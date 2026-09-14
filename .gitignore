@@ -1,7 +1,7 @@
 .agents/
 AGENTS.md
 CLAUDE.md
-.claude/skills
+.claude/*
 
 /dist/
 
