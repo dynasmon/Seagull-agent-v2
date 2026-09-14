@@ -1,0 +1,9 @@
+.agents/
+AGENTS.md
+CLAUDE.md
+.claude/*
+
+/dist/
+
+/go.work
+/go.work.sum
