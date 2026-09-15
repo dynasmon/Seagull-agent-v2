@@ -16,7 +16,6 @@ import (
 // Sources that do not exist yet but whose names a careless runtime-artifact
 // pattern, such as spool/ for a local spool directory, would hide from Git.
 var plannedSources = []string{
-	"internal/runtime/runtime.go",
 	"internal/spool/spool.go",
 	"internal/spool/testdata/fuzz/FuzzRecover/582528ddfad69eb5",
 }
