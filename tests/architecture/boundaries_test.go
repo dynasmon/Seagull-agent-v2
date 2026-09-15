@@ -61,37 +61,21 @@ func TestForeignProductCodeIsRecognised(t *testing.T) {
 func TestNoSourceImportsAnotherSeagullImplementation(t *testing.T) {
 	root := moduleRoot(t)
 	files := token.NewFileSet()
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	for _, source := range goSources(t, root) {
+		parsed, err := parser.ParseFile(files, source, nil, parser.ImportsOnly)
 		if err != nil {
-			return err
-		}
-		if path != root && ignoredByGo(entry.Name()) {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if entry.IsDir() || filepath.Ext(path) != ".go" {
-			return nil
-		}
-		parsed, err := parser.ParseFile(files, path, nil, parser.ImportsOnly)
-		if err != nil {
-			return err
+			t.Fatalf("parse %s: %v", relative(root, source), err)
 		}
 		for _, spec := range parsed.Imports {
 			imported, err := strconv.Unquote(spec.Path.Value)
 			if err != nil {
-				return err
+				t.Fatalf("read an import of %s: %v", relative(root, source), err)
 			}
 			if foreign(imported) {
 				t.Errorf("%s imports %s: only %s may be shared with another Seagull repository",
-					relative(root, path), imported, contractsPath)
+					relative(root, source), imported, contractsPath)
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("scan the sources: %v", err)
 	}
 }
 
@@ -152,6 +136,30 @@ func ignoredByGo(name string) bool {
 	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || name == "testdata"
 }
 
+func goSources(t *testing.T, root string) []string {
+	t.Helper()
+	var sources []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path != root && ignoredByGo(entry.Name()) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !entry.IsDir() && filepath.Ext(path) == ".go" {
+			sources = append(sources, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk the sources: %v", err)
+	}
+	return sources
+}
+
 func moduleRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))
@@ -174,9 +182,14 @@ func relative(root, path string) string {
 
 func run(t *testing.T, dir, name string, args ...string) []byte {
 	t.Helper()
+	return runWith(t, dir, nil, name, args...)
+}
+
+func runWith(t *testing.T, dir string, env []string, name string, args ...string) []byte {
+	t.Helper()
 	command := exec.CommandContext(t.Context(), name, args...)
 	command.Dir = dir
-	command.Env = append(os.Environ(), "GOWORK=off")
+	command.Env = append(append(os.Environ(), "GOWORK=off"), env...)
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	output, err := command.Output()
