@@ -1,0 +1,74 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "6fae3457bb2b721fc891e1c80bf12a5f3fc408c2",
+    "contracts": "v0.14.0"
+  },
+  "exchanges": [
+    {
+      "name": "events-accepted",
+      "route": "POST /v1/events",
+      "status": 200
+    },
+    {
+      "name": "events-protocol-2",
+      "route": "POST /v1/events",
+      "status": 426
+    },
+    {
+      "name": "events-schema-2",
+      "route": "POST /v1/events",
+      "status": 422
+    },
+    {
+      "name": "events-unknown-class",
+      "route": "POST /v1/events",
+      "status": 422
+    },
+    {
+      "name": "events-unknown-transport",
+      "route": "POST /v1/events",
+      "status": 422
+    },
+    {
+      "name": "events-invalid-record",
+      "route": "POST /v1/events",
+      "status": 422
+    },
+    {
+      "name": "inventory-accepted",
+      "route": "POST /v1/inventory",
+      "status": 200
+    },
+    {
+      "name": "inventory-protocol-2",
+      "route": "POST /v1/inventory",
+      "status": 426
+    },
+    {
+      "name": "inventory-schema-2",
+      "route": "POST /v1/inventory",
+      "status": 422
+    },
+    {
+      "name": "inventory-unknown-kind",
+      "route": "POST /v1/inventory",
+      "status": 422
+    },
+    {
+      "name": "inventory-unknown-mode",
+      "route": "POST /v1/inventory",
+      "status": 422
+    },
+    {
+      "name": "inventory-unknown-service-state",
+      "route": "POST /v1/inventory",
+      "status": 422
+    },
+    {
+      "name": "inventory-invalid-record",
+      "route": "POST /v1/inventory",
+      "status": 422
+    }
+  ]
+}
