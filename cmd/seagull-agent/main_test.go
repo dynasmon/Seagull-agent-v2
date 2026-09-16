@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
 )
 
@@ -28,17 +30,49 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestTheVersionFlagPrintsTheBuildIdentity(t *testing.T) {
+func TestTheVersionFlagPrintsTheBuildIdentityApartFromTheWireVersions(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"-version"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr.String())
 	}
-	fields := strings.Fields(stdout.String())
+	identity, spoken, _ := strings.Cut(stdout.String(), "\n")
+	fields := strings.Fields(identity)
 	if len(fields) != 4 || fields[0] != "seagull-agent" || fields[2] != runtime.Version() {
-		t.Fatalf("build identity %q", stdout.String())
+		t.Fatalf("build identity %q", identity)
 	}
 	if platform := runtime.GOOS + "/" + runtime.GOARCH; fields[3] != platform {
 		t.Fatalf("build identity names %s, the binary runs on %s", fields[3], platform)
+	}
+	want := fmt.Sprintf("protocol_version %d\nevent_schema_version %d\ninventory_schema_version %d\n",
+		protocol.Version, protocol.EventSchemaVersion, protocol.InventorySchemaVersion)
+	if spoken != want {
+		t.Fatalf("printed the wire versions as %q, want %q", spoken, want)
+	}
+}
+
+func TestTheAgentLogsTheVersionsItSpeaksAsItStarts(t *testing.T) {
+	ctx, stop := context.WithCancel(t.Context())
+	stop()
+	var logs bytes.Buffer
+	if code := serve(ctx, slog.New(slog.NewJSONHandler(&logs, nil))); code != 0 {
+		t.Fatalf("exit code %d:\n%s", code, logs.String())
+	}
+	first, _, _ := strings.Cut(logs.String(), "\n")
+	var started map[string]any
+	if err := json.Unmarshal([]byte(first), &started); err != nil {
+		t.Fatalf("decode the first log line: %v\n%s", err, logs.String())
+	}
+	want := map[string]any{
+		"msg":                      "agent_starting",
+		"build":                    buildIdentity(),
+		"protocol_version":         float64(protocol.Version),
+		"event_schema_version":     float64(protocol.EventSchemaVersion),
+		"inventory_schema_version": float64(protocol.InventorySchemaVersion),
+	}
+	for name, value := range want {
+		if started[name] != value {
+			t.Errorf("the first log line carries %s=%v, want %v: %v", name, started[name], value, started)
+		}
 	}
 }
 

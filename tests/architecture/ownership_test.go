@@ -38,6 +38,8 @@ type dependencyRule struct {
 	reason     string
 }
 
+var networkPackages = []string{"net/http", "net/rpc", "crypto/tls", "google.golang.org/grpc", "golang.org/x/net/http2"}
+
 var dependencyRules = []dependencyRule{
 	{
 		exempt:    "cmd/seagull-agent",
@@ -52,9 +54,15 @@ var dependencyRules = []dependencyRule{
 	},
 	{
 		packages:   "internal/modules",
-		forbidden:  []string{"net/http", "net/rpc", "crypto/tls", "google.golang.org/grpc", "golang.org/x/net/http2"},
+		forbidden:  networkPackages,
 		transitive: true,
 		reason:     "collectors hand observations to admission; delivery owns requests, connections and TLS",
+	},
+	{
+		packages:   "internal/protocol",
+		forbidden:  networkPackages,
+		transitive: true,
+		reason:     "the protocol speaks in contract terms, the versions the agent writes and the refusals the platform answers with; delivery owns how they travel",
 	},
 }
 
@@ -146,6 +154,23 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				Deps:       []string{ingest, "google.golang.org/protobuf/proto"},
 			},
 			want: []string{ingest},
+		},
+		{
+			name: "the protocol reading a refusal off the HTTP status",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/protocol",
+				Imports:    []string{ingest, "net/http"},
+				Deps:       []string{"crypto/tls", ingest, "net/http"},
+			},
+			want: []string{"crypto/tls", "net/http"},
+		},
+		{
+			name: "the protocol reading a refusal off the contracts",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/protocol",
+				Imports:    []string{ingest, "google.golang.org/protobuf/reflect/protoreflect"},
+				Deps:       []string{ingest, "google.golang.org/protobuf/reflect/protoreflect"},
+			},
 		},
 		{
 			name: "the runtime on the standard library alone",

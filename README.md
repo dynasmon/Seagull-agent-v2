@@ -27,9 +27,11 @@ make verify     # formatting, vet, module graph, tests, race detector and build
 make vulncheck  # known vulnerabilities reachable from the agent
 ```
 
-`seagull-agent -version` prints the build identity: the version Go stamps from
-this repository's history, the toolchain and the platform. It is metadata about
-a build, not proof of which build is running.
+`seagull-agent -version` prints the build identity, which is the version Go
+stamps from this repository's history, the toolchain and the platform, and then
+the wire versions the build speaks. `go version -m` lists every module and build
+setting that went into a binary. Both are metadata about a build, not proof of
+which build is running.
 
 ## Running
 
@@ -73,6 +75,11 @@ conventions:
 - collectors, under `internal/modules`, reach no HTTP, gRPC, RPC or TLS package,
   directly or through another package: they hand observations to admission,
   and delivery owns the network;
+- neither does `internal/protocol`, which speaks in contract terms: the versions
+  the agent writes and the refusals the platform answers with;
+- no `.proto` file, generated binding or descriptor built at run time defines a
+  message of the agent's own, so it has no handshake or envelope beside the
+  published contracts;
 - a source file that only some of linux, windows and darwin build belongs to an
   adapter under `internal/platform`;
 - production code never recovers from a panic.
@@ -85,6 +92,54 @@ builds.
 wire format rather than with the generated types, so a contracts release that
 renumbers or retypes a field the agent depends on fails the suite instead of
 changing what the agent reads.
+
+## Compatibility with the platform
+
+Three versions describe an agent, and none stands in for another. The release
+names a build. The protocol version, `protocol_version` on every batch, shapes
+a batch and the answer to it. The schema version, `schema_version` on every
+event and on every inventory record, shapes a record of that kind, and each
+kind moves on its own. This build speaks protocol 1, event schema 1 and
+inventory schema 1: `-version` prints them and `agent_starting` logs them.
+
+What the platform accepts is the platform's to say, and an agent hears it in
+one place: the answer to a batch. The platform's descriptor names the versions
+it supports, but it is served on the operator listener, which an agent's
+certificate cannot reach, and it names no inventory schema. So the agent
+negotiates nothing before it sends, and it advertises no capability or build
+metadata, because the contracts have no field to carry them. It reads a refusal
+with `internal/protocol` instead:
+
+- a refused protocol or schema version the agent set is an `Incompatibility`;
+- so is a refused value the agent's contracts declare, such as an event class,
+  an inventory kind or a service state: the platform was built from contracts
+  that lack it;
+- a refused value the agent left unset, or one no contracts declare, is the
+  agent's own mistake, and like every other refusal it is no incompatibility.
+
+An `Incompatibility` names the field, the value and the record the platform
+refused, with the platform's own explanation. It does not make those records
+invalid: a platform that speaks what they carry accepts them unchanged.
+
+What one side does not know follows from the same rule:
+
+- a reply field the pinned contracts do not declare is ignored and changes
+  nothing the agent concludes, so a change to what a reply means has to come
+  with a new protocol version, which an older agent sees refused;
+- no reply the agent reads carries an enum, and a contracts release that adds
+  one fails the suite until the agent decides how to read a value it does not
+  declare;
+- the agent writes only what its contracts declare, and since a platform built
+  from older contracts ignores a field it does not know instead of refusing it,
+  nothing the agent sends may depend on a field no recorded platform consumes.
+
+`tests/compatibility/testdata` holds exchanges recorded from the ingest gateway
+of a backend commit, driven in process by that commit's end-to-end harness: the
+bytes of every batch sent and of every answer. The suite fails when `go.mod`
+pins contracts no recorded platform was built with, when a recorded platform
+never durably accepted a version the agent speaks, or when a recorded refusal
+reads differently. Compatibility is claimed only with recorded platforms, and
+with no earlier release of the agent, because none exists.
 
 ## Working against a local contracts checkout
 
