@@ -122,6 +122,38 @@ func TestAnythingButACommandIsAUsageError(t *testing.T) {
 	}
 }
 
+func TestReplacingTheInstallationNamesTheOneItReplaces(t *testing.T) {
+	state := stateDirectory(t)
+	created, _ := logged(t, serveStopped(t, state), "installation_created")
+	previous, _ := created["installation_id"].(string)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-state", state, "installation", "replace"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code %d: %s", code, stderr.String())
+	}
+	replacement, replaces, _ := strings.Cut(strings.TrimPrefix(stdout.String(), "installation_id "), "\n")
+	if previous == "" || replacement == previous || replaces != "replaces "+previous+"\n" {
+		t.Fatalf("printed %q after replacing %q", stdout.String(), previous)
+	}
+	if !strings.Contains(stderr.String(), "enroll the new installation") {
+		t.Errorf("said nothing about enrolling the new installation: %q", stderr.String())
+	}
+	if started, _ := logged(t, serveStopped(t, state), "agent_starting"); started["installation_id"] != replacement {
+		t.Fatalf("started as installation %v after replacing it with %s", started["installation_id"], replacement)
+	}
+}
+
+func TestThereIsNoInstallationToReplaceBeforeTheAgentRuns(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-state", stateDirectory(t), "installation", "replace"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("exit code %d, want 1", code)
+	}
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "no installation to replace") ||
+		!strings.Contains(stderr.String(), "run the agent to create an installation") {
+		t.Fatalf("printed %q and %q", stdout.String(), stderr.String())
+	}
+}
+
 func TestASignalStopsTheAgentCleanly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("windows cannot deliver SIGINT or SIGTERM to another process")

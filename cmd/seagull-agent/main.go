@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"slices"
@@ -23,8 +24,9 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 const usage = `Usage:
-  seagull-agent -state DIR run   run the agent until it receives SIGINT or SIGTERM
-  seagull-agent -version         print the build identity and the wire versions it speaks, and exit
+  seagull-agent -state DIR run                    run the agent until it receives SIGINT or SIGTERM
+  seagull-agent -state DIR installation replace   replace the installation with a new one that is not enrolled
+  seagull-agent -version                          print the build identity and the wire versions it speaks, and exit
 `
 
 func main() {
@@ -54,6 +56,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		return serve(ctx, slog.New(slog.NewJSONHandler(stderr, nil)), *state)
+	case !*version && *state != "" && slices.Equal(flags.Args(), []string{"installation", "replace"}):
+		return replace(*state, stdout, stderr)
 	}
 	flags.Usage()
 	return 2
@@ -91,6 +95,23 @@ func serve(ctx context.Context, logger *slog.Logger, state string, components ..
 	return 0
 }
 
+func replace(state string, stdout, stderr io.Writer) int {
+	installation, err := identity.Replace(state)
+	if err != nil {
+		fmt.Fprintf(stderr, "seagull-agent: %v\n", err)
+		fmt.Fprintf(stderr, "seagull-agent: %s\n", recovery(state, err))
+		return 1
+	}
+	defer installation.Close()
+	fmt.Fprintf(stdout, "installation_id %s\n", installation.ID())
+	if replaced := installation.Replaces(); replaced != "" {
+		fmt.Fprintf(stdout, "replaces %s\n", replaced)
+	}
+	fmt.Fprintf(stderr, "seagull-agent: the replaced state is kept under %s; enroll the new installation before it delivers anything\n",
+		filepath.Join(state, "replaced"))
+	return 0
+}
+
 // What an operator does next depends on why the installation cannot be used,
 // and never on the agent deciding it for them: a damaged or newer state is
 // replaced only when somebody asks for it.
@@ -105,6 +126,8 @@ func recovery(state string, err error) string {
 		return "run the agent release that wrote this state, or discard the installation with " + replacement
 	case errors.Is(err, identity.ErrDamaged):
 		return "restore " + state + " from a backup of this installation, or discard the installation with " + replacement + " and enroll the new one"
+	case errors.Is(err, identity.ErrNoInstallation):
+		return "run the agent to create an installation"
 	}
 	return "check that " + state + " can be created and read by the account the agent runs as"
 }
