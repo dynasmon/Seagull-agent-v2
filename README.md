@@ -35,10 +35,11 @@ which build is running.
 
 ## Running
 
-`seagull-agent run` starts the agent and keeps it running until it receives
-SIGINT or SIGTERM. It logs JSON lines to stderr, and exits with 0 after a
-requested stop, 1 when it could not start, an essential component failed or the
-stop overran its deadline, and 2 on a usage error.
+`seagull-agent -state DIR run` starts the agent on the installation held in
+`DIR` and keeps it running until it receives SIGINT or SIGTERM. It logs JSON
+lines to stderr, and exits with 0 after a requested stop, 1 when it could not
+start, an essential component failed or the stop overran its deadline, and 2 on
+a usage error.
 
 `cmd/seagull-agent` is the composition root: it builds each component and hands
 the enabled ones to `internal/runtime`, which owns their lifecycle.
@@ -59,6 +60,53 @@ the enabled ones to `internal/runtime`, which owns their lifecycle.
 No component is composed yet: collection, local admission, the spool and
 delivery will each arrive as a component of its own.
 
+## The installation
+
+An installation is one agent installed on one machine, and `-state` names the
+directory that holds it. The first start in a new or empty directory draws its
+`installation_id`, 122 random bits written as a UUID; every later start reads
+the same one. It is never derived from the hostname, an address, a MAC or a
+machine identifier, which stay observations about the machine.
+
+The installation is not the agent the platform knows. The platform issues a
+certificate for an `agent_id` an operator registered, and once enrollment
+activates a credential generation, `installation.json` records it: that agent,
+the generation number, the SHA-256 identifier of the key and what the
+certificate says. It holds no key, token or other secret, and a field it does
+not declare, such as a key, makes the file damaged, so copying it or the agent's
+public settings authenticates nothing. Each generation follows the active one by
+exactly one and is issued to the same agent; enrolling as another agent takes a
+new installation.
+
+The state is the agent's alone:
+
+- the directory and its files belong to the account the agent runs as and are
+  closed to its group and to others, and the agent reads nothing that is not;
+- a running agent holds the directory locked, so a second agent or a
+  replacement on the same directory is refused, and the lock goes away however
+  the agent ends;
+- a write lands in a temporary file that is synced and renamed over
+  `installation.json` before the directory is synced, and a start discards what
+  an interrupted write left behind.
+
+When the state cannot be used, the agent does not start: it logs
+`agent_not_started` with the reason and a `recovery`, and never creates a new
+identity in its place. A damaged `installation.json`, or a directory that holds
+something but no `installation.json`, is restored from a backup of this
+installation or replaced; a state written by a newer agent is read by that
+release or replaced; a state others can reach is made private again.
+
+`seagull-agent -state DIR installation replace` is that replacement, made on
+purpose while the agent is stopped. It keeps the previous `installation.json`
+under `replaced/`, draws a new `installation_id` that names the one it replaces
+whenever that one could be read, and leaves the new installation unenrolled.
+Records belong to the installation that admitted them, so the spool, when it
+arrives, must not hand a predecessor's backlog to its replacement.
+
+Packaging follows the same line: an uninstall leaves the state where it is, so
+a reinstall is the same installation, and only a purge removes the directory,
+after which the next start is a new installation.
+
 ## Boundaries
 
 `tests/architecture` holds the repository boundaries as tests rather than as
@@ -77,6 +125,8 @@ conventions:
   and delivery owns the network;
 - neither does `internal/protocol`, which speaks in contract terms: the versions
   the agent writes and the refusals the platform answers with;
+- `internal/identity` imports no network package at all: an installation never
+  takes its identity from an address, an interface or a server's answer;
 - no `.proto` file, generated binding or descriptor built at run time defines a
   message of the agent's own, so it has no handshake or envelope beside the
   published contracts;
