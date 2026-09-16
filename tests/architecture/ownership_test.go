@@ -64,6 +64,11 @@ var dependencyRules = []dependencyRule{
 		transitive: true,
 		reason:     "the protocol speaks in contract terms, the versions the agent writes and the refusals the platform answers with; delivery owns how they travel",
 	},
+	{
+		packages:  "internal/identity",
+		forbidden: append([]string{"net"}, networkPackages...),
+		reason:    "an installation is who the agent is locally; addresses, interfaces and a server's answer are observations, never where its identity comes from",
+	},
 }
 
 func (r dependencyRule) violations(pkg buildPackage) []string {
@@ -170,6 +175,23 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				ImportPath: modulePath + "/internal/protocol",
 				Imports:    []string{ingest, "google.golang.org/protobuf/reflect/protoreflect"},
 				Deps:       []string{ingest, "google.golang.org/protobuf/reflect/protoreflect"},
+			},
+		},
+		{
+			name: "the installation named after the machine's network interfaces",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/identity",
+				Imports:    []string{"crypto/rand", "net"},
+				Deps:       []string{"crypto/rand", "net"},
+			},
+			want: []string{"net"},
+		},
+		{
+			name: "the installation checking certificates it was issued",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/identity",
+				Imports:    []string{"crypto/x509"},
+				Deps:       []string{"crypto/x509", "net", "net/url"},
 			},
 		},
 		{
