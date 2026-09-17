@@ -69,6 +69,17 @@ var dependencyRules = []dependencyRule{
 		forbidden: append([]string{"net"}, networkPackages...),
 		reason:    "an installation is who the agent is locally; addresses, interfaces and a server's answer are observations, never where its identity comes from",
 	},
+	{
+		packages:  "internal/pki",
+		forbidden: networkPackages,
+		reason:    "a key signs where it is held and never travels; transport owns requests, connections and TLS",
+	},
+	{
+		packages:   "internal/modules",
+		forbidden:  []string{modulePath + "/internal/pki"},
+		transitive: true,
+		reason:     "collectors observe the endpoint and never hold the keys the agent proves its identity with",
+	},
 }
 
 func (r dependencyRule) violations(pkg buildPackage) []string {
@@ -193,6 +204,32 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				Imports:    []string{"crypto/x509"},
 				Deps:       []string{"crypto/x509", "net", "net/url"},
 			},
+		},
+		{
+			name: "the key provider sending its own requests",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/pki",
+				Imports:    []string{"crypto/ecdsa", "crypto/tls", "net/http"},
+				Deps:       []string{"crypto/ecdsa", "crypto/tls", "net", "net/http"},
+			},
+			want: []string{"crypto/tls", "net/http"},
+		},
+		{
+			name: "the key provider reading certificates",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/pki",
+				Imports:    []string{"crypto/ecdsa", "crypto/x509", modulePath + "/internal/platform/files"},
+				Deps:       []string{"crypto/ecdsa", "crypto/x509", "net", "net/url", modulePath + "/internal/platform/files"},
+			},
+		},
+		{
+			name: "a collector reaching the agent's keys through another package",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/modules/fim",
+				Imports:    []string{modulePath + "/internal/telemetry"},
+				Deps:       []string{modulePath + "/internal/pki", modulePath + "/internal/telemetry"},
+			},
+			want: []string{modulePath + "/internal/pki"},
 		},
 		{
 			name: "the runtime on the standard library alone",
