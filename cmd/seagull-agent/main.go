@@ -17,11 +17,15 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
+	"github.com/dynasmon/Seagull-agent-v2/internal/pki"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
 )
 
-const shutdownTimeout = 10 * time.Second
+const (
+	shutdownTimeout = 10 * time.Second
+	keysDirectory   = "keys"
+)
 
 const usage = `Usage:
   seagull-agent -state DIR run                    run the agent until it receives SIGINT or SIGTERM
@@ -78,14 +82,25 @@ func serve(ctx context.Context, logger *slog.Logger, state string, components ..
 	if installation.Created() {
 		logger.Info("installation_created", slog.String("installation_id", installation.ID()), slog.String("state", state))
 	}
+	keys, err := openKeys(installation)
+	if err != nil {
+		logger.Error("agent_not_started", slog.Any("error", err), slog.String("recovery", recovery(state, err)))
+		return 1
+	}
 	started := []any{slog.String("build", buildIdentity())}
 	for _, spoken := range wireVersions() {
 		started = append(started, slog.Int(spoken.name, spoken.version))
 	}
 	started = append(started, slog.String("installation_id", installation.ID()))
 	if enrolled, ok := installation.Enrollment(); ok {
+		if _, err := keys.Open(enrolled.KeyID); err != nil {
+			logger.Error("agent_not_started", slog.Any("error", err), slog.String("recovery", recovery(state, err)))
+			return 1
+		}
 		started = append(started, slog.String("agent_id", enrolled.AgentID), slog.Uint64("credential_generation", enrolled.Generation))
 	}
+	posture := keys.Posture()
+	started = append(started, slog.String("key_provider", posture.Provider), slog.Bool("key_exportable", posture.Exportable))
 	logger.Info("agent_starting", started...)
 	if err := agent.Run(ctx); err != nil {
 		logger.Error("agent_stopped", slog.Any("error", err))
@@ -93,6 +108,18 @@ func serve(ctx context.Context, logger *slog.Logger, state string, components ..
 	}
 	logger.Info("agent_stopped")
 	return 0
+}
+
+func openKeys(installation *identity.Installation) (pki.KeyProvider, error) {
+	directory, err := installation.Directory(keysDirectory)
+	if err != nil {
+		return nil, err
+	}
+	keys, err := pki.OpenKeyFiles(directory)
+	if err != nil {
+		return nil, err
+	}
+	return keys, nil
 }
 
 func replace(state string, stdout, stderr io.Writer) int {
@@ -107,7 +134,7 @@ func replace(state string, stdout, stderr io.Writer) int {
 	if replaced := installation.Replaces(); replaced != "" {
 		fmt.Fprintf(stdout, "replaces %s\n", replaced)
 	}
-	fmt.Fprintf(stderr, "seagull-agent: everything the replaced installation held is kept under %s; enroll the new installation before it delivers anything\n",
+	fmt.Fprintf(stderr, "seagull-agent: everything the replaced installation held, its keys included, is kept under %s; enroll the new installation before it delivers anything\n",
 		filepath.Join(state, "replaced"))
 	return 0
 }
@@ -122,9 +149,12 @@ func recovery(state string, err error) string {
 		return "stop the agent that holds " + state + ": two agents never share an installation"
 	case errors.Is(err, identity.ErrInsecure):
 		return "make " + state + " and everything in it belong to the account the agent runs as, closed to its group and to others"
+	case errors.Is(err, pki.ErrKeyInsecure):
+		return "make " + state + " and everything in it belong to the account the agent runs as, closed to its group and to others; " +
+			"if another account could read the key, revoke the certificate issued for it and discard the installation with " + replacement
 	case errors.Is(err, identity.ErrNewer):
 		return "run the agent release that wrote this state, or discard the installation with " + replacement
-	case errors.Is(err, identity.ErrDamaged):
+	case errors.Is(err, identity.ErrDamaged), errors.Is(err, pki.ErrKeyMissing), errors.Is(err, pki.ErrKeyDamaged):
 		return "restore " + state + " from a backup of this installation, or discard the installation with " + replacement + " and enroll the new one"
 	case errors.Is(err, identity.ErrNoInstallation):
 		return "run the agent to create an installation"
