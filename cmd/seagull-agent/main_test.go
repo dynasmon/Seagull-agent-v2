@@ -107,6 +107,52 @@ func TestAnEnrolledAgentStartsWithTheKeyItsCredentialsName(t *testing.T) {
 	}
 }
 
+func TestKeysSurviveAnActivationInterruptedBeforeItsStateWasWritten(t *testing.T) {
+	state := stateDirectory(t)
+	active := enroll(t, state)
+	installation, err := identity.Open(state)
+	if err != nil {
+		t.Fatalf("open the installation: %v", err)
+	}
+	keys, err := openKeys(installation)
+	if err != nil {
+		t.Fatalf("open the keys: %v", err)
+	}
+	next, err := keys.Create()
+	if err != nil {
+		t.Fatalf("create the key of the next generation: %v", err)
+	}
+	interrupted := filepath.Join(state, ".installation.json.0123456789abcdef.tmp")
+	if err := os.WriteFile(interrupted, []byte(`{"format": 1, "enrollment": {"generation": 2, "key_id": "`+next.ID()), 0o600); err != nil {
+		t.Fatalf("interrupt the activation: %v", err)
+	}
+	if err := installation.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	started, _ := logged(t, serveStopped(t, state), "agent_starting")
+	if started["credential_generation"] != float64(1) {
+		t.Fatalf("after the interruption the agent started as %v", started)
+	}
+	installation, err = identity.Open(state)
+	if err != nil {
+		t.Fatalf("reopen the installation: %v", err)
+	}
+	defer installation.Close()
+	if keys, err = openKeys(installation); err != nil {
+		t.Fatalf("reopen the keys: %v", err)
+	}
+	enrolled, _ := installation.Enrollment()
+	for _, id := range []string{enrolled.KeyID, next.ID()} {
+		if _, err := keys.Open(id); err != nil {
+			t.Fatalf("key %s did not survive the interrupted activation: %v", id, err)
+		}
+	}
+	if filepath.Base(active) != enrolled.KeyID+".pem" {
+		t.Fatalf("the active generation names key %s, it was created as %s", enrolled.KeyID, filepath.Base(active))
+	}
+}
+
 func TestAnythingButACommandIsAUsageError(t *testing.T) {
 	state := stateDirectory(t)
 	for _, args := range [][]string{
