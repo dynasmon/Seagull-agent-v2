@@ -36,6 +36,7 @@ var (
 
 var (
 	installationIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	directoryPattern      = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 	agentIDPattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 	digestPattern         = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	serialPattern         = regexp.MustCompile(`^(?:[0-9a-f]{2}){1,32}$`)
@@ -68,11 +69,12 @@ type state struct {
 }
 
 type Installation struct {
-	directory string
-	root      *os.Root
-	lock      *os.File
-	state     state
-	created   bool
+	directory   string
+	root        *os.Root
+	lock        *os.File
+	state       state
+	created     bool
+	directories []*os.Root
 }
 
 // Open holds the installation in directory until Close, creating it when the
@@ -156,8 +158,48 @@ func (i *Installation) Activate(next Enrollment) error {
 	return nil
 }
 
+// Directory holds name, a private directory of the installation, creating it
+// when it is missing. What it holds belongs to the installation: a replacement
+// sets it aside with the rest, and Close closes the root it returns.
+func (i *Installation) Directory(name string) (*os.Root, error) {
+	if !directoryPattern.MatchString(name) || name == replacedDir {
+		return nil, fmt.Errorf("%q does not name a directory of the installation", name)
+	}
+	path := i.path(name)
+	if err := i.root.Mkdir(name, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return nil, fmt.Errorf("create %s: %w", path, err)
+	}
+	if err := i.syncDirectory("."); err != nil {
+		return nil, err
+	}
+	described, err := i.root.Lstat(name)
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("inspect %s: %w", path, err)
+	case !described.IsDir():
+		return nil, fmt.Errorf("%w: %s is not a directory", ErrInsecure, path)
+	}
+	if err := private(path, described); err != nil {
+		return nil, err
+	}
+	opened, err := i.root.OpenRoot(name)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	if held, err := opened.Stat("."); err != nil || !os.SameFile(held, described) {
+		opened.Close()
+		return nil, fmt.Errorf("%w: %s changed while it was being opened", ErrInsecure, path)
+	}
+	i.directories = append(i.directories, opened)
+	return opened, nil
+}
+
 func (i *Installation) Close() error {
-	return errors.Join(i.lock.Close(), i.root.Close())
+	closed := make([]error, 0, len(i.directories)+2)
+	for _, directory := range i.directories {
+		closed = append(closed, directory.Close())
+	}
+	return errors.Join(append(closed, i.lock.Close(), i.root.Close())...)
 }
 
 func claim(directory string, create bool) (*Installation, error) {

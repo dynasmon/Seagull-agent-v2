@@ -616,6 +616,76 @@ func TestReplacementRecoversADirectoryThatLostItsInstallation(t *testing.T) {
 	}
 }
 
+func TestAnInstallationHoldsPrivateDirectoriesAcrossRestarts(t *testing.T) {
+	directory := stateDirectory(t)
+	installation := open(t, directory)
+	held, err := installation.Directory("keys")
+	if err != nil {
+		t.Fatalf("hold the keys directory: %v", err)
+	}
+	if err := held.WriteFile("key.pem", []byte("key"), 0o600); err != nil {
+		t.Fatalf("write into the keys directory: %v", err)
+	}
+	described, err := os.Lstat(filepath.Join(directory, "keys"))
+	if err != nil || described.Mode().Perm() != 0o700 {
+		t.Fatalf("the keys directory was created as %v: %v", described, err)
+	}
+	if err := installation.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if _, err := held.Lstat("key.pem"); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("the directory outlived the installation that held it: %v", err)
+	}
+
+	reopened, err := open(t, directory).Directory("keys")
+	if err != nil {
+		t.Fatalf("hold the keys directory again: %v", err)
+	}
+	if content, err := reopened.ReadFile("key.pem"); err != nil || string(content) != "key" {
+		t.Fatalf("after a restart the keys directory holds %q: %v", content, err)
+	}
+}
+
+func TestOnlyADirectoryOfItsOwnIsHeld(t *testing.T) {
+	installation := open(t, stateDirectory(t))
+	for _, name := range []string{"", "replaced", "installation.json", ".keys", "Keys", "../keys", "keys/old", "/keys"} {
+		if held, err := installation.Directory(name); err == nil {
+			t.Errorf("the installation holds %q as %s", name, held.Name())
+		}
+	}
+}
+
+func TestADirectoryOthersCanReachIsRefused(t *testing.T) {
+	for name, prepare := range map[string]func(directory string) error{
+		"a directory its group can list": func(directory string) error {
+			if err := os.Mkdir(filepath.Join(directory, "keys"), 0o700); err != nil {
+				return err
+			}
+			return os.Chmod(filepath.Join(directory, "keys"), 0o750)
+		},
+		"a symbolic link": func(directory string) error {
+			if err := os.MkdirAll(filepath.Join(directory, "replaced", "keys"), 0o700); err != nil {
+				return err
+			}
+			return os.Symlink(filepath.Join("replaced", "keys"), filepath.Join(directory, "keys"))
+		},
+		"a file": func(directory string) error {
+			return os.WriteFile(filepath.Join(directory, "keys"), nil, 0o600)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := stateDirectory(t)
+			installation := open(t, directory)
+			if err := prepare(directory); err != nil {
+				t.Fatalf("prepare %s: %v", name, err)
+			}
+			if _, err := installation.Directory("keys"); !errors.Is(err, identity.ErrInsecure) {
+				t.Fatalf("holding the keys directory returned %v", err)
+			}
+		})
+	}
+}
+
 type agent struct {
 	process *exec.Cmd
 	input   io.WriteCloser
