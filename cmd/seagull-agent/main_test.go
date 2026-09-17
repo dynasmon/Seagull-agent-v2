@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -65,6 +66,8 @@ func TestTheAgentLogsWhatItIsAsItStarts(t *testing.T) {
 		"event_schema_version":     float64(protocol.EventSchemaVersion),
 		"inventory_schema_version": float64(protocol.InventorySchemaVersion),
 		"installation_id":          created["installation_id"],
+		"key_provider":             "filesystem",
+		"key_exportable":           true,
 	}
 	for name, value := range want {
 		if started[name] != value {
@@ -87,6 +90,66 @@ func TestTheAgentKeepsItsInstallationAcrossRestarts(t *testing.T) {
 		if started, _ := logged(t, logs, "agent_starting"); started["installation_id"] != created["installation_id"] {
 			t.Fatalf("started as installation %v, created %v", started["installation_id"], created["installation_id"])
 		}
+	}
+}
+
+func TestAnEnrolledAgentStartsWithTheKeyItsCredentialsName(t *testing.T) {
+	state := stateDirectory(t)
+	enroll(t, state)
+
+	logs := serveStopped(t, state)
+	started, _ := logged(t, logs, "agent_starting")
+	if started["agent_id"] != "web-01" || started["credential_generation"] != float64(1) || started["key_provider"] != "filesystem" {
+		t.Fatalf("an enrolled installation started as %v", started)
+	}
+	if exposesKeys(t, logs, state) {
+		t.Fatalf("the log shows a key:\n%s", logs)
+	}
+}
+
+func TestKeysSurviveAnActivationInterruptedBeforeItsStateWasWritten(t *testing.T) {
+	state := stateDirectory(t)
+	active := enroll(t, state)
+	installation, err := identity.Open(state)
+	if err != nil {
+		t.Fatalf("open the installation: %v", err)
+	}
+	keys, err := openKeys(installation)
+	if err != nil {
+		t.Fatalf("open the keys: %v", err)
+	}
+	next, err := keys.Create()
+	if err != nil {
+		t.Fatalf("create the key of the next generation: %v", err)
+	}
+	interrupted := filepath.Join(state, ".installation.json.0123456789abcdef.tmp")
+	if err := os.WriteFile(interrupted, []byte(`{"format": 1, "enrollment": {"generation": 2, "key_id": "`+next.ID()), 0o600); err != nil {
+		t.Fatalf("interrupt the activation: %v", err)
+	}
+	if err := installation.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	started, _ := logged(t, serveStopped(t, state), "agent_starting")
+	if started["credential_generation"] != float64(1) {
+		t.Fatalf("after the interruption the agent started as %v", started)
+	}
+	installation, err = identity.Open(state)
+	if err != nil {
+		t.Fatalf("reopen the installation: %v", err)
+	}
+	defer installation.Close()
+	if keys, err = openKeys(installation); err != nil {
+		t.Fatalf("reopen the keys: %v", err)
+	}
+	enrolled, _ := installation.Enrollment()
+	for _, id := range []string{enrolled.KeyID, next.ID()} {
+		if _, err := keys.Open(id); err != nil {
+			t.Fatalf("key %s did not survive the interrupted activation: %v", id, err)
+		}
+	}
+	if filepath.Base(active) != enrolled.KeyID+".pem" {
+		t.Fatalf("the active generation names key %s, it was created as %s", enrolled.KeyID, filepath.Base(active))
 	}
 }
 
@@ -140,6 +203,44 @@ func TestReplacingTheInstallationNamesTheOneItReplaces(t *testing.T) {
 	}
 	if started, _ := logged(t, serveStopped(t, state), "agent_starting"); started["installation_id"] != replacement {
 		t.Fatalf("started as installation %v after replacing it with %s", started["installation_id"], replacement)
+	}
+}
+
+func TestTheReplacementTheAgentSuggestsLetsItStartAgain(t *testing.T) {
+	for name, prepare := range map[string]func(state string) error{
+		"a damaged installation state": func(state string) error {
+			return os.WriteFile(filepath.Join(state, "installation.json"), []byte("{"), 0o600)
+		},
+		"a directory that lost its installation state": func(state string) error {
+			return os.Mkdir(filepath.Join(state, "keys"), 0o700)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			state := stateDirectory(t)
+			if err := os.Mkdir(state, 0o700); err != nil {
+				t.Fatalf("create %s: %v", state, err)
+			}
+			if err := prepare(state); err != nil {
+				t.Fatalf("prepare %s: %v", name, err)
+			}
+			var logs bytes.Buffer
+			if code := serve(t.Context(), slog.New(slog.NewJSONHandler(&logs, nil)), state); code != 1 {
+				t.Fatalf("exit code %d, want 1", code)
+			}
+			refused, _ := logged(t, logs.String(), "agent_not_started")
+			suggested := fmt.Sprintf(`"seagull-agent -state %s installation replace"`, state)
+			if recovery, _ := refused["recovery"].(string); !strings.Contains(recovery, suggested) {
+				t.Fatalf("the agent suggested %q, want %s", recovery, suggested)
+			}
+
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"-state", state, "installation", "replace"}, &stdout, &stderr); code != 0 {
+				t.Fatalf("the suggested replacement exited with %d: %s", code, stderr.String())
+			}
+			if _, started := logged(t, serveStopped(t, state), "agent_starting"); !started {
+				t.Fatal("the agent did not start after the suggested replacement")
+			}
+		})
 	}
 }
 
@@ -228,6 +329,51 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 			recovery: "-state %s installation replace",
 		},
 		{
+			name: "the key of the active credential generation is missing",
+			prepare: func(t *testing.T, state string) {
+				if err := os.Remove(enroll(t, state)); err != nil {
+					t.Fatalf("lose the key: %v", err)
+				}
+			},
+			message:  "agent_not_started",
+			cause:    "the key does not exist",
+			recovery: "-state %s installation replace",
+		},
+		{
+			name: "the key of the active credential generation is damaged",
+			prepare: func(t *testing.T, state string) {
+				if err := os.WriteFile(enroll(t, state), []byte("damaged"), 0o600); err != nil {
+					t.Fatalf("damage the key: %v", err)
+				}
+			},
+			message:  "agent_not_started",
+			cause:    "the key is damaged",
+			recovery: "-state %s installation replace",
+		},
+		{
+			name: "another account can read the key",
+			prepare: func(t *testing.T, state string) {
+				if err := os.Chmod(enroll(t, state), 0o644); err != nil {
+					t.Fatalf("expose the key: %v", err)
+				}
+			},
+			message:  "agent_not_started",
+			cause:    "the key is not private to the account the agent runs as",
+			recovery: "revoke the certificate issued for it",
+		},
+		{
+			name: "another account can list the keys",
+			prepare: func(t *testing.T, state string) {
+				enroll(t, state)
+				if err := os.Chmod(filepath.Join(state, "keys"), 0o750); err != nil {
+					t.Fatalf("expose the keys: %v", err)
+				}
+			},
+			message:  "agent_not_started",
+			cause:    "the installation state is not private to the account the agent runs as",
+			recovery: "make %s and everything in it belong to the account the agent runs as",
+		},
+		{
 			name: "another agent holds the installation",
 			prepare: func(t *testing.T, state string) {
 				held, err := identity.Open(state)
@@ -261,8 +407,67 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 				!strings.Contains(cause, c.cause) || !strings.Contains(recovery, want) {
 				t.Fatalf("logged %v, want an error naming %q and a recovery naming %q", entry, c.cause, want)
 			}
+			if exposesKeys(t, logs.String(), state) {
+				t.Fatalf("the log shows a key:\n%s", logs.String())
+			}
 		})
 	}
+}
+
+func enroll(t *testing.T, state string) string {
+	t.Helper()
+	installation, err := identity.Open(state)
+	if err != nil {
+		t.Fatalf("open the installation: %v", err)
+	}
+	defer installation.Close()
+	keys, err := openKeys(installation)
+	if err != nil {
+		t.Fatalf("open the keys: %v", err)
+	}
+	key, err := keys.Create()
+	if err != nil {
+		t.Fatalf("create a key: %v", err)
+	}
+	if err := installation.Activate(identity.Enrollment{
+		AgentID:    "web-01",
+		Generation: 1,
+		KeyID:      key.ID(),
+		Certificate: identity.Certificate{
+			Subject:           "web-01",
+			Serial:            "01",
+			FingerprintSHA256: strings.Repeat("01", 32),
+			NotBefore:         time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+			NotAfter:          time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC),
+		},
+	}); err != nil {
+		t.Fatalf("activate the first credential generation: %v", err)
+	}
+	return filepath.Join(state, keysDirectory, key.ID()+".pem")
+}
+
+func exposesKeys(t *testing.T, logs, state string) bool {
+	t.Helper()
+	held, err := filepath.Glob(filepath.Join(state, keysDirectory, "*.pem"))
+	if err != nil {
+		t.Fatalf("list the keys: %v", err)
+	}
+	for _, path := range held {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		block, _ := pem.Decode(content)
+		if block == nil {
+			continue
+		}
+		for _, line := range strings.Split(string(pem.EncodeToMemory(&pem.Block{Bytes: block.Bytes})), "\n") {
+			if len(line) > 16 && !strings.HasPrefix(line, "-----") && strings.Contains(logs, line) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func follow(t *testing.T, logs io.Reader) <-chan map[string]any {

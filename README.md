@@ -71,12 +71,12 @@ machine identifier, which stay observations about the machine.
 The installation is not the agent the platform knows. The platform issues a
 certificate for an `agent_id` an operator registered, and once enrollment
 activates a credential generation, `installation.json` records it: that agent,
-the generation number, the SHA-256 identifier of the key and what the
-certificate says. It holds no key, token or other secret, and a field it does
-not declare, such as a key, makes the file damaged, so copying it or the agent's
-public settings authenticates nothing. Each generation follows the active one by
-exactly one and is issued to the same agent; enrolling as another agent takes a
-new installation.
+the generation number, the `key_id` of its key and what the certificate says.
+It holds no key, token or other secret, and a field it does not declare, such
+as a key, makes the file damaged, so copying it or the agent's public settings
+authenticates nothing. Each generation follows the active one by exactly one
+and is issued to the same agent; enrolling as another agent takes a new
+installation.
 
 The state is the agent's alone:
 
@@ -87,7 +87,10 @@ The state is the agent's alone:
   the agent ends;
 - a write lands in a temporary file that is synced and renamed over
   `installation.json` before the directory is synced, and a start discards what
-  an interrupted write left behind.
+  an interrupted write left behind;
+- whatever else the installation keeps, such as its keys, lives in a private
+  directory of its own inside the state directory, which the installation holds
+  under the same lock and closes when it is closed.
 
 When the state cannot be used, the agent does not start: it logs
 `agent_not_started` with the reason and a `recovery`, and never creates a new
@@ -97,15 +100,93 @@ installation or replaced; a state written by a newer agent is read by that
 release or replaced; a state others can reach is made private again.
 
 `seagull-agent -state DIR installation replace` is that replacement, made on
-purpose while the agent is stopped. It keeps the previous `installation.json`
-under `replaced/`, draws a new `installation_id` that names the one it replaces
-whenever that one could be read, and leaves the new installation unenrolled.
-Records belong to the installation that admitted them, so the spool, when it
-arrives, must not hand a predecessor's backlog to its replacement.
+purpose while the agent is stopped. It sets everything the state directory held
+aside under `replaced/`, in a directory named after the moment of the
+replacement: `installation.json`, the keys and anything else, even when the
+state was damaged or lost. It then draws a new `installation_id` that names the
+one it replaces whenever that one could be read, and leaves the new
+installation unenrolled and without keys. Keys set aside still authenticate as
+the agent they were certified for until its certificate expires or is revoked,
+so revoke it when the replaced installation was enrolled, and delete
+`replaced/` once nothing in it is needed. Records belong to the installation
+that admitted them, so a spool kept in the state directory is set aside with
+that installation rather than handed to its replacement.
 
 Packaging follows the same line: an uninstall leaves the state where it is, so
 a reinstall is the same installation, and only a purge removes the directory,
 after which the next start is a new installation.
+
+## Keys
+
+The agent proves which agent it is with a private key it draws itself, and the
+key stays where it was drawn. `internal/pki` holds that line: a `KeyProvider`
+creates keys and opens them by identifier, and each `Key` it hands out is a
+`crypto.Signer` with an identifier and nothing more. A certificate request and
+a TLS client handshake need no more than that, so no caller receives a private
+key, and a provider that never exports its keys fits the same boundary without
+an export to fall back on.
+
+Every key is ECDSA on P-256. At the recorded backend commit, the platform signs
+requests for P-256, P-384, P-521, Ed25519 and RSA keys of at least 2048 bits,
+and its ingest and renewal listeners accept only TLS 1.3, which every
+implementation must support with ECDSA on P-256. P-256 is also a curve that
+TPM 2.0, PKCS #11 tokens, Windows CNG and the Apple Secure Enclave hold, so
+keeping keys in one of them would change nothing the platform receives.
+
+A key's `key_id` is the SHA-256 digest, in lower-case hexadecimal, of its
+DER-encoded SubjectPublicKeyInfo: the bytes a certificate request and a
+certificate for the key carry, so a credential generation names exactly one
+key.
+
+The only provider keeps keys in files, under `keys/` in the state directory:
+
+- each key is an unencrypted PKCS #8 PEM file named `<key_id>.pem`, created
+  0600 in a 0700 directory, and the directory or a key in it is refused when it
+  does not belong to the account the agent runs as or is open to its group or
+  to others;
+- a new key is written to a temporary file that is synced and then linked under
+  its name, which never replaces an existing file, before the directory is
+  synced; `Create` returns the key only then, and opening the directory
+  discards whatever an interrupted write left behind;
+- a key opens only from a regular file holding one unencrypted PKCS #8 ECDSA
+  P-256 key, the one its name identifies, so a key that is truncated,
+  re-encoded, swapped for another or replaced by a symbolic link is damaged,
+  and it is left as it was.
+
+At start, the agent opens `keys/` and, once the installation is enrolled, the
+key of its active credential generation. When `keys/` or a key in it is
+reachable by another account, or that key is missing or damaged, the agent logs
+`agent_not_started` with a `recovery` and does not start, as for damaged
+installation state. A key another account could read has to be treated as
+exposed: revoke the certificate issued for it and replace the installation.
+`agent_starting` names the provider in `key_provider` and says in
+`key_exportable` whether a key can be read out of it; no log line carries a key.
+
+The files keep a key from other accounts, and from nothing else:
+
+- root, the account the agent runs as, anything that can act as that account
+  and whoever copies the state directory, such as a backup or a disk image, can
+  read a key, so `key_exportable` is `true` and a copied key is an identity to
+  revoke;
+- a key is not encrypted at rest, since the secret to decrypt it would have to
+  sit on the same disk, within reach of whoever can read the key;
+- the agent does not claim to erase a key's copies from memory, which Go does
+  not guarantee.
+
+Protected providers were weighed against Linux, the platform the agent is built
+and tested for:
+
+- a TPM 2.0 is the one that fits: it signs with a key wrapped by its own storage
+  key and never exports it. It is not implemented yet, because no supported
+  deployment requires it and many hosts, virtual machines and containers have no
+  TPM to use;
+- PKCS #11 needs a hardware token on every endpoint and cgo in the build;
+- CNG, DPAPI, the Keychain and the Secure Enclave belong to Windows and macOS,
+  which the agent does not support yet.
+
+Providers never fall back to one another: when a protected provider is added,
+a host where it is unavailable will not have its keys quietly kept in files
+instead.
 
 ## Boundaries
 
@@ -127,6 +208,10 @@ conventions:
   the agent writes and the refusals the platform answers with;
 - `internal/identity` imports no network package at all: an installation never
   takes its identity from an address, an interface or a server's answer;
+- `internal/pki` imports no HTTP, gRPC, RPC or TLS package: a key signs where it
+  is held, and transport owns requests, connections and TLS;
+- no collector reaches `internal/pki`, directly or through another package, so
+  collectors never hold the keys the agent proves its identity with;
 - no `.proto` file, generated binding or descriptor built at run time defines a
   message of the agent's own, so it has no handshake or envelope beside the
   published contracts;

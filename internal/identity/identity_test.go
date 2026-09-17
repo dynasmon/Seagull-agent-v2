@@ -508,17 +508,181 @@ func TestAReplacementInterruptedBeforeItsNewStateLeavesThePreviousInstallation(t
 	if err := previous.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	if err := os.Mkdir(filepath.Join(directory, "replaced"), 0o700); err != nil {
-		t.Fatalf("create the replaced directory: %v", err)
+	hold(t, directory, "keys")
+	kept := filepath.Join(directory, "replaced", "20260916T170000.000000000Z")
+	if err := os.MkdirAll(kept, 0o700); err != nil {
+		t.Fatalf("create the kept directory: %v", err)
 	}
-	kept := filepath.Join(directory, "replaced", "20260916T170000.000000000Z.json")
-	if err := os.Link(filepath.Join(directory, "installation.json"), kept); err != nil {
+	if err := os.Link(filepath.Join(directory, "installation.json"), filepath.Join(kept, "installation.json")); err != nil {
 		t.Fatalf("keep the previous state: %v", err)
 	}
+	if err := os.Rename(filepath.Join(directory, "keys"), filepath.Join(kept, "keys")); err != nil {
+		t.Fatalf("set the keys directory aside: %v", err)
+	}
 
-	if reopened := open(t, directory); reopened.ID() != previous.ID() || reopened.Created() {
+	reopened := open(t, directory)
+	if reopened.ID() != previous.ID() || reopened.Created() {
 		t.Fatalf("the interrupted replacement left %s (created: %t), the installation is %s",
 			reopened.ID(), reopened.Created(), previous.ID())
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	replacement, err := identity.Replace(directory)
+	if err != nil {
+		t.Fatalf("replace again: %v", err)
+	}
+	defer replacement.Close()
+	if replacement.Replaces() != previous.ID() {
+		t.Fatalf("the repeated replacement replaces %q, the installation was %s", replacement.Replaces(), previous.ID())
+	}
+}
+
+func TestReplacementSetsAsideEverythingTheInstallationHeld(t *testing.T) {
+	directory := stateDirectory(t)
+	previous := open(t, directory)
+	if err := previous.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	for _, name := range []string{"keys", "spool"} {
+		hold(t, directory, name)
+	}
+	previousState := readState(t, directory)
+
+	replacement, err := identity.Replace(directory)
+	if err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	defer replacement.Close()
+	if names := entries(t, directory); strings.Join(names, " ") != "installation.json replaced" {
+		t.Fatalf("the replacement holds %q", names)
+	}
+	kept, err := filepath.Glob(filepath.Join(directory, "replaced", "*"))
+	if err != nil || len(kept) != 1 {
+		t.Fatalf("kept %q: %v", kept, err)
+	}
+	if names := entries(t, kept[0]); strings.Join(names, " ") != "installation.json keys spool" {
+		t.Fatalf("set aside %q", names)
+	}
+	for _, name := range []string{"keys", "spool"} {
+		if content, err := os.ReadFile(filepath.Join(kept[0], name, "held")); err != nil || string(content) != name {
+			t.Fatalf("set aside %s holding %q: %v", name, content, err)
+		}
+	}
+	if kept := keptStates(t, directory); len(kept) != 1 || kept[0] != previousState {
+		t.Fatalf("kept %q, want the previous state", kept)
+	}
+}
+
+func TestReplacementRecoversADirectoryThatLostItsInstallation(t *testing.T) {
+	for name, prepare := range map[string]func(directory string) error{
+		"a directory holding keys": func(directory string) error {
+			return os.Mkdir(filepath.Join(directory, "keys"), 0o700)
+		},
+		"a directory holding only the installations it replaced": func(directory string) error {
+			return os.MkdirAll(filepath.Join(directory, "replaced", "20260916T170000.000000000Z"), 0o700)
+		},
+		"a state that is a directory": func(directory string) error {
+			return os.Mkdir(filepath.Join(directory, "installation.json"), 0o700)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := stateDirectory(t)
+			if err := os.Mkdir(directory, 0o700); err != nil {
+				t.Fatalf("create %s: %v", directory, err)
+			}
+			if err := prepare(directory); err != nil {
+				t.Fatalf("prepare %s: %v", name, err)
+			}
+			if _, err := identity.Open(directory); !errors.Is(err, identity.ErrDamaged) {
+				t.Fatalf("open returned %v", err)
+			}
+
+			replacement, err := identity.Replace(directory)
+			if err != nil {
+				t.Fatalf("replace: %v", err)
+			}
+			if !randomUUID.MatchString(replacement.ID()) || replacement.Replaces() != "" {
+				t.Fatalf("replaced it with %s, which replaces %q", replacement.ID(), replacement.Replaces())
+			}
+			if err := replacement.Close(); err != nil {
+				t.Fatalf("close: %v", err)
+			}
+			if reopened := open(t, directory); reopened.ID() != replacement.ID() || reopened.Created() {
+				t.Fatalf("after the replacement the installation is %s (created: %t), want %s",
+					reopened.ID(), reopened.Created(), replacement.ID())
+			}
+		})
+	}
+}
+
+func TestAnInstallationHoldsPrivateDirectoriesAcrossRestarts(t *testing.T) {
+	directory := stateDirectory(t)
+	installation := open(t, directory)
+	held, err := installation.Directory("keys")
+	if err != nil {
+		t.Fatalf("hold the keys directory: %v", err)
+	}
+	if err := held.WriteFile("key.pem", []byte("key"), 0o600); err != nil {
+		t.Fatalf("write into the keys directory: %v", err)
+	}
+	described, err := os.Lstat(filepath.Join(directory, "keys"))
+	if err != nil || described.Mode().Perm() != 0o700 {
+		t.Fatalf("the keys directory was created as %v: %v", described, err)
+	}
+	if err := installation.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if _, err := held.Lstat("key.pem"); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("the directory outlived the installation that held it: %v", err)
+	}
+
+	reopened, err := open(t, directory).Directory("keys")
+	if err != nil {
+		t.Fatalf("hold the keys directory again: %v", err)
+	}
+	if content, err := reopened.ReadFile("key.pem"); err != nil || string(content) != "key" {
+		t.Fatalf("after a restart the keys directory holds %q: %v", content, err)
+	}
+}
+
+func TestOnlyADirectoryOfItsOwnIsHeld(t *testing.T) {
+	installation := open(t, stateDirectory(t))
+	for _, name := range []string{"", "replaced", "installation.json", ".keys", "Keys", "../keys", "keys/old", "/keys"} {
+		if held, err := installation.Directory(name); err == nil {
+			t.Errorf("the installation holds %q as %s", name, held.Name())
+		}
+	}
+}
+
+func TestADirectoryOthersCanReachIsRefused(t *testing.T) {
+	for name, prepare := range map[string]func(directory string) error{
+		"a directory its group can list": func(directory string) error {
+			if err := os.Mkdir(filepath.Join(directory, "keys"), 0o700); err != nil {
+				return err
+			}
+			return os.Chmod(filepath.Join(directory, "keys"), 0o750)
+		},
+		"a symbolic link": func(directory string) error {
+			if err := os.MkdirAll(filepath.Join(directory, "replaced", "keys"), 0o700); err != nil {
+				return err
+			}
+			return os.Symlink(filepath.Join("replaced", "keys"), filepath.Join(directory, "keys"))
+		},
+		"a file": func(directory string) error {
+			return os.WriteFile(filepath.Join(directory, "keys"), nil, 0o600)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := stateDirectory(t)
+			installation := open(t, directory)
+			if err := prepare(directory); err != nil {
+				t.Fatalf("prepare %s: %v", name, err)
+			}
+			if _, err := installation.Directory("keys"); !errors.Is(err, identity.ErrInsecure) {
+				t.Fatalf("holding the keys directory returned %v", err)
+			}
+		})
 	}
 }
 
@@ -631,7 +795,7 @@ func readState(t *testing.T, directory string) string {
 
 func keptStates(t *testing.T, directory string) []string {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join(directory, "replaced", "*.json"))
+	paths, err := filepath.Glob(filepath.Join(directory, "replaced", "*", "installation.json"))
 	if err != nil {
 		t.Fatalf("list the replaced states: %v", err)
 	}
@@ -644,6 +808,29 @@ func keptStates(t *testing.T, directory string) []string {
 		kept = append(kept, string(content))
 	}
 	return kept
+}
+
+func hold(t *testing.T, directory, name string) {
+	t.Helper()
+	if err := os.Mkdir(filepath.Join(directory, name), 0o700); err != nil {
+		t.Fatalf("create %s: %v", name, err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, name, "held"), []byte(name), 0o600); err != nil {
+		t.Fatalf("write into %s: %v", name, err)
+	}
+}
+
+func entries(t *testing.T, directory string) []string {
+	t.Helper()
+	listed, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("list %s: %v", directory, err)
+	}
+	names := make([]string, 0, len(listed))
+	for _, entry := range listed {
+		names = append(names, entry.Name())
+	}
+	return names
 }
 
 func enrollment(agentID string, generation uint64, key string) identity.Enrollment {
