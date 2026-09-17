@@ -107,7 +107,7 @@ func replace(state string, stdout, stderr io.Writer) int {
 	if replaced := installation.Replaces(); replaced != "" {
 		fmt.Fprintf(stdout, "replaces %s\n", replaced)
 	}
-	fmt.Fprintf(stderr, "seagull-agent: the replaced state is kept under %s; enroll the new installation before it delivers anything\n",
+	fmt.Fprintf(stderr, "seagull-agent: everything the replaced installation held is kept under %s; enroll the new installation before it delivers anything\n",
 		filepath.Join(state, "replaced"))
 	return 0
 }

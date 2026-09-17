@@ -98,9 +98,9 @@ func Open(directory string) (*Installation, error) {
 }
 
 // Replace discards the installation in directory for a new, unenrolled one,
-// even when its state is damaged or newer than this agent reads. The replaced
-// state is kept under replaced/, and the new installation names the one it
-// replaces whenever that one could be read.
+// even when its state is damaged, missing or newer than this agent reads.
+// Everything the replaced installation held is set aside under replaced/, and
+// the new installation names the one it replaces whenever that one could be read.
 func Replace(directory string) (*Installation, error) {
 	installation, err := claim(directory, false)
 	if err != nil {
@@ -108,11 +108,9 @@ func Replace(directory string) (*Installation, error) {
 	}
 	previous, found, err := installation.read()
 	switch {
-	case err == nil && !found:
-		err = fmt.Errorf("%w in %s", ErrNoInstallation, directory)
-	case err == nil:
+	case err == nil && found:
 		err = installation.replace(previous.InstallationID)
-	case errors.Is(err, ErrDamaged), errors.Is(err, ErrNewer), errors.Is(err, ErrInsecure):
+	case err == nil, errors.Is(err, ErrDamaged), errors.Is(err, ErrNewer), errors.Is(err, ErrInsecure):
 		err = installation.replace("")
 	}
 	if err != nil {
@@ -269,6 +267,13 @@ func (i *Installation) create(replaces string) error {
 }
 
 func (i *Installation) replace(previous string) error {
+	names, err := i.names()
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("%w in %s", ErrNoInstallation, i.directory)
+	}
 	if err := i.root.Mkdir(replacedDir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		return fmt.Errorf("create %s: %w", i.path(replacedDir), err)
 	}
@@ -282,14 +287,33 @@ func (i *Installation) replace(previous string) error {
 	if err := private(i.path(replacedDir), described); err != nil {
 		return err
 	}
-	kept := filepath.Join(replacedDir, time.Now().UTC().Format("20060102T150405.000000000Z")+".json")
-	if err := i.root.Link(stateFile, kept); err != nil {
-		return fmt.Errorf("keep %s as %s: %w", i.path(stateFile), i.path(kept), err)
+	kept := filepath.Join(replacedDir, time.Now().UTC().Format("20060102T150405.000000000Z"))
+	if err := i.root.Mkdir(kept, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", i.path(kept), err)
 	}
-	if err := i.syncDirectory(replacedDir); err != nil {
-		return err
+	for _, name := range names {
+		if name == replacedDir {
+			continue
+		}
+		if err := i.setAside(name, filepath.Join(kept, name)); err != nil {
+			return fmt.Errorf("set %s aside as %s: %w", i.path(name), i.path(filepath.Join(kept, name)), err)
+		}
+	}
+	for _, synced := range []string{kept, replacedDir, "."} {
+		if err := i.syncDirectory(synced); err != nil {
+			return err
+		}
 	}
 	return i.create(previous)
+}
+
+func (i *Installation) setAside(name, kept string) error {
+	if name == stateFile {
+		if described, err := i.root.Lstat(name); err == nil && described.Mode().IsRegular() {
+			return i.root.Link(name, kept)
+		}
+	}
+	return i.root.Rename(name, kept)
 }
 
 func (i *Installation) write(next state) error {

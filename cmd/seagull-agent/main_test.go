@@ -143,6 +143,44 @@ func TestReplacingTheInstallationNamesTheOneItReplaces(t *testing.T) {
 	}
 }
 
+func TestTheReplacementTheAgentSuggestsLetsItStartAgain(t *testing.T) {
+	for name, prepare := range map[string]func(state string) error{
+		"a damaged installation state": func(state string) error {
+			return os.WriteFile(filepath.Join(state, "installation.json"), []byte("{"), 0o600)
+		},
+		"a directory that lost its installation state": func(state string) error {
+			return os.Mkdir(filepath.Join(state, "keys"), 0o700)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			state := stateDirectory(t)
+			if err := os.Mkdir(state, 0o700); err != nil {
+				t.Fatalf("create %s: %v", state, err)
+			}
+			if err := prepare(state); err != nil {
+				t.Fatalf("prepare %s: %v", name, err)
+			}
+			var logs bytes.Buffer
+			if code := serve(t.Context(), slog.New(slog.NewJSONHandler(&logs, nil)), state); code != 1 {
+				t.Fatalf("exit code %d, want 1", code)
+			}
+			refused, _ := logged(t, logs.String(), "agent_not_started")
+			suggested := fmt.Sprintf(`"seagull-agent -state %s installation replace"`, state)
+			if recovery, _ := refused["recovery"].(string); !strings.Contains(recovery, suggested) {
+				t.Fatalf("the agent suggested %q, want %s", recovery, suggested)
+			}
+
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"-state", state, "installation", "replace"}, &stdout, &stderr); code != 0 {
+				t.Fatalf("the suggested replacement exited with %d: %s", code, stderr.String())
+			}
+			if _, started := logged(t, serveStopped(t, state), "agent_starting"); !started {
+				t.Fatal("the agent did not start after the suggested replacement")
+			}
+		})
+	}
+}
+
 func TestThereIsNoInstallationToReplaceBeforeTheAgentRuns(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"-state", stateDirectory(t), "installation", "replace"}, &stdout, &stderr); code != 1 {
