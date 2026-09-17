@@ -87,21 +87,23 @@ type exit struct {
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
-	if ctx.Err() != nil {
-		return nil
-	}
 	work, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	exits := make(chan exit, len(r.components))
 	running := make([]bool, len(r.components))
-	for i, component := range r.components {
-		r.logger.Info("component_started", component.attributes()...)
-		running[i] = true
-		go func() { exits <- exit{component: i, err: component.Run(work)} }()
+	pending := 0
+	// A stop that arrives before the agent runs starts no component, and is
+	// still reported: every stop names the reason it happened.
+	if ctx.Err() == nil {
+		for i, component := range r.components {
+			r.logger.Info("component_started", component.attributes()...)
+			running[i] = true
+			pending++
+			go func() { exits <- exit{component: i, err: component.Run(work)} }()
+		}
 	}
 
-	pending := len(r.components)
 	var failures []error
 	record := func(stopped exit, stopping bool) error {
 		pending--

@@ -386,18 +386,23 @@ func TestAFailureWhileStoppingIsReported(t *testing.T) {
 	})
 }
 
-func TestAStopRequestedBeforeTheAgentRunsStartsNothing(t *testing.T) {
+func TestAStopRequestedBeforeTheAgentRunsStartsNothingAndIsStillReported(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		var logs journal
 		delivery := &probe{}
-		agent := compose(t, &journal{}, runtime.Component{Name: "delivery", Policy: runtime.Essential, Run: delivery.run})
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
+		agent := compose(t, &logs, runtime.Component{Name: "delivery", Policy: runtime.Essential, Run: delivery.run})
+		ctx, stop := context.WithCancelCause(t.Context())
+		stop(errors.New("terminated signal received"))
 		if err := agent.Run(ctx); err != nil {
 			t.Fatalf("a stop requested before the agent ran failed: %v", err)
 		}
 		synctest.Wait()
 		if delivery.started.Load() {
 			t.Fatal("a component started although the agent had already been stopped")
+		}
+		shutdown := logs.entries(t, "shutdown_started")
+		if len(shutdown) != 1 || shutdown[0]["reason"] != "terminated signal received" {
+			t.Fatalf("the stop was logged as %v, want the reason it was requested", shutdown)
 		}
 	})
 }
