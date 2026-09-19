@@ -61,6 +61,36 @@ func TestOnlyWhatNoGroupOrOtherAccountReachesIsPrivate(t *testing.T) {
 	}
 }
 
+func TestOnlyWhatNoGroupOrOtherAccountWritesIsTrusted(t *testing.T) {
+	directory := t.TempDir()
+	cases := map[fs.FileMode]bool{
+		0o600: true,
+		0o644: true,
+		0o400: true,
+		0o755: true,
+		0o660: false,
+		0o666: false,
+		0o602: false,
+		0o777: false,
+	}
+	for mode, trusted := range cases {
+		path := filepath.Join(directory, mode.String())
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatalf("create %s: %v", path, err)
+		}
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatalf("chmod %s: %v", path, err)
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatalf("describe %s: %v", path, err)
+		}
+		if err := files.Trusted(info); (err == nil) != trusted {
+			t.Errorf("a file with mode %s is trusted: %v, want %t", mode, err, trusted)
+		}
+	}
+}
+
 type ownedBy struct {
 	fs.FileInfo
 	described any
@@ -83,6 +113,35 @@ func TestWhatAnotherAccountOwnsIsNotPrivate(t *testing.T) {
 	} {
 		if err := files.Private(ownedBy{FileInfo: info, described: described}); err == nil {
 			t.Errorf("a file owned by %s is private", name)
+		}
+	}
+}
+
+// The agent's settings are installed by root and read by the account the agent
+// runs as, so what root owns is what the agent was given rather than something
+// another account left in its way.
+func TestWhatRootOwnsIsTrustedAndWhatAnotherAccountOwnsIsNot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.json")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("create %s: %v", path, err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("describe %s: %v", path, err)
+	}
+	for name, owner := range map[string]struct {
+		described any
+		trusted   bool
+	}{
+		"the superuser":   {described: &syscall.Stat_t{Uid: 0}, trusted: true},
+		"another account": {described: &syscall.Stat_t{Uid: uint32(os.Geteuid() + 1)}},
+		"no owner at all": {described: nil},
+	} {
+		if err := files.Trusted(ownedBy{FileInfo: info, described: owner.described}); (err == nil) != owner.trusted {
+			t.Errorf("a file owned by %s is trusted: %v, want %t", name, err, owner.trusted)
+		}
+		if err := files.Private(ownedBy{FileInfo: info, described: owner.described}); err == nil {
+			t.Errorf("a file owned by %s, open to others, is private", name)
 		}
 	}
 }

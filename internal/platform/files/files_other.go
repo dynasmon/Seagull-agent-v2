@@ -17,3 +17,7 @@ func Lock(file *os.File) error {
 func Private(fs.FileInfo) error {
 	return fmt.Errorf("cannot tell who may reach it on %s: %w", runtime.GOOS, errors.ErrUnsupported)
 }
+
+func Trusted(fs.FileInfo) error {
+	return fmt.Errorf("cannot tell who may change it on %s: %w", runtime.GOOS, errors.ErrUnsupported)
+}
