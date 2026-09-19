@@ -4,21 +4,32 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
+	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"runtime/debug"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/dynasmon/Seagull-agent-v2/internal/config"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
@@ -54,7 +65,8 @@ func TestTheVersionFlagPrintsTheBuildIdentityApartFromTheWireVersions(t *testing
 }
 
 func TestTheAgentLogsWhatItIsAsItStarts(t *testing.T) {
-	logs := serveStopped(t, stateDirectory(t))
+	path := configured(t, stateDirectory(t), nil)
+	logs := serveStopped(t, path)
 	created, _ := logged(t, logs, "installation_created")
 	started, found := logged(t, logs, "agent_starting")
 	if !found || created["installation_id"] == nil {
@@ -62,6 +74,7 @@ func TestTheAgentLogsWhatItIsAsItStarts(t *testing.T) {
 	}
 	want := map[string]any{
 		"build":                    buildIdentity(),
+		"config":                   path,
 		"protocol_version":         float64(protocol.Version),
 		"event_schema_version":     float64(protocol.EventSchemaVersion),
 		"inventory_schema_version": float64(protocol.InventorySchemaVersion),
@@ -80,8 +93,8 @@ func TestTheAgentLogsWhatItIsAsItStarts(t *testing.T) {
 }
 
 func TestTheAgentKeepsItsInstallationAcrossRestarts(t *testing.T) {
-	state := stateDirectory(t)
-	first, second := serveStopped(t, state), serveStopped(t, state)
+	path := configured(t, stateDirectory(t), nil)
+	first, second := serveStopped(t, path), serveStopped(t, path)
 	created, _ := logged(t, first, "installation_created")
 	if _, recreated := logged(t, second, "installation_created"); recreated || created["installation_id"] == nil {
 		t.Fatalf("the first start created %v and the second created one too: %t", created["installation_id"], recreated)
@@ -97,7 +110,7 @@ func TestAnEnrolledAgentStartsWithTheKeyItsCredentialsName(t *testing.T) {
 	state := stateDirectory(t)
 	enroll(t, state)
 
-	logs := serveStopped(t, state)
+	logs := serveStopped(t, configured(t, state, nil))
 	started, _ := logged(t, logs, "agent_starting")
 	if started["agent_id"] != "web-01" || started["credential_generation"] != float64(1) || started["key_provider"] != "filesystem" {
 		t.Fatalf("an enrolled installation started as %v", started)
@@ -114,7 +127,7 @@ func TestKeysSurviveAnActivationInterruptedBeforeItsStateWasWritten(t *testing.T
 	if err != nil {
 		t.Fatalf("open the installation: %v", err)
 	}
-	keys, err := openKeys(installation)
+	keys, err := openKeys(installation, config.KeysInFiles)
 	if err != nil {
 		t.Fatalf("open the keys: %v", err)
 	}
@@ -130,7 +143,7 @@ func TestKeysSurviveAnActivationInterruptedBeforeItsStateWasWritten(t *testing.T
 		t.Fatalf("close: %v", err)
 	}
 
-	started, _ := logged(t, serveStopped(t, state), "agent_starting")
+	started, _ := logged(t, serveStopped(t, configured(t, state, nil)), "agent_starting")
 	if started["credential_generation"] != float64(1) {
 		t.Fatalf("after the interruption the agent started as %v", started)
 	}
@@ -139,7 +152,7 @@ func TestKeysSurviveAnActivationInterruptedBeforeItsStateWasWritten(t *testing.T
 		t.Fatalf("reopen the installation: %v", err)
 	}
 	defer installation.Close()
-	if keys, err = openKeys(installation); err != nil {
+	if keys, err = openKeys(installation, config.KeysInFiles); err != nil {
 		t.Fatalf("reopen the keys: %v", err)
 	}
 	enrolled, _ := installation.Enrollment()
@@ -153,8 +166,217 @@ func TestKeysSurviveAnActivationInterruptedBeforeItsStateWasWritten(t *testing.T
 	}
 }
 
+func TestAConfigurationTheAgentRefusesStopsItBeforeItTouchesTheInstallation(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, map[string]string{"spool": `{"max_age": "1000h"}`})
+	var logs bytes.Buffer
+	if code := serve(t.Context(), &logs, path); code != 1 {
+		t.Fatalf("exit code %d, want 1", code)
+	}
+	refused, found := logged(t, logs.String(), "agent_not_started")
+	cause, _ := refused["error"].(string)
+	hint, _ := refused["recovery"].(string)
+	if !found || !strings.Contains(cause, "spool.max_age") || !strings.Contains(hint, "config check") {
+		t.Fatalf("logged %v", refused)
+	}
+	if _, err := os.Lstat(state); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a configuration the agent refused reached the installation state: %v", err)
+	}
+}
+
+func TestReadingTheConfigurationDoesNotStartTheAgent(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, map[string]string{"logging": `{"level": "debug"}`})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-config", path, "config", "check"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), state) {
+		t.Fatalf("exit code %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	if code := run([]string{"-config", path, "config", "print"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code %d: %s", code, stderr.String())
+	}
+	printed := map[string]any{}
+	if err := json.Unmarshal(stdout.Bytes(), &printed); err != nil {
+		t.Fatalf("decode the printed configuration %q: %v", stdout.String(), err)
+	}
+	shown := func(group, setting string) any {
+		held, _ := printed[group].(map[string]any)
+		return held[setting]
+	}
+	if printed["format"] != float64(config.Format) || shown("logging", "level") != "debug" || shown("spool", "max_bytes") != "512MiB" {
+		t.Fatalf("the agent printed %v", printed)
+	}
+	if _, err := os.Lstat(state); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("reading the configuration reached the installation state: %v", err)
+	}
+
+	refused := configured(t, state, map[string]string{"updates": `{"enabled": true}`})
+	for _, command := range [][]string{{"config", "check"}, {"config", "print"}} {
+		stdout.Reset()
+		stderr.Reset()
+		if code := run(append([]string{"-config", refused}, command...), &stdout, &stderr); code != 1 || stdout.Len() != 0 {
+			t.Errorf("%q: exit code %d, stdout %q", command, code, stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "updates.enabled") {
+			t.Errorf("%q: refused the configuration with %q", command, stderr.String())
+		}
+	}
+}
+
+func TestTheAgentReadsItsConfigurationAgainWhenItIsAsked(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	var logs bytes.Buffer
+	held := configuration{
+		logger: slog.New(slog.NewJSONHandler(&logs, nil)),
+		path:   path,
+		active: config.Activate(loaded(t, path)),
+		level:  new(slog.LevelVar),
+	}
+
+	rewrite(t, path, state, map[string]string{"logging": `{"level": "debug"}`, "spool": `{"max_bytes": "1GiB"}`})
+	held.reload()
+
+	reloaded, found := logged(t, logs.String(), "configuration_reloaded")
+	if !found || reloaded["log_level"] != "debug" || reloaded["config"] != path {
+		t.Fatalf("logged %v:\n%s", reloaded, logs.String())
+	}
+	if running := held.active.Settings(); running.Spool.MaxBytes != 1<<30 || running.Logging.Level != "debug" {
+		t.Fatalf("the agent runs on %+v", running)
+	}
+	if held.level.Level() != slog.LevelDebug {
+		t.Fatalf("the agent logs at %v", held.level.Level())
+	}
+}
+
+func TestAReloadTheAgentRefusesKeepsTheConfigurationItRunsOn(t *testing.T) {
+	for name, ask := range map[string]func(t *testing.T, path, state string){
+		"a configuration it refuses": func(t *testing.T, path, state string) {
+			rewrite(t, path, state, map[string]string{"logging": `{"level": "silent"}`})
+		},
+		"a setting it settled as it started": func(t *testing.T, path, state string) {
+			rewrite(t, path, filepath.Join(state, "elsewhere"), nil)
+		},
+		"a configuration that is gone": func(t *testing.T, path, state string) {
+			if err := os.Remove(path); err != nil {
+				t.Fatalf("remove %s: %v", path, err)
+			}
+		},
+		"a configuration another account can change": func(t *testing.T, path, state string) {
+			if err := os.Chmod(path, 0o666); err != nil {
+				t.Fatalf("expose %s: %v", path, err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			state := stateDirectory(t)
+			path := configured(t, state, nil)
+			started := loaded(t, path)
+			var logs bytes.Buffer
+			held := configuration{
+				logger: slog.New(slog.NewJSONHandler(&logs, nil)),
+				path:   path,
+				active: config.Activate(started),
+				level:  new(slog.LevelVar),
+			}
+			held.level.Set(started.Logging.Severity())
+
+			ask(t, path, state)
+			held.reload()
+
+			refused, found := logged(t, logs.String(), "configuration_not_reloaded")
+			if !found || refused["level"] != "ERROR" || refused["recovery"] == nil {
+				t.Fatalf("logged %v:\n%s", refused, logs.String())
+			}
+			if running := held.active.Settings(); !reflect.DeepEqual(running, started) {
+				t.Fatalf("the agent runs on\n%+v\nrather than the configuration it started with\n%+v", running, started)
+			}
+			if held.level.Level() != started.Logging.Severity() {
+				t.Fatalf("the agent logs at %v, it started at %v", held.level.Level(), started.Logging.Severity())
+			}
+		})
+	}
+}
+
+func TestTheAgentSpendsWhatItsConfigurationAllows(t *testing.T) {
+	previous := debug.SetMemoryLimit(-1)
+	t.Cleanup(func() { debug.SetMemoryLimit(previous) })
+
+	settings := loaded(t, configured(t, stateDirectory(t), map[string]string{
+		"logging":   `{"level": "warn"}`,
+		"resources": `{"memory_limit": "512MiB"}`,
+	}))
+	level := new(slog.LevelVar)
+	apply(settings, level)
+	if level.Level() != slog.LevelWarn {
+		t.Errorf("the agent logs at %v, its configuration says %q", level.Level(), settings.Logging.Level)
+	}
+	if limit := debug.SetMemoryLimit(-1); limit != 512<<20 {
+		t.Errorf("the agent keeps to %d bytes, its configuration allows %s", limit, settings.Resources.MemoryLimit)
+	}
+}
+
+func TestAHangupAsksTheAgentToReadItsConfigurationAgain(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows cannot deliver SIGHUP to another process")
+	}
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	agent := exec.CommandContext(t.Context(), os.Args[0])
+	agent.Env = append(os.Environ(), childArguments+"=-config "+path+" run")
+	logs, err := agent.StderrPipe()
+	if err != nil {
+		t.Fatalf("attach to the agent's log: %v", err)
+	}
+	if err := agent.Start(); err != nil {
+		t.Fatalf("start the agent: %v", err)
+	}
+	entries := follow(t, logs)
+	await(t, entries, "agent_starting")
+
+	rewrite(t, path, state, map[string]string{"spool": `{"max_bytes": "1MiB"}`})
+	hangup(t, agent)
+	if cause, _ := await(t, entries, "configuration_not_reloaded")["error"].(string); !strings.Contains(cause, "spool.max_bytes") {
+		t.Errorf("the agent refused the configuration with %q", cause)
+	}
+
+	rewrite(t, path, state, map[string]string{"spool": `{"max_bytes": "1GiB"}`})
+	hangup(t, agent)
+	if entry := await(t, entries, "configuration_reloaded"); entry["config"] != path {
+		t.Errorf("the agent read %v", entry["config"])
+	}
+
+	if err := agent.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("send SIGTERM: %v", err)
+	}
+	await(t, entries, "agent_stopped")
+	for range entries {
+	}
+	if err := agent.Wait(); err != nil {
+		t.Fatalf("the agent exited with %v after a reload, want a clean exit", err)
+	}
+}
+
+func hangup(t *testing.T, agent *exec.Cmd) {
+	t.Helper()
+	if err := agent.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatalf("send SIGHUP: %v", err)
+	}
+}
+
+func loaded(t *testing.T, path string) config.Config {
+	t.Helper()
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("load %s: %v", path, err)
+	}
+	return settings
+}
+
 func TestAnythingButACommandIsAUsageError(t *testing.T) {
 	state := stateDirectory(t)
+	path := configured(t, state, nil)
 	for _, args := range [][]string{
 		nil,
 		{"start"},
@@ -163,11 +385,13 @@ func TestAnythingButACommandIsAUsageError(t *testing.T) {
 		{"-version", "run"},
 		{"run"},
 		{"run", "extra"},
-		{"-state", state},
-		{"-state", state, "-version"},
-		{"-state", state, "run", "extra"},
-		{"-state", state, "installation"},
-		{"-state", state, "installation", "show"},
+		{"-config", path},
+		{"-config", path, "-version"},
+		{"-config", path, "run", "extra"},
+		{"-config", path, "config"},
+		{"-config", path, "config", "reload"},
+		{"-config", path, "installation"},
+		{"-config", path, "installation", "show"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 2 {
@@ -176,7 +400,7 @@ func TestAnythingButACommandIsAUsageError(t *testing.T) {
 		if stdout.Len() != 0 {
 			t.Errorf("%q: wrote %q to stdout", args, stdout.String())
 		}
-		if !strings.Contains(stderr.String(), "seagull-agent -state DIR run") {
+		if !strings.Contains(stderr.String(), "seagull-agent -config FILE run") {
 			t.Errorf("%q: explained no command on stderr: %q", args, stderr.String())
 		}
 	}
@@ -187,11 +411,12 @@ func TestAnythingButACommandIsAUsageError(t *testing.T) {
 
 func TestReplacingTheInstallationNamesTheOneItReplaces(t *testing.T) {
 	state := stateDirectory(t)
-	created, _ := logged(t, serveStopped(t, state), "installation_created")
+	path := configured(t, state, nil)
+	created, _ := logged(t, serveStopped(t, path), "installation_created")
 	previous, _ := created["installation_id"].(string)
 
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-state", state, "installation", "replace"}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"-config", path, "installation", "replace"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr.String())
 	}
 	replacement, replaces, _ := strings.Cut(strings.TrimPrefix(stdout.String(), "installation_id "), "\n")
@@ -201,7 +426,7 @@ func TestReplacingTheInstallationNamesTheOneItReplaces(t *testing.T) {
 	if !strings.Contains(stderr.String(), "enroll the new installation") {
 		t.Errorf("said nothing about enrolling the new installation: %q", stderr.String())
 	}
-	if started, _ := logged(t, serveStopped(t, state), "agent_starting"); started["installation_id"] != replacement {
+	if started, _ := logged(t, serveStopped(t, path), "agent_starting"); started["installation_id"] != replacement {
 		t.Fatalf("started as installation %v after replacing it with %s", started["installation_id"], replacement)
 	}
 }
@@ -217,6 +442,7 @@ func TestTheReplacementTheAgentSuggestsLetsItStartAgain(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			state := stateDirectory(t)
+			path := configured(t, state, nil)
 			if err := os.Mkdir(state, 0o700); err != nil {
 				t.Fatalf("create %s: %v", state, err)
 			}
@@ -224,20 +450,20 @@ func TestTheReplacementTheAgentSuggestsLetsItStartAgain(t *testing.T) {
 				t.Fatalf("prepare %s: %v", name, err)
 			}
 			var logs bytes.Buffer
-			if code := serve(t.Context(), slog.New(slog.NewJSONHandler(&logs, nil)), state); code != 1 {
+			if code := serve(t.Context(), &logs, path); code != 1 {
 				t.Fatalf("exit code %d, want 1", code)
 			}
 			refused, _ := logged(t, logs.String(), "agent_not_started")
-			suggested := fmt.Sprintf(`"seagull-agent -state %s installation replace"`, state)
+			suggested := fmt.Sprintf(`"seagull-agent -config %s installation replace"`, path)
 			if recovery, _ := refused["recovery"].(string); !strings.Contains(recovery, suggested) {
 				t.Fatalf("the agent suggested %q, want %s", recovery, suggested)
 			}
 
 			var stdout, stderr bytes.Buffer
-			if code := run([]string{"-state", state, "installation", "replace"}, &stdout, &stderr); code != 0 {
+			if code := run([]string{"-config", path, "installation", "replace"}, &stdout, &stderr); code != 0 {
 				t.Fatalf("the suggested replacement exited with %d: %s", code, stderr.String())
 			}
-			if _, started := logged(t, serveStopped(t, state), "agent_starting"); !started {
+			if _, started := logged(t, serveStopped(t, path), "agent_starting"); !started {
 				t.Fatal("the agent did not start after the suggested replacement")
 			}
 		})
@@ -246,7 +472,7 @@ func TestTheReplacementTheAgentSuggestsLetsItStartAgain(t *testing.T) {
 
 func TestThereIsNoInstallationToReplaceBeforeTheAgentRuns(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-state", stateDirectory(t), "installation", "replace"}, &stdout, &stderr); code != 1 {
+	if code := run([]string{"-config", configured(t, stateDirectory(t), nil), "installation", "replace"}, &stdout, &stderr); code != 1 {
 		t.Fatalf("exit code %d, want 1", code)
 	}
 	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "no installation to replace") ||
@@ -262,7 +488,7 @@ func TestASignalStopsTheAgentCleanly(t *testing.T) {
 	for _, signal := range []syscall.Signal{syscall.SIGTERM, syscall.SIGINT} {
 		t.Run(signal.String(), func(t *testing.T) {
 			agent := exec.CommandContext(t.Context(), os.Args[0])
-			agent.Env = append(os.Environ(), childArguments+"=-state "+stateDirectory(t)+" run")
+			agent.Env = append(os.Environ(), childArguments+"=-config "+configured(t, stateDirectory(t), nil)+" run")
 			logs, err := agent.StderrPipe()
 			if err != nil {
 				t.Fatalf("attach to the agent's log: %v", err)
@@ -326,7 +552,7 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 			},
 			message:  "agent_not_started",
 			cause:    "the installation state is damaged",
-			recovery: "-state %s installation replace",
+			recovery: "installation replace",
 		},
 		{
 			name: "the key of the active credential generation is missing",
@@ -337,7 +563,7 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 			},
 			message:  "agent_not_started",
 			cause:    "the key does not exist",
-			recovery: "-state %s installation replace",
+			recovery: "installation replace",
 		},
 		{
 			name: "the key of the active credential generation is damaged",
@@ -348,7 +574,7 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 			},
 			message:  "agent_not_started",
 			cause:    "the key is damaged",
-			recovery: "-state %s installation replace",
+			recovery: "installation replace",
 		},
 		{
 			name: "another account can read the key",
@@ -390,11 +616,12 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			state := stateDirectory(t)
+			path := configured(t, state, nil)
 			if c.prepare != nil {
 				c.prepare(t, state)
 			}
 			var logs bytes.Buffer
-			if code := serve(t.Context(), slog.New(slog.NewJSONHandler(&logs, nil)), state, c.components...); code != 1 {
+			if code := serve(t.Context(), &logs, path, c.components...); code != 1 {
 				t.Fatalf("exit code %d, want 1", code)
 			}
 			entry, found := logged(t, logs.String(), c.message)
@@ -421,7 +648,7 @@ func enroll(t *testing.T, state string) string {
 		t.Fatalf("open the installation: %v", err)
 	}
 	defer installation.Close()
-	keys, err := openKeys(installation)
+	keys, err := openKeys(installation, config.KeysInFiles)
 	if err != nil {
 		t.Fatalf("open the keys: %v", err)
 	}
@@ -512,15 +739,73 @@ func stateDirectory(t *testing.T) string {
 	return filepath.Join(t.TempDir(), "state")
 }
 
-func serveStopped(t *testing.T, state string) string {
+func serveStopped(t *testing.T, path string) string {
 	t.Helper()
 	ctx, stop := context.WithCancel(t.Context())
 	stop()
 	var logs bytes.Buffer
-	if code := serve(ctx, slog.New(slog.NewJSONHandler(&logs, nil)), state); code != 0 {
+	if code := serve(ctx, &logs, path); code != 0 {
 		t.Fatalf("exit code %d:\n%s", code, logs.String())
 	}
 	return logs.String()
+}
+
+// The settings an operator writes: where the installation is, which platform
+// the agent reaches, and whatever else the test says.
+func configured(t *testing.T, state string, sections map[string]string) string {
+	t.Helper()
+	directory := filepath.Join(t.TempDir(), "etc")
+	if err := os.Mkdir(directory, 0o755); err != nil {
+		t.Fatalf("create %s: %v", directory, err)
+	}
+	authority(t, directory)
+	path := filepath.Join(directory, "agent.json")
+	rewrite(t, path, state, sections)
+	return path
+}
+
+func rewrite(t *testing.T, path, state string, sections map[string]string) {
+	t.Helper()
+	held := map[string]string{
+		"format":   "1",
+		"identity": fmt.Sprintf(`{"state_directory": %q}`, state),
+		"server": fmt.Sprintf(`{"ingest_url": "https://gateway.example:8443", "renewal_url": "https://control.example:8446", "trust_bundle": %q}`,
+			filepath.Join(filepath.Dir(path), "platform-ca.pem")),
+	}
+	maps.Copy(held, sections)
+	var settings []string
+	for _, name := range slices.Sorted(maps.Keys(held)) {
+		settings = append(settings, fmt.Sprintf("%q: %s", name, held[name]))
+	}
+	if err := os.WriteFile(path, []byte("{"+strings.Join(settings, ", ")+"}\n"), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func authority(t *testing.T, directory string) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("draw the key of the platform authority: %v", err)
+	}
+	platform := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Seagull platform"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+	}
+	signed, err := x509.CreateCertificate(rand.Reader, platform, platform, key.Public(), key)
+	if err != nil {
+		t.Fatalf("sign the certificate of the platform authority: %v", err)
+	}
+	path := filepath.Join(directory, "platform-ca.pem")
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signed}), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	return path
 }
 
 func logged(t *testing.T, logs, message string) (map[string]any, bool) {
