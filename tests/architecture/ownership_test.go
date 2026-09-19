@@ -80,6 +80,12 @@ var dependencyRules = []dependencyRule{
 		transitive: true,
 		reason:     "collectors observe the endpoint and never hold the keys the agent proves its identity with",
 	},
+	{
+		packages:   "internal/config",
+		forbidden:  append([]string{modulePath + "/internal/identity", modulePath + "/internal/pki"}, networkPackages...),
+		transitive: true,
+		reason:     "the configuration is read before there is an installation, a key or a connection: it says what the agent runs on, and each component opens what its own settings name",
+	},
 }
 
 func (r dependencyRule) violations(pkg buildPackage) []string {
@@ -230,6 +236,32 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				Deps:       []string{modulePath + "/internal/pki", modulePath + "/internal/telemetry"},
 			},
 			want: []string{modulePath + "/internal/pki"},
+		},
+		{
+			name: "the configuration reaching the platform it names",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/config",
+				Imports:    []string{"net/http", "net/url"},
+				Deps:       []string{"crypto/tls", "net/http", "net/url"},
+			},
+			want: []string{"crypto/tls", "net/http"},
+		},
+		{
+			name: "the configuration opening the installation it names",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/config",
+				Imports:    []string{modulePath + "/internal/identity"},
+				Deps:       []string{modulePath + "/internal/identity", modulePath + "/internal/platform/files"},
+			},
+			want: []string{modulePath + "/internal/identity"},
+		},
+		{
+			name: "the configuration reading the certificates a trust bundle holds",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/config",
+				Imports:    []string{"crypto/x509", modulePath + "/internal/platform/files"},
+				Deps:       []string{"crypto/x509", "net", "net/url", modulePath + "/internal/platform/files"},
+			},
 		},
 		{
 			name: "the runtime on the standard library alone",
