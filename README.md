@@ -169,6 +169,50 @@ is configured once rather than as each one lands. `modules` and
 accepted them would be promising collection it cannot do and updates it cannot
 install.
 
+## Collection
+
+`internal/modules` runs the collectors this build has. The agent's runtime owns
+components and knows none of them; the collection owns the collectors inside one
+component, so a collector that fails is the collection's business and never the
+agent's.
+
+A module is a name and a `Collect(ctx)` call that owns every goroutine, timer,
+descriptor and checkpoint it starts, and returns once all of them have stopped.
+Modules share the agent's process and its privileges: a goroutine is a unit of
+lifecycle and never one of isolation.
+
+Each enabled module collects in a goroutine of its own, and the collection says
+what each of them is doing:
+
+- `running`: it is collecting;
+- `degraded`: it is enabled and not collecting, because it failed and will be
+  started again, or because the agent has not started it yet;
+- `failed`: it failed as often as its budget allows, so the agent leaves it
+  alone rather than start it again forever;
+- `disabled`: nothing asked for it.
+
+A module that returns before the agent is asked to stop has failed, whether it
+returned an error or nothing at all. The agent waits a second before starting it
+again and twice as long after each failure, up to five minutes, spread by a
+fifth so the endpoints of a fleet that failed together do not return together.
+Five failures in a row spend a module's budget; a module that collected for five
+minutes has its failures forgiven. What a module reported is kept with its
+state, bounded, and is never a label.
+
+The set of modules that should be collecting is applied whole: a name this build
+does not have refuses the set, so nothing is half applied; a module the set
+leaves out is cancelled, and the agent waits for it to return, so disabling a
+collector releases what it held; and a module that spent its budget is started
+once more when it is named again, because the budget bounds what the agent
+retries on its own, not what an operator asks for. Stopping cancels every
+module, and the collection names the ones that did not return rather than wait
+for them. A panic inside a module is not recovered, as anywhere else in the
+agent.
+
+No collector exists yet, so the composition root composes no collection: the
+first one arrives with the authentication collector, and until then the
+configuration refuses every module named in `modules`.
+
 ## The installation
 
 An installation is one agent installed on one machine, and
