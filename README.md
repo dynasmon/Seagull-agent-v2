@@ -35,11 +35,11 @@ which build is running.
 
 ## Running
 
-`seagull-agent -state DIR run` starts the agent on the installation held in
-`DIR` and keeps it running until it receives SIGINT or SIGTERM. It logs JSON
-lines to stderr, and exits with 0 after a requested stop, 1 when it could not
-start, an essential component failed or the stop overran its deadline, and 2 on
-a usage error.
+`seagull-agent -config FILE run` starts the agent on the configuration held in
+`FILE` and keeps it running until it receives SIGINT or SIGTERM. It logs to
+stderr, and exits with 0 after a requested stop, 1 when it could not start, an
+essential component failed or the stop overran its deadline, and 2 on a usage
+error.
 
 `cmd/seagull-agent` is the composition root: it builds each component and hands
 the enabled ones to `internal/runtime`, which owns their lifecycle.
@@ -50,23 +50,133 @@ the enabled ones to `internal/runtime`, which owns their lifecycle.
 - Every component declares a failure policy. An optional component that fails
   is reported and the agent carries on without it; an essential one that fails,
   or stops before it is asked to, stops the agent.
-- Stopping cancels every component and waits at most ten seconds for them. A
-  component still running after that is named in the log, and the process
-  exits rather than wait any longer.
+- Stopping cancels every component and waits `resources.shutdown_timeout` for
+  them. A component still running after that is named in the log, and the
+  process exits rather than wait any longer.
 - A panic is never recovered. It ends the process, because the goroutine that
   panicked may have left shared state inconsistent; durable state has to
   survive that just as it survives any other crash.
 
-No component is composed yet: collection, local admission, the spool and
-delivery will each arrive as a component of its own.
+One component is composed: the configuration the agent holds, which reads the
+file again whenever the agent is asked to. Collection, local admission, the
+spool and delivery will each arrive as a component of its own.
+
+## Configuration
+
+`-config` names one file, and everything the agent runs on is in it. The file
+is JSON: what the agent refuses has to be what an operator wrote, and JSON has
+one way to write a value, no unit or type it infers, and no dependency of its
+own in a build whose whole module graph is verified.
+
+```json
+{
+  "format": 1,
+  "identity": {"state_directory": "/var/lib/seagull-agent"},
+  "server": {
+    "ingest_url": "https://gateway.example:8443",
+    "renewal_url": "https://control.example:8446",
+    "trust_bundle": "/etc/seagull-agent/platform-ca.pem"
+  }
+}
+```
+
+That is a whole configuration: those settings are the deployment, so the agent
+has no default to offer for them, and every other setting has one it documents
+below. `seagull-agent -config FILE config print` prints what the agent would run
+on, defaults and all, and `config check` reads the file and reports what it
+refuses without starting the agent.
+
+The agent reads the file whole, or refuses it whole:
+
+- a setting it does not have, a setting written twice, a setting written as
+  null, more than one document, or a file above 64 KiB, is refused. Nothing is
+  guessed: what the file leaves out is the default below, and a file written
+  for a build with settings this one does not have is refused rather than half
+  understood;
+- a size is bytes with a binary unit, `8MiB`, and a time carries its unit,
+  `30s`. A bare number is refused, because what it counts is the reader's guess;
+- every setting the file gets wrong is reported at once, each with its name, and
+  the same file is always refused the same way, whether the agent is starting or
+  reading it again;
+- `format` is the shape of the file and not the release of the agent. This build
+  reads format 1. A newer format is refused and names the release that reads it.
+  A release that changes what a setting means raises the format and keeps
+  reading the formats it still supports; a release that only adds a setting
+  leaves the format where it is.
+
+| Setting | Default | What the agent takes |
+| --- | --- | --- |
+| `identity.state_directory` | — | an absolute path to the directory that holds the installation |
+| `identity.key_provider` | `filesystem` | `filesystem` |
+| `server.ingest_url` | — | an `https` URL, with no credentials and nothing to resolve |
+| `server.renewal_url` | — | an `https` URL, for the platform's renewal listener |
+| `server.trust_bundle` | — | an absolute path to PEM certificates |
+| `transport.connect_timeout` | `10s` | `1s` to `1m` |
+| `transport.request_timeout` | `30s` | `5s` to `10m`, never shorter than the connect timeout |
+| `transport.max_batch_bytes` | `4MiB` | `64KiB` to `8MiB`, the recorded platform's request ceiling |
+| `transport.max_response_bytes` | `64KiB` | `4KiB` to `1MiB` |
+| `spool.max_bytes` | `512MiB` | `16MiB` to `64GiB`, and at least four batches |
+| `spool.max_age` | `72h` | `1h` to `720h` |
+| `modules` | `{}` | the collectors this build has, which are none |
+| `resources.memory_limit` | `256MiB` | `64MiB` to `8GiB` |
+| `resources.max_concurrent_collections` | `2` | 1 to 64 |
+| `resources.max_concurrent_uploads` | `1` | 1 to 16 |
+| `resources.shutdown_timeout` | `10s` | `1s` to `5m` |
+| `logging.level` | `info` | `debug`, `info`, `warn` or `error` |
+| `logging.format` | `json` | `json` or `text` |
+| `updates.enabled` | `false` | `false`: this build installs no update |
+
+The defaults are what a supported deployment reaches the recorded platform with.
+Its ingest listener reads at most 8 MiB per request, and admits events up to
+seven days old and inventory up to thirty, so a spool kept far beyond that keeps
+records the platform will not take. `resources.memory_limit` is the target the
+garbage collector works to, not a ceiling the kernel enforces: that one belongs
+to the service the agent is installed as. None of the defaults turns a check off
+or leaves a budget unlimited, and there is no setting that does either.
+
+The file is the agent's instructions, so who may write it is who decides what
+the agent does:
+
+- the file and the directory that holds it belong to the account the agent runs
+  as or to root, and neither their group nor anybody else may write them. They
+  may be read by anyone: the settings are public;
+- `server.trust_bundle` is read under the same rule, and has to hold
+  certificates the agent can parse. Whoever changes it decides which platform
+  the agent trusts, and the agent verifies against that bundle alone;
+- no setting carries a secret. A setting names where credential material is
+  kept, and the agent's own keys live in the installation, so the file can be
+  read, copied into a ticket or written by configuration management without
+  handing anything over.
+
+A running agent reads the file again when it receives SIGHUP. It reads and
+validates the whole candidate before anything changes:
+
+- a file it refuses leaves the agent on the configuration it already read,
+  logged as `configuration_not_reloaded` with the reason and a `recovery`;
+- a file it accepts replaces that configuration whole, logged as
+  `configuration_reloaded`, so nothing ever runs on half of each;
+- what the agent settled as it started is refused as a change:
+  `identity.state_directory`, `identity.key_provider`, `logging.format` and
+  `resources.shutdown_timeout` take stopping the agent and starting it again.
+
+What a setting does today follows what the agent has. `identity`, `logging` and
+`resources.memory_limit` and `resources.shutdown_timeout` are in force: they
+decide where the installation is opened, what the log says and what the agent
+spends. `server`, `transport`, `spool` and the concurrency budgets are validated
+here and take effect as the components that spend them arrive, so a deployment
+is configured once rather than as each one lands. `modules` and
+`updates.enabled` are the settings this build refuses outright: an agent that
+accepted them would be promising collection it cannot do and updates it cannot
+install.
 
 ## The installation
 
-An installation is one agent installed on one machine, and `-state` names the
-directory that holds it. The first start in a new or empty directory draws its
-`installation_id`, 122 random bits written as a UUID; every later start reads
-the same one. It is never derived from the hostname, an address, a MAC or a
-machine identifier, which stay observations about the machine.
+An installation is one agent installed on one machine, and
+`identity.state_directory` names the directory that holds it. The first start in
+a new or empty directory draws its `installation_id`, 122 random bits written as
+a UUID; every later start reads the same one. It is never derived from the
+hostname, an address, a MAC or a machine identifier, which stay observations
+about the machine.
 
 The installation is not the agent the platform knows. The platform issues a
 certificate for an `agent_id` an operator registered, and once enrollment
@@ -99,7 +209,7 @@ something but no `installation.json`, is restored from a backup of this
 installation or replaced; a state written by a newer agent is read by that
 release or replaced; a state others can reach is made private again.
 
-`seagull-agent -state DIR installation replace` is that replacement, made on
+`seagull-agent -config FILE installation replace` is that replacement, made on
 purpose while the agent is stopped. It sets everything the state directory held
 aside under `replaced/`, in a directory named after the moment of the
 replacement: `installation.json`, the keys and anything else, even when the
@@ -210,6 +320,10 @@ conventions:
   takes its identity from an address, an interface or a server's answer;
 - `internal/pki` imports no HTTP, gRPC, RPC or TLS package: a key signs where it
   is held, and transport owns requests, connections and TLS;
+- `internal/config` imports neither the installation, nor the keys, nor an HTTP,
+  gRPC, RPC or TLS package, directly or through another package: the
+  configuration is read before any of them exists, and each component opens what
+  its own settings name;
 - no collector reaches `internal/pki`, directly or through another package, so
   collectors never hold the keys the agent proves its identity with;
 - no `.proto` file, generated binding or descriptor built at run time defines a
