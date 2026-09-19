@@ -213,6 +213,53 @@ No collector exists yet, so the composition root composes no collection: the
 first one arrives with the authentication collector, and until then the
 configuration refuses every module named in `modules`.
 
+## Privileges
+
+The agent is one process running as one account, and everything it does happens
+with what that account may do. Modules run inside it, so a module may do
+whatever the agent may: the process is the privilege boundary and a goroutine
+is not one.
+
+| What the agent does | What it needs |
+| --- | --- |
+| Keep its installation and its keys | a directory of its own, owned by the account it runs as |
+| Read its configuration and its trust bundle | files that account, or root, writes and it reads |
+| Reach the platform | an outgoing TLS connection, which needs no privilege |
+| Collect | nothing yet: this build has no collector |
+
+Nothing on that list needs the superuser, a Linux capability, or a helper of its
+own. A collector that needs more — the authentication log will be the first —
+names it there, and the packaging grants that much: a group where a group is
+enough, and a capability only where it is not.
+
+At start the agent reports what it actually may do as `agent_privileges`: the
+account, the groups it belongs to, the capabilities it holds and whether
+`no_new_privs` is set. A capability counts as held when it is permitted or
+effective, since a permitted one can be raised into use. When the agent holds
+anything the table above does not need, that line is a warning that names it: a
+claim about privileges is about the process that is running, not about the one
+the packaging intended.
+
+The agent does not drop privileges itself. Go runs it on several threads and
+Linux keeps a capability set for each of them, so a program that drops what it
+holds part way through its life promises it for the thread that made the call
+and no other. Bounding the process belongs to the service manager, before the
+agent starts, and the unit that does it arrives with the packaging.
+
+It refuses to start as more than one account. A real and an effective identity
+that differ mean it was started through a setuid or setgid program, and every
+check it makes about its state, its keys and its settings compares against the
+account it runs as, so an agent that cannot say which account that is cannot
+make them.
+
+There is no privileged helper, because nothing the agent does needs a privilege
+its service account cannot be given. One would take more than a second process:
+fixed typed operations rather than a way to run commands, callers authenticated
+by what the kernel says about them rather than by what they claim, bounded
+messages, targets confined to the files the operation is for, and a lifecycle
+and failure behavior of its own. None of that exists, and nothing in the agent
+reaches for it.
+
 ## The installation
 
 An installation is one agent installed on one machine, and
