@@ -854,3 +854,55 @@ func equal(a, b identity.Enrollment) bool {
 		a.Certificate.FingerprintSHA256 == b.Certificate.FingerprintSHA256 &&
 		a.Certificate.NotBefore.Equal(b.Certificate.NotBefore) && a.Certificate.NotAfter.Equal(b.Certificate.NotAfter)
 }
+
+// What a refusal may carry of the state it read: enough to name what is
+// damaged, and never enough for the file to decide how long a log line is.
+const maxRefusalBytes = 4 << 10
+
+func TestNothingTheStateHoldsDecidesHowLongARefusalIs(t *testing.T) {
+	marker := strings.Repeat("written", 36) + "-marker-tail"
+	for name, content := range map[string]string{
+		"a setting this agent does not have":    strings.Replace(enrolledState, `"format": 1,`, `"format": 1, "`+marker+`": true,`, 1),
+		"an identifier that is not drawn":       strings.Replace(enrolledState, `5f0b6a1e-3c2d-4b8f-9a7e-1d2c3b4a5f6e`, marker, 1),
+		"an agent the platform cannot name":     strings.Replace(enrolledState, `"agent_id": "web-01"`, `"agent_id": "`+marker+`"`, 1),
+		"a key identifier that is not a digest": strings.Replace(enrolledState, firstKey, marker, 1),
+		"a certificate for another agent":       strings.Replace(enrolledState, `"subject": "web-01"`, `"subject": "`+marker+`"`, 1),
+		"a serial that is not one":              strings.Replace(enrolledState, `"0a1b2c3d"`, `"`+marker+`"`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := stateDirectory(t)
+			writeState(t, directory, content)
+			_, err := identity.Open(directory)
+			if !errors.Is(err, identity.ErrDamaged) {
+				t.Fatalf("open returned %v", err)
+			}
+			bounded(t, err)
+		})
+	}
+}
+
+func TestNothingTheStateDirectoryHoldsDecidesHowLongARefusalIs(t *testing.T) {
+	directory := stateDirectory(t)
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatalf("create %s: %v", directory, err)
+	}
+	held := filepath.Join(directory, strings.Repeat("written", 34)+"-marker-tail")
+	if err := os.WriteFile(held, []byte("whatever it holds"), 0o600); err != nil {
+		t.Fatalf("write %s: %v", held, err)
+	}
+	_, err := identity.Open(directory)
+	if !errors.Is(err, identity.ErrDamaged) {
+		t.Fatalf("open returned %v", err)
+	}
+	bounded(t, err)
+}
+
+func bounded(t *testing.T, err error) {
+	t.Helper()
+	if strings.Contains(err.Error(), "-marker-tail") {
+		t.Errorf("the refusal carries what it read:\n%v", err)
+	}
+	if len(err.Error()) > maxRefusalBytes {
+		t.Errorf("the refusal is %d bytes long, and what it read decides how long it is:\n%v", len(err.Error()), err)
+	}
+}

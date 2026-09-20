@@ -437,3 +437,46 @@ func exposes(text string, key []byte) bool {
 	}
 	return false
 }
+
+// What a refusal may carry of a key file: enough to say what is damaged about
+// it, never the key and never enough for the file to fill the agent's log.
+const maxRefusalBytes = 4 << 10
+
+func TestNothingAKeyFileHoldsDecidesHowLongARefusalIs(t *testing.T) {
+	marker := strings.Repeat("written", 36) + "-marker-tail"
+	directory := keysDirectory(t)
+	keys := openKeys(t, directory)
+	created := create(t, keys)
+	for name, content := range map[string][]byte{
+		"a block that is not a key": pem.EncodeToMemory(&pem.Block{Type: marker, Bytes: []byte("not a key")}),
+		"a block that holds no key": pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte(marker)}),
+		"something other than PEM":  []byte(marker),
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(directory, created.ID()+".pem")
+			if err := os.WriteFile(path, content, 0o600); err != nil {
+				t.Fatalf("damage the key: %v", err)
+			}
+			_, err := keys.Open(created.ID())
+			if !errors.Is(err, pki.ErrKeyDamaged) {
+				t.Fatalf("open returned %v", err)
+			}
+			bounded(t, err)
+		})
+	}
+	if _, err := keys.Open(marker); err == nil {
+		t.Fatal("a key identifier that is not one was opened")
+	} else {
+		bounded(t, err)
+	}
+}
+
+func bounded(t *testing.T, err error) {
+	t.Helper()
+	if strings.Contains(err.Error(), "-marker-tail") {
+		t.Errorf("the refusal carries what it read:\n%v", err)
+	}
+	if len(err.Error()) > maxRefusalBytes {
+		t.Errorf("the refusal is %d bytes long, and what it read decides how long it is:\n%v", len(err.Error()), err)
+	}
+}

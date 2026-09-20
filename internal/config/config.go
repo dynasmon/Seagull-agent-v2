@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
+	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 )
 
 const Format = 1
@@ -40,7 +41,6 @@ const (
 	maxPathBytes    = 4 << 10
 	batchesSpooled  = 4
 	maxGroups       = 8
-	maxShownBytes   = 48
 )
 
 var (
@@ -383,9 +383,9 @@ func (m Modules) validate() []error {
 	for _, name := range slices.Sorted(maps.Keys(m)) {
 		switch {
 		case len(collectors) == 0:
-			found = append(found, fmt.Errorf("modules.%s is configured, and this build has no collector to configure", name))
+			found = append(found, fmt.Errorf("modules.%s is configured, and this build has no collector to configure", secrets.Bounded(name)))
 		case !slices.Contains(collectors, name):
-			found = append(found, fmt.Errorf("modules.%s is configured, and this build collects with %s", name, strings.Join(collectors, ", ")))
+			found = append(found, fmt.Errorf("modules.%s is configured, and this build collects with %s", secrets.Bounded(name), strings.Join(collectors, ", ")))
 		}
 	}
 	return found
@@ -425,7 +425,7 @@ func chosen(name, value string, accepted []string, does string) error {
 	if value == "" {
 		return fmt.Errorf("%s is not set, and this agent %s %s", name, does, strings.Join(accepted, ", "))
 	}
-	return fmt.Errorf("%s is %q, and this agent %s %s", name, value, does, strings.Join(accepted, ", "))
+	return fmt.Errorf("%s is %s, and this agent %s %s", name, secrets.Shown(value), does, strings.Join(accepted, ", "))
 }
 
 func size(name string, value, low, high Size) error {
@@ -456,7 +456,7 @@ func absolute(name, path, what, example string) error {
 	case len(path) > maxPathBytes:
 		return fmt.Errorf("%s is longer than %d bytes", name, maxPathBytes)
 	case !filepath.IsAbs(path) || filepath.Clean(path) != path:
-		return fmt.Errorf("%s is %q, and it is an absolute path with nothing to resolve, such as %q", name, path, example)
+		return fmt.Errorf("%s is %s, and it is an absolute path with nothing to resolve, such as %q", name, secrets.Shown(path), example)
 	case path == string(filepath.Separator):
 		return fmt.Errorf("%s is %q, and it names %s, never the root of the filesystem", name, path, what)
 	}
@@ -469,23 +469,24 @@ func bundle(name, path string) error {
 		return err
 	}
 	described, err := os.Lstat(path)
+	named := secrets.Bounded(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return fmt.Errorf("%s names %s, and there is no such file", name, path)
+		return fmt.Errorf("%s names %s, and there is no such file", name, named)
 	case err != nil:
-		return fmt.Errorf("%s names %s, which the agent cannot inspect: %v", name, path, err)
+		return fmt.Errorf("%s names %s, which the agent cannot inspect: %s", name, named, secrets.Bounded(err.Error()))
 	case !described.Mode().IsRegular():
-		return fmt.Errorf("%s names %s, which is not a regular file", name, path)
+		return fmt.Errorf("%s names %s, which is not a regular file", name, named)
 	}
 	if err := files.Trusted(described); err != nil {
-		return fmt.Errorf("%s names %s, and it %v: whoever changes it decides which platform the agent trusts", name, path, err)
+		return fmt.Errorf("%s names %s, and it %v: whoever changes it decides which platform the agent trusts", name, named, err)
 	}
 	content, err := contents(path, described, maxBundleBytes)
 	if err != nil {
-		return fmt.Errorf("%s names %s, which %v", name, path, err)
+		return fmt.Errorf("%s names %s, which %v", name, named, err)
 	}
 	if err := authorities(content); err != nil {
-		return fmt.Errorf("%s names %s, which %v", name, path, err)
+		return fmt.Errorf("%s names %s, which %v", name, named, err)
 	}
 	return nil
 }
@@ -501,10 +502,10 @@ func authorities(content []byte) error {
 		case block == nil:
 			return errors.New("holds something that is not PEM")
 		case block.Type != "CERTIFICATE":
-			return fmt.Errorf("holds a %q block, and a trust bundle holds certificates", block.Type)
+			return fmt.Errorf("holds a %s block, and a trust bundle holds certificates", secrets.Shown(block.Type))
 		}
 		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
-			return fmt.Errorf("holds a block that is not a certificate: %v", err)
+			return fmt.Errorf("holds a block that is not a certificate: %s", secrets.Bounded(err.Error()))
 		}
 		rest = remainder
 	}
@@ -524,21 +525,25 @@ func address(name, raw string) (string, error) {
 	reached, err := url.Parse(raw)
 	switch {
 	case err != nil:
-		return "", fmt.Errorf("%s is %q, which is not a URL: %v", name, raw, err)
+		var unparsed *url.Error
+		if errors.As(err, &unparsed) {
+			err = unparsed.Err
+		}
+		return "", fmt.Errorf("%s is %s, which is not a URL: %s", name, secrets.Address(raw), secrets.Bounded(err.Error()))
 	case reached.Scheme != "https":
-		return "", fmt.Errorf("%s is %q, and the agent speaks to the platform over TLS alone", name, raw)
+		return "", fmt.Errorf("%s is %s, and the agent speaks to the platform over TLS alone", name, secrets.Address(raw))
 	case reached.Host == "" || reached.Hostname() == "":
-		return "", fmt.Errorf("%s is %q, and it names no host to reach", name, raw)
+		return "", fmt.Errorf("%s is %s, and it names no host to reach", name, secrets.Address(raw))
 	case reached.User != nil:
 		return "", fmt.Errorf("%s carries credentials, and the agent authenticates with the key of its installation", name)
 	case reached.RawQuery != "" || reached.ForceQuery || reached.Fragment != "":
-		return "", fmt.Errorf("%s is %q, and the agent adds what it asks for to the path it is given", name, raw)
+		return "", fmt.Errorf("%s is %s, and the agent adds what it asks for to the path it is given", name, secrets.Address(raw))
 	}
 	reached.Path = strings.TrimSuffix(reached.Path, "/")
 	segments := strings.Split(strings.TrimPrefix(reached.Path, "/"), "/")
 	unresolved := func(segment string) bool { return segment == "" || segment == "." || segment == ".." }
 	if reached.Path != "" && (!strings.HasPrefix(reached.Path, "/") || slices.ContainsFunc(segments, unresolved)) {
-		return "", fmt.Errorf("%s is %q, and the path it names has nothing to resolve", name, raw)
+		return "", fmt.Errorf("%s is %s, and the path it names has nothing to resolve", name, secrets.Address(raw))
 	}
 	return reached.String(), nil
 }
@@ -547,7 +552,7 @@ func setting(path string) string {
 	if path == "" {
 		return "the configuration"
 	}
-	return path
+	return secrets.Bounded(path)
 }
 
 func join(path, name string) string {
@@ -563,9 +568,9 @@ func explain(err error) string {
 		return fmt.Sprintf("%s is %s, and it takes %s", setting(mistyped.Field), shown(mistyped.Value), expected(mistyped.Type))
 	}
 	if name, unknown := strings.CutPrefix(err.Error(), "json: unknown field "); unknown {
-		return fmt.Sprintf("%s is not a setting this agent has", name)
+		return fmt.Sprintf("%s is not a setting this agent has", secrets.Bounded(name))
 	}
-	return fmt.Sprintf("it is not a configuration: %v", err)
+	return fmt.Sprintf("it is not a configuration: %s", secrets.Bounded(err.Error()))
 }
 
 func shown(value string) string {
@@ -581,7 +586,7 @@ func shown(value string) string {
 	case "array":
 		return "a list"
 	}
-	return value
+	return secrets.Bounded(value)
 }
 
 func expected(held reflect.Type) string {
@@ -680,9 +685,5 @@ func (d *Duration) UnmarshalJSON(content []byte) error {
 // The decoder names the setting a value belongs to only when the type it
 // refuses is one it knows, so a size and a time report themselves as one.
 func mistyped[T any](content []byte) error {
-	value := string(content)
-	if len(value) > maxShownBytes {
-		value = value[:maxShownBytes] + "..."
-	}
-	return &json.UnmarshalTypeError{Value: value, Type: reflect.TypeFor[T]()}
+	return &json.UnmarshalTypeError{Value: string(content), Type: reflect.TypeFor[T]()}
 }
