@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
+	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 )
 
 const (
@@ -143,8 +144,8 @@ func (i *Installation) Activate(next Enrollment) error {
 	case current == nil && next.Generation != 1:
 		return fmt.Errorf("%w: the first credential generation is 1, not %d", ErrRefused, next.Generation)
 	case current != nil && next.AgentID != current.AgentID:
-		return fmt.Errorf("%w: the installation is enrolled as %q, and enrolling it as %q takes a replacement installation",
-			ErrRefused, current.AgentID, next.AgentID)
+		return fmt.Errorf("%w: the installation is enrolled as %s, and enrolling it as %s takes a replacement installation",
+			ErrRefused, secrets.Shown(current.AgentID), secrets.Shown(next.AgentID))
 	case current != nil && next.Generation != current.Generation+1:
 		return fmt.Errorf("%w: generation %d is active, so the next one is %d, not %d",
 			ErrRefused, current.Generation, current.Generation+1, next.Generation)
@@ -283,7 +284,7 @@ func (i *Installation) read() (state, bool, error) {
 		if errors.As(err, new(newerFormat)) {
 			kind = ErrNewer
 		}
-		return state{}, false, fmt.Errorf("%w: %s: %v", kind, path, err)
+		return state{}, false, fmt.Errorf("%w: %s: %s", kind, path, secrets.Bounded(err.Error()))
 	}
 	return decoded, true, nil
 }
@@ -294,7 +295,7 @@ func (i *Installation) start() error {
 		return err
 	}
 	if len(names) > 0 {
-		return fmt.Errorf("%w: %s holds %s but no %s", ErrDamaged, i.directory, names[0], stateFile)
+		return fmt.Errorf("%w: %s holds %s but no %s", ErrDamaged, i.directory, secrets.Shown(names[0]), stateFile)
 	}
 	return i.create("")
 }
@@ -431,7 +432,7 @@ func decode(content []byte) (state, error) {
 		Format int `json:"format"`
 	}
 	if err := json.Unmarshal(content, &declared); err != nil {
-		return state{}, fmt.Errorf("it is not an installation state: %v", err)
+		return state{}, fmt.Errorf("it is not an installation state: %s", secrets.Bounded(err.Error()))
 	}
 	if declared.Format > format {
 		return state{}, newerFormat(declared.Format)
@@ -440,7 +441,7 @@ func decode(content []byte) (state, error) {
 	decoder.DisallowUnknownFields()
 	var decoded state
 	if err := decoder.Decode(&decoded); err != nil {
-		return state{}, fmt.Errorf("it is not an installation state: %v", err)
+		return state{}, fmt.Errorf("it is not an installation state: %s", secrets.Bounded(err.Error()))
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return state{}, errors.New("it holds more than one document")
@@ -453,11 +454,11 @@ func (s state) validate() error {
 	case s.Format != format:
 		return fmt.Errorf("format %d is not one this agent writes", s.Format)
 	case !installationIDPattern.MatchString(s.InstallationID):
-		return fmt.Errorf("installation_id %q is not a random UUID", s.InstallationID)
+		return fmt.Errorf("installation_id %s is not a random UUID", secrets.Shown(s.InstallationID))
 	case s.CreatedAt.IsZero():
 		return errors.New("created_at is missing")
 	case s.Replaces != "" && !installationIDPattern.MatchString(s.Replaces):
-		return fmt.Errorf("replaces %q is not a random UUID", s.Replaces)
+		return fmt.Errorf("replaces %s is not a random UUID", secrets.Shown(s.Replaces))
 	case s.Replaces == s.InstallationID:
 		return errors.New("the installation replaces itself")
 	case s.Enrollment != nil:
@@ -469,17 +470,17 @@ func (s state) validate() error {
 func (e Enrollment) validate() error {
 	switch {
 	case !agentIDPattern.MatchString(e.AgentID):
-		return fmt.Errorf("agent_id %q is not an identifier the platform issues certificates for", e.AgentID)
+		return fmt.Errorf("agent_id %s is not an identifier the platform issues certificates for", secrets.Shown(e.AgentID))
 	case e.Generation == 0:
 		return errors.New("generation 0 does not exist: generations count from 1")
 	case !digestPattern.MatchString(e.KeyID):
-		return fmt.Errorf("key_id %q is not a SHA-256 digest in lower-case hexadecimal", e.KeyID)
+		return fmt.Errorf("key_id %s is not a SHA-256 digest in lower-case hexadecimal", secrets.Shown(e.KeyID))
 	case e.Certificate.Subject != e.AgentID:
-		return fmt.Errorf("the certificate names %q, not agent %q", e.Certificate.Subject, e.AgentID)
+		return fmt.Errorf("the certificate names %s, not agent %s", secrets.Shown(e.Certificate.Subject), secrets.Shown(e.AgentID))
 	case !serialPattern.MatchString(e.Certificate.Serial):
-		return fmt.Errorf("the certificate serial %q is not whole bytes of lower-case hexadecimal", e.Certificate.Serial)
+		return fmt.Errorf("the certificate serial %s is not whole bytes of lower-case hexadecimal", secrets.Shown(e.Certificate.Serial))
 	case !digestPattern.MatchString(e.Certificate.FingerprintSHA256):
-		return fmt.Errorf("the certificate fingerprint %q is not a SHA-256 digest in lower-case hexadecimal", e.Certificate.FingerprintSHA256)
+		return fmt.Errorf("the certificate fingerprint %s is not a SHA-256 digest in lower-case hexadecimal", secrets.Shown(e.Certificate.FingerprintSHA256))
 	case e.Certificate.NotBefore.IsZero() || !e.Certificate.NotAfter.After(e.Certificate.NotBefore):
 		return errors.New("the certificate stops being valid before it starts")
 	}

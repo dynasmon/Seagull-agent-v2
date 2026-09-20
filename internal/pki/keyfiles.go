@@ -15,6 +15,7 @@ import (
 	"regexp"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
+	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 )
 
 const (
@@ -109,7 +110,7 @@ func (k *KeyFiles) Create() (Key, error) {
 
 func (k *KeyFiles) Open(id string) (Key, error) {
 	if !keyIDPattern.MatchString(id) {
-		return nil, fmt.Errorf("%q is not a key identifier", id)
+		return nil, fmt.Errorf("%s is not a key identifier", secrets.Shown(id))
 	}
 	name := id + keySuffix
 	path := k.path(name)
@@ -157,13 +158,13 @@ func decode(content []byte, id string) (*ecdsa.PrivateKey, error) {
 	case block == nil:
 		return nil, errors.New("holds no PEM block")
 	case block.Type != keyBlock || len(block.Headers) > 0:
-		return nil, fmt.Errorf("holds a %q block, not an unencrypted PKCS #8 key", block.Type)
+		return nil, fmt.Errorf("holds a %s block, not an unencrypted PKCS #8 key", secrets.Shown(block.Type))
 	case len(rest) > 0:
 		return nil, errors.New("holds more than the key")
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("holds no PKCS #8 key: %v", err)
+		return nil, fmt.Errorf("holds no PKCS #8 key: %s", secrets.Bounded(err.Error()))
 	}
 	decoded, ok := parsed.(*ecdsa.PrivateKey)
 	if !ok || decoded.Curve != elliptic.P256() {

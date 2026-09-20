@@ -454,3 +454,58 @@ func platform(t *testing.T, directory string) string {
 	}
 	return write(t, directory, "platform-ca.pem", string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signed})))
 }
+
+// What a refusal may carry of the file it read: it names every setting it
+// refuses, and nothing written in the file decides how long a log line is.
+const maxRefusalBytes = 4 << 10
+
+func TestNothingTheConfigurationHoldsDecidesHowLongARefusalIs(t *testing.T) {
+	const password = "p4ssw0rd-token"
+	marker := strings.Repeat("written", 512) + "-marker-tail"
+	for name, describe := range map[string]func(t *testing.T, directory string) string{
+		"a setting this agent does not have": func(*testing.T, string) string {
+			return `{"format": 1, "` + marker + `": true}`
+		},
+		"a setting written twice": func(*testing.T, string) string {
+			return `{"format": 1, "logging": {"` + marker + `": 1, "` + marker + `": 2}}`
+		},
+		"a size that is not one": func(*testing.T, string) string {
+			return `{"format": 1, "spool": {"max_bytes": "` + marker + `"}}`
+		},
+		"a level it does not log at": func(*testing.T, string) string {
+			return `{"format": 1, "logging": {"level": "` + marker + `"}}`
+		},
+		"a state directory to resolve": func(*testing.T, string) string {
+			return `{"format": 1, "identity": {"state_directory": "` + marker + `"}}`
+		},
+		"a module this build does not have": func(*testing.T, string) string {
+			return `{"format": 1, "modules": {"` + marker + `": {"enabled": true}}}`
+		},
+		"a listener that is not a URL": func(t *testing.T, directory string) string {
+			return fmt.Sprintf(`{"format": 1, "server": {"ingest_url": "ht tp://agent:%s@gateway.example:8443", "renewal_url": "https://control.example:8446", "trust_bundle": %q}}`,
+				password, platform(t, directory))
+		},
+		"a listener that carries a credential": func(t *testing.T, directory string) string {
+			return fmt.Sprintf(`{"format": 1, "server": {"ingest_url": "https://agent:%s@gateway.example:8443", "renewal_url": "https://control.example:8446", "trust_bundle": %q}}`,
+				password, platform(t, directory))
+		},
+		"a trust bundle that holds something else": func(t *testing.T, directory string) string {
+			bundle := write(t, directory, "platform-ca.pem", string(pem.EncodeToMemory(&pem.Block{Type: marker, Bytes: []byte("not a certificate")})))
+			return fmt.Sprintf(`{"format": 1, "server": {"ingest_url": "https://gateway.example:8443", "renewal_url": "https://control.example:8446", "trust_bundle": %q}}`, bundle)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := trusted(t)
+			_, err := config.Load(written(t, directory, describe(t, directory)))
+			if !errors.Is(err, config.ErrInvalid) {
+				t.Fatalf("the agent ran on %s: %v", name, err)
+			}
+			if strings.Contains(err.Error(), "-marker-tail") || strings.Contains(err.Error(), password) {
+				t.Errorf("the refusal carries what the file held:\n%v", err)
+			}
+			if len(err.Error()) > maxRefusalBytes {
+				t.Errorf("the refusal is %d bytes long, and the file it read decides how long it is:\n%v", len(err.Error()), err)
+			}
+		})
+	}
+}
