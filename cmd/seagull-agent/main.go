@@ -21,6 +21,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/pki"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
 )
@@ -78,15 +79,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func serve(ctx context.Context, stderr io.Writer, path string, components ...agentruntime.Component) int {
+	granted, err := privileges.Held()
+	if err != nil {
+		return unstarted(stderr, path, err)
+	}
 	settings, err := config.Load(path)
 	if err != nil {
-		slog.New(slog.NewJSONHandler(stderr, nil)).Error("agent_not_started",
-			slog.Any("error", err), slog.String("recovery", recovery(path, "", err)))
-		return 1
+		return unstarted(stderr, path, err)
 	}
 	level := new(slog.LevelVar)
 	logger := logging(stderr, settings, level)
 	apply(settings, level)
+	inventory(logger, granted)
 	state := settings.Identity.StateDirectory
 	held := configuration{logger: logger, path: path, active: config.Activate(settings), level: level}
 
@@ -134,6 +138,35 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	}
 	logger.Info("agent_stopped")
 	return 0
+}
+
+func unstarted(stderr io.Writer, path string, err error) int {
+	slog.New(slog.NewJSONHandler(stderr, nil)).Error("agent_not_started",
+		slog.Any("error", err), slog.String("recovery", recovery(path, "", err)))
+	return 1
+}
+
+// What the agent needs of the machine beyond the account it runs as: nothing.
+// Its installation, its keys and its settings are files that account reaches,
+// and the platform is a network service like any other. A collector that needs
+// more names it here, and every module shares whatever the process holds.
+func needed() []string { return nil }
+
+func inventory(logger *slog.Logger, granted privileges.Privileges) {
+	reported := []any{
+		slog.Int("user", granted.User),
+		slog.Int("group", granted.Group),
+		slog.Any("groups", granted.Groups),
+		slog.Any("capabilities", granted.Capabilities),
+		slog.Bool("no_new_privs", granted.NoNewPrivs),
+	}
+	beyond := granted.Beyond(needed())
+	if len(beyond) == 0 {
+		logger.Info("agent_privileges", reported...)
+		return
+	}
+	logger.Warn("agent_privileges", append(reported, slog.Any("beyond", beyond),
+		slog.String("recovery", "run the agent as an account of its own, in the groups the files it reads belong to: nothing this build does needs more"))...)
 }
 
 func logging(stderr io.Writer, settings config.Config, level *slog.LevelVar) *slog.Logger {
@@ -253,8 +286,6 @@ func replace(path string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// Every setting the agent refuses is a line of its own, and the last line is
-// what an operator does about them.
 func refuse(path, state string, err error, stderr io.Writer) int {
 	for line := range strings.SplitSeq(err.Error(), "\n") {
 		fmt.Fprintf(stderr, "seagull-agent: %s\n", line)
@@ -278,6 +309,8 @@ func recovery(path, state string, err error) string {
 		return "let the account the agent runs as, and root, change " + path + " and the directory that holds it, and nobody else"
 	case errors.Is(err, config.ErrFixed):
 		return "stop the agent and start it again for what it settles as it starts to change"
+	case errors.Is(err, privileges.ErrInconsistent):
+		return "start the agent as the account it runs as: its packaging never starts it through a setuid or setgid program"
 	case errors.Is(err, identity.ErrLocked):
 		return "stop the agent that holds " + state + ": two agents never share an installation"
 	case errors.Is(err, identity.ErrInsecure):

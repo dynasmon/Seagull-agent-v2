@@ -31,6 +31,7 @@ import (
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
 )
@@ -163,6 +164,59 @@ func TestKeysSurviveAnActivationInterruptedBeforeItsStateWasWritten(t *testing.T
 	}
 	if filepath.Base(active) != enrolled.KeyID+".pem" {
 		t.Fatalf("the active generation names key %s, it was created as %s", enrolled.KeyID, filepath.Base(active))
+	}
+}
+
+func TestTheAgentSaysWhatItMayDoAsItStarts(t *testing.T) {
+	logs := serveStopped(t, configured(t, stateDirectory(t), nil))
+	reported, found := logged(t, logs, "agent_privileges")
+	if !found {
+		t.Fatalf("the agent said nothing about what it may do:\n%s", logs)
+	}
+	if reported["user"] != float64(os.Geteuid()) || reported["group"] != float64(os.Getegid()) {
+		t.Errorf("the agent runs as uid %d in gid %d, and reported %v", os.Geteuid(), os.Getegid(), reported)
+	}
+	if _, said := reported["no_new_privs"]; !said || reported["groups"] == nil {
+		t.Errorf("the agent left out part of what it may do: %v", reported)
+	}
+	beyond, _ := reported["beyond"].([]any)
+	if os.Geteuid() == 0 {
+		if reported["level"] != "WARN" || !slices.Contains(beyond, "superuser") {
+			t.Fatalf("an agent running as the superuser reported %v", reported)
+		}
+		return
+	}
+	if reported["level"] != "INFO" || len(beyond) != 0 {
+		t.Fatalf("an agent running as an account of its own reported %v", reported)
+	}
+}
+
+func TestAnAgentHoldingMoreThanAnythingItDoesNeedsSaysSo(t *testing.T) {
+	var logs bytes.Buffer
+	inventory(slog.New(slog.NewJSONHandler(&logs, nil)), privileges.Privileges{
+		User:         0,
+		Group:        0,
+		Groups:       []int{0},
+		Capabilities: []string{"CAP_DAC_READ_SEARCH", "CAP_SYS_ADMIN"},
+	})
+	reported, found := logged(t, logs.String(), "agent_privileges")
+	if !found || reported["level"] != "WARN" {
+		t.Fatalf("an agent running as the superuser reported %v", reported)
+	}
+	beyond, _ := reported["beyond"].([]any)
+	if !slices.Equal(beyond, []any{"superuser", "CAP_DAC_READ_SEARCH", "CAP_SYS_ADMIN"}) {
+		t.Errorf("the agent holds %v beyond what it needs", beyond)
+	}
+	if hint, _ := reported["recovery"].(string); !strings.Contains(hint, "account of its own") {
+		t.Errorf("the agent suggested %q", hint)
+	}
+}
+
+func TestAnAgentThatCannotSayWhichAccountItRunsAsIsToldWhatToDo(t *testing.T) {
+	path := configured(t, stateDirectory(t), nil)
+	started := fmt.Errorf("%w: uid 0 started it and it runs as uid 987", privileges.ErrInconsistent)
+	if hint := recovery(path, "", started); !strings.Contains(hint, "setuid") {
+		t.Fatalf("the agent suggested %q", hint)
 	}
 }
 
