@@ -21,6 +21,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/pki"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dumps"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
@@ -79,6 +80,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func serve(ctx context.Context, stderr io.Writer, path string, components ...agentruntime.Component) int {
+	withheld := dumps.Withhold()
 	granted, err := privileges.Held()
 	if err != nil {
 		return unstarted(stderr, path, err)
@@ -91,6 +93,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	logger := logging(stderr, settings, level)
 	apply(settings, level)
 	inventory(logger, granted)
+	memory(logger, withheld)
 	state := settings.Identity.StateDirectory
 	held := configuration{logger: logger, path: path, active: config.Activate(settings), level: level}
 
@@ -167,6 +170,18 @@ func inventory(logger *slog.Logger, granted privileges.Privileges) {
 	}
 	logger.Warn("agent_privileges", append(reported, slog.Any("beyond", beyond),
 		slog.String("recovery", "run the agent as an account of its own, in the groups the files it reads belong to: nothing this build does needs more"))...)
+}
+
+// What the kernel would hand whoever asks of what the agent holds in memory.
+// Its key lives there, and a core dump is a copy of that key in a file the
+// agent neither writes nor protects, so it starts by asking for neither.
+func memory(logger *slog.Logger, withheld error) {
+	if withheld != nil {
+		logger.Warn("agent_core_dumps", slog.Bool("withheld", false), slog.Any("error", withheld),
+			slog.String("recovery", "let the service that starts the agent leave the kernel nothing to write, with LimitCORE=0 or what the platform calls it"))
+		return
+	}
+	logger.Info("agent_core_dumps", slog.Bool("withheld", true))
 }
 
 func logging(stderr io.Writer, settings config.Config, level *slog.LevelVar) *slog.Logger {

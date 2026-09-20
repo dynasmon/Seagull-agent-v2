@@ -191,6 +191,38 @@ func TestTheAgentSaysWhatItMayDoAsItStarts(t *testing.T) {
 	}
 }
 
+func TestTheAgentWithholdsWhatItHoldsInMemoryAsItStarts(t *testing.T) {
+	logs := serveStopped(t, configured(t, stateDirectory(t), nil))
+	reported, found := logged(t, logs, "agent_core_dumps")
+	if !found {
+		t.Fatalf("the agent said nothing about what the kernel does with its memory:\n%s", logs)
+	}
+	if runtime.GOOS != "linux" {
+		if reported["withheld"] != false || reported["level"] != "WARN" {
+			t.Fatalf("an agent on %s reported %v", runtime.GOOS, reported)
+		}
+		return
+	}
+	if reported["withheld"] != true || reported["level"] != "INFO" {
+		t.Fatalf("the agent reported %v", reported)
+	}
+	if _, said := logged(t, logs, "agent_privileges"); !said {
+		t.Error("an agent that withheld its memory no longer says what it may do")
+	}
+}
+
+func TestAnAgentTheKernelStillDumpsSaysWhatToDo(t *testing.T) {
+	var logs bytes.Buffer
+	memory(slog.New(slog.NewJSONHandler(&logs, nil)), errors.New("the kernel writes a core dump of the agent of up to 1024 bytes"))
+	reported, found := logged(t, logs.String(), "agent_core_dumps")
+	if !found || reported["level"] != "WARN" || reported["withheld"] != false {
+		t.Fatalf("an agent the kernel still dumps reported %v", reported)
+	}
+	if hint, _ := reported["recovery"].(string); !strings.Contains(hint, "LimitCORE=0") {
+		t.Errorf("the agent suggested %q", hint)
+	}
+}
+
 func TestAnAgentHoldingMoreThanAnythingItDoesNeedsSaysSo(t *testing.T) {
 	var logs bytes.Buffer
 	inventory(slog.New(slog.NewJSONHandler(&logs, nil)), privileges.Privileges{
