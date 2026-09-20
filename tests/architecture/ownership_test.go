@@ -81,6 +81,12 @@ var dependencyRules = []dependencyRule{
 		reason:     "collectors observe the endpoint and never hold the keys the agent proves its identity with",
 	},
 	{
+		packages:   "internal/secrets",
+		forbidden:  []string{modulePath, contractsPath, "os", "net"},
+		transitive: true,
+		reason:     "what a message may carry of what the agent read is a question about text: it opens no file, reaches no host and knows nothing the agent holds",
+	},
+	{
 		packages:   "internal/config",
 		forbidden:  append([]string{modulePath + "/internal/identity", modulePath + "/internal/pki"}, networkPackages...),
 		transitive: true,
@@ -226,6 +232,23 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				ImportPath: modulePath + "/internal/pki",
 				Imports:    []string{"crypto/ecdsa", "crypto/x509", modulePath + "/internal/platform/files"},
 				Deps:       []string{"crypto/ecdsa", "crypto/x509", "net", "net/url", modulePath + "/internal/platform/files"},
+			},
+		},
+		{
+			name: "the words of a message read out of the file they name",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/secrets",
+				Imports:    []string{"os", "strconv"},
+				Deps:       []string{"os", "strconv"},
+			},
+			want: []string{"os"},
+		},
+		{
+			name: "the words of a message cut to what it may carry",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/secrets",
+				Imports:    []string{"strconv", "strings", "unicode/utf8"},
+				Deps:       []string{"strconv", "strings", "unicode/utf8"},
 			},
 		},
 		{

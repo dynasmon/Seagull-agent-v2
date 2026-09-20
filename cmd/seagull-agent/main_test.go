@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"maps"
 	"math/big"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
@@ -382,6 +384,119 @@ func TestAReloadTheAgentRefusesKeepsTheConfigurationItRunsOn(t *testing.T) {
 				t.Fatalf("the agent logs at %v, it started at %v", held.level.Level(), started.Logging.Severity())
 			}
 		})
+	}
+}
+
+// What one line the agent writes may carry of what it read: enough to name
+// what it refuses, and never enough for a file to decide how long a log is.
+const maxLineBytes = 8 << 10
+
+func TestNothingTheAgentReadsReachesWhatItWrites(t *testing.T) {
+	const password = "p4ssw0rd-token"
+	marker := strings.Repeat("written", 36) + "-marker-tail"
+	for name, prepare := range map[string]func(t *testing.T, state string) string{
+		"a setting this agent does not have": func(t *testing.T, state string) string {
+			return configured(t, state, map[string]string{marker: "true"})
+		},
+		"a listener that carries a credential": func(t *testing.T, state string) string {
+			path := configured(t, state, nil)
+			rewrite(t, path, state, map[string]string{"server": fmt.Sprintf(
+				`{"ingest_url": "https://agent:%s@gateway.example:8443", "renewal_url": "https://control.example:8446", "trust_bundle": %q}`,
+				password, filepath.Join(filepath.Dir(path), "platform-ca.pem"))})
+			return path
+		},
+		"a trust bundle that holds something else": func(t *testing.T, state string) string {
+			path := configured(t, state, nil)
+			bundle := filepath.Join(filepath.Dir(path), "platform-ca.pem")
+			if err := os.WriteFile(bundle, pem.EncodeToMemory(&pem.Block{Type: marker, Bytes: []byte("not a certificate")}), 0o644); err != nil {
+				t.Fatalf("write %s: %v", bundle, err)
+			}
+			return path
+		},
+		"an installation state that is damaged": func(t *testing.T, state string) string {
+			path := configured(t, state, nil)
+			if err := os.Mkdir(state, 0o700); err != nil {
+				t.Fatalf("create %s: %v", state, err)
+			}
+			held := fmt.Sprintf(`{"format": 1, "installation_id": %q}`, marker)
+			if err := os.WriteFile(filepath.Join(state, "installation.json"), []byte(held), 0o600); err != nil {
+				t.Fatalf("damage the installation state: %v", err)
+			}
+			return path
+		},
+		"a key that is not one": func(t *testing.T, state string) string {
+			path := configured(t, state, nil)
+			active := enroll(t, state)
+			if err := os.WriteFile(active, pem.EncodeToMemory(&pem.Block{Type: marker, Bytes: []byte("not a key")}), 0o600); err != nil {
+				t.Fatalf("damage the key: %v", err)
+			}
+			return path
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			state := stateDirectory(t)
+			path := prepare(t, state)
+			var logs, stdout, stderr bytes.Buffer
+			if code := serve(t.Context(), &logs, path); code != 1 {
+				t.Fatalf("exit code %d, want 1:\n%s", code, logs.String())
+			}
+			run([]string{"-config", path, "config", "check"}, &stdout, &stderr)
+			run([]string{"-config", path, "config", "print"}, &stdout, &stderr)
+			written := logs.String() + stdout.String() + stderr.String()
+			if strings.Contains(written, "-marker-tail") || strings.Contains(written, password) {
+				t.Errorf("the agent wrote down what it read:\n%s", written)
+			}
+			for line := range strings.Lines(written) {
+				if len(line) > maxLineBytes {
+					t.Errorf("the agent wrote a line of %d bytes, and what it reads decides how long it is:\n%s", len(line), line)
+				}
+			}
+		})
+	}
+}
+
+func TestEverythingTheInstallationHoldsIsPrivateToTheAccountTheAgentRunsAs(t *testing.T) {
+	state := stateDirectory(t)
+	enroll(t, state)
+	path := configured(t, state, nil)
+	serveStopped(t, path)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-config", path, "installation", "replace"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code %d: %s", code, stderr.String())
+	}
+	serveStopped(t, path)
+
+	held := 0
+	err := filepath.WalkDir(state, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		held++
+		described, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if err := files.Private(described); err != nil {
+			if errors.Is(err, errors.ErrUnsupported) {
+				t.Skipf("this platform cannot tell who may reach %s", path)
+			}
+			t.Errorf("%s %v", path, err)
+		}
+		switch permissions := described.Mode().Perm(); {
+		case entry.IsDir() && permissions != 0o700:
+			t.Errorf("%s is a directory granting %s, and the installation keeps its own as 0700", path, permissions)
+		case !entry.IsDir() && !described.Mode().IsRegular():
+			t.Errorf("%s is neither a file nor a directory of the installation", path)
+		case !entry.IsDir() && permissions != 0o600:
+			t.Errorf("%s grants %s, and the installation keeps what it holds as 0600", path, permissions)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", state, err)
+	}
+	if held < 6 {
+		t.Fatalf("an enrolled installation that was replaced holds %d files and directories", held)
 	}
 }
 
