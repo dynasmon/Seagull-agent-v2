@@ -389,6 +389,63 @@ Providers never fall back to one another: when a protected provider is added,
 a host where it is unavailable will not have its keys quietly kept in files
 instead.
 
+## What the agent writes down
+
+The agent holds one secret, the private key of its installation, and it reads
+text it did not write: its configuration, its installation state, its trust
+bundle and its key files. `internal/secrets` is the one place that decides what
+any of that may become in a log line, a refusal or a message on the terminal.
+
+- No message carries a key. A `Key` is a `crypto.Signer` with an identifier, so
+  no caller holds a private half to print; the buffers a key file is read and
+  written through are cleared as soon as it is parsed or stored; and a refusal
+  about a key names the file and what is wrong with its shape, never its bytes.
+- Text copied out of something the agent read — a setting's value or name, the
+  type of a PEM block, what a library said about bytes it could not parse — is
+  cut to 96 bytes and quoted when it is not printable. A file cannot decide how
+  long a log line is, and cannot write a terminal's own escape sequences into
+  one either.
+- An address never carries credentials into a message. The agent refuses a
+  `server.*` URL that holds a user and a password, and whatever was written
+  between `//` and `@` reads as `(redacted)` in every message about that URL,
+  including one about a URL the agent could not parse: the text a parser
+  repeats back is its own, and the agent writes what it kept of it.
+- The agent takes one argument, `-config FILE`, and reads nothing from the
+  environment it was started in; `tests/architecture` holds that as a test. A
+  credential on a command line or in an environment variable is readable by
+  other accounts on the host, so the agent accepts neither.
+- The configuration names where secrets are kept and holds none: a test refuses
+  any setting whose name says otherwise, which is why `config print` prints the
+  file as it stands.
+
+At start the agent asks the kernel for no core dump of itself and for its
+memory to be out of reach of the other processes of its account, and then reads
+back what the kernel says rather than trusting that the calls returned.
+`agent_core_dumps` reports `withheld`; a host where it did not take gets a
+warning naming what the service unit should do instead. On Linux that is a hard
+`RLIMIT_CORE` of 0, which the process can no longer raise, and `PR_SET_DUMPABLE`
+of 0, which also keeps another process of the same account out of
+`/proc/<pid>/mem` while leaving the process visible to `ps` and to the service
+manager. A core dump of the agent would be its key in a file the agent neither
+writes nor protects, so none is written even when an operator would like one: a
+crash is investigated from the log and from a reproduction, and a panic's
+traceback names the functions that were running rather than the bytes they held.
+
+What none of that claims:
+
+- the agent does not erase a key from memory. Go copies values as it collects
+  them, so only the buffers it reads and writes a key through are cleared, and
+  a key in use is in memory;
+- memory is not locked, so a host that swaps may write a key to its swap
+  device. Encrypting that device belongs to the deployment;
+- redaction is a rule about what the agent copies, not a filter over what
+  somebody else wrote. The agent bounds and escapes what it repeats and refuses
+  the one setting where a credential could arrive; it does not search text for
+  what looks like a secret. When collection arrives, each collector drops what
+  its source holds before it is admitted, where the source is understood;
+- nothing is delivered yet, so there is nothing to sanitize before a spool.
+  Admission will read the same rule when it arrives.
+
 ## Boundaries
 
 `tests/architecture` holds the repository boundaries as tests rather than as
@@ -422,6 +479,10 @@ conventions:
   published contracts;
 - a source file that only some of linux, windows and darwin build belongs to an
   adapter under `internal/platform`;
+- `internal/secrets`, which decides what a message may carry of what the agent
+  read, imports nothing of the agent, nothing of the contracts and neither `os`
+  nor `net`: what may be written down is a question about text;
+- production code reads nothing from the environment the agent was started in;
 - production code never recovers from a panic.
 
 The dependency rules are checked against the build graph Go computes for each
