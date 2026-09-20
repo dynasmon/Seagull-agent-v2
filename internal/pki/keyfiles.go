@@ -85,13 +85,16 @@ func (k *KeyFiles) Create() (Key, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode key %s: %w", id, err)
 	}
+	defer clear(encoded)
 	name := id + keySuffix
 	temporary := "." + name + ".tmp"
 	file, err := k.directory.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("write %s: %w", k.path(name), err)
 	}
-	_, err = file.Write(pem.EncodeToMemory(&pem.Block{Type: keyBlock, Bytes: encoded}))
+	written := pem.EncodeToMemory(&pem.Block{Type: keyBlock, Bytes: encoded})
+	_, err = file.Write(written)
+	clear(written)
 	if err == nil {
 		err = file.Sync()
 	}
@@ -138,6 +141,7 @@ func (k *KeyFiles) Open(id string) (Key, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	defer clear(content)
 	signer, err := decode(content, id)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s %v", ErrKeyDamaged, path, err)
@@ -163,6 +167,7 @@ func decode(content []byte, id string) (*ecdsa.PrivateKey, error) {
 		return nil, errors.New("holds more than the key")
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	clear(block.Bytes)
 	if err != nil {
 		return nil, fmt.Errorf("holds no PKCS #8 key: %s", secrets.Bounded(err.Error()))
 	}
