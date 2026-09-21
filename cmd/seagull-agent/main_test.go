@@ -36,6 +36,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
+	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 )
 
 const childArguments = "SEAGULL_AGENT_TEST_ARGUMENTS"
@@ -92,6 +93,57 @@ func TestTheAgentLogsWhatItIsAsItStarts(t *testing.T) {
 	}
 	if agentID, enrolled := started["agent_id"]; enrolled {
 		t.Errorf("a new installation started as agent %v", agentID)
+	}
+}
+
+func TestTheAgentReadsBackItsSpoolAsItStarts(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, map[string]string{"spool": `{"max_bytes": "32MiB"}`})
+	first, _ := logged(t, serveStopped(t, path), "spool_opened")
+	if first["max_bytes"] != float64(32<<20) || first["level"] != "INFO" {
+		t.Fatalf("a new installation opened its spool as %v", first)
+	}
+	held, release := spoolIn(t, state)
+	if _, err := held.Admit(spool.Events, spool.Record{ID: "event-1", Payload: []byte("admitted")}, spool.Record{ID: "event-2", Payload: []byte("admitted")}); err != nil {
+		t.Fatalf("admit two events: %v", err)
+	}
+	if err := held.Acknowledge(spool.Events, 1); err != nil {
+		t.Fatalf("acknowledge the first event: %v", err)
+	}
+	release()
+
+	opened, found := logged(t, serveStopped(t, path), "spool_opened")
+	events, _ := opened["events"].(map[string]any)
+	inventory, _ := opened["inventory"].(map[string]any)
+	if !found || events["outstanding"] != float64(1) || events["delivered"] != float64(1) || events["lost"] != float64(0) {
+		t.Fatalf("the agent reported its spool as %v", opened)
+	}
+	if inventory["outstanding"] != float64(0) || opened["bytes"].(float64) <= 0 {
+		t.Fatalf("the agent reported its spool as %v", opened)
+	}
+}
+
+func TestReplacingTheInstallationSetsItsSpoolAside(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	serveStopped(t, path)
+	held, release := spoolIn(t, state)
+	if _, err := held.Admit(spool.Events, spool.Record{ID: "event-1", Payload: []byte("admitted by the replaced installation")}); err != nil {
+		t.Fatalf("admit an event: %v", err)
+	}
+	release()
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-config", path, "installation", "replace"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code %d: %s", code, stderr.String())
+	}
+	opened, _ := logged(t, serveStopped(t, path), "spool_opened")
+	if events, _ := opened["events"].(map[string]any); events["outstanding"] != float64(0) {
+		t.Fatalf("the replacement installation holds the records of the one it replaced: %v", opened)
+	}
+	kept, err := filepath.Glob(filepath.Join(state, "replaced", "*", spoolDirectory, "events", "*.seg"))
+	if err != nil || len(kept) != 1 {
+		t.Fatalf("the replaced installation's records were not set aside with it: %q %v", kept, err)
 	}
 }
 
@@ -336,6 +388,13 @@ func TestTheAgentReadsItsConfigurationAgainWhenItIsAsked(t *testing.T) {
 	if held.level.Level() != slog.LevelDebug {
 		t.Fatalf("the agent logs at %v", held.level.Level())
 	}
+
+	held.spool, _ = spoolIn(t, state)
+	rewrite(t, path, state, map[string]string{"spool": `{"max_bytes": "32MiB"}`})
+	held.reload()
+	if limit := held.spool.Stats().MaxBytes; limit != 32<<20 {
+		t.Fatalf("after the reload the spool keeps to %d bytes", limit)
+	}
 }
 
 func TestAReloadTheAgentRefusesKeepsTheConfigurationItRunsOn(t *testing.T) {
@@ -432,6 +491,16 @@ func TestNothingTheAgentReadsReachesWhatItWrites(t *testing.T) {
 			}
 			return path
 		},
+		"a spool that holds what the agent did not write": func(t *testing.T, state string) string {
+			path := configured(t, state, nil)
+			_, release := spoolIn(t, state)
+			release()
+			stray := filepath.Join(state, spoolDirectory, "events", strings.Repeat("written", 30)+"-marker-tail")
+			if err := os.WriteFile(stray, []byte(password), 0o600); err != nil {
+				t.Fatalf("write %s: %v", stray, err)
+			}
+			return path
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			state := stateDirectory(t)
@@ -455,11 +524,64 @@ func TestNothingTheAgentReadsReachesWhatItWrites(t *testing.T) {
 	}
 }
 
+// A record holds whatever a collector admitted, so what the agent writes about
+// the spool that keeps it names records by where they are and never by what
+// they hold, even when it cannot read them back.
+func TestNothingTheSpoolHoldsReachesWhatTheAgentWrites(t *testing.T) {
+	const password = "p4ssw0rd-token"
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	held, release := spoolIn(t, state)
+	for n := range 3 {
+		secret := spool.Record{ID: fmt.Sprintf("session-%d-marker-tail", n), Payload: []byte(strings.Repeat(password+" ", 40))}
+		if _, err := held.Admit(spool.Events, secret); err != nil {
+			t.Fatalf("admit a record: %v", err)
+		}
+	}
+	release()
+	segments, err := filepath.Glob(filepath.Join(state, spoolDirectory, "events", "*.seg"))
+	if err != nil || len(segments) != 1 {
+		t.Fatalf("the spool holds %q: %v", segments, err)
+	}
+	file, err := os.OpenFile(segments[0], os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("open %s: %v", segments[0], err)
+	}
+	described, err := file.Stat()
+	if err == nil {
+		_, err = file.WriteAt([]byte("damaged"), described.Size()-100)
+	}
+	if err = errors.Join(err, file.Close()); err != nil {
+		t.Fatalf("damage %s: %v", segments[0], err)
+	}
+	if err := os.WriteFile(filepath.Join(state, spoolDirectory, "events", "ledger"), []byte(password), 0o600); err != nil {
+		t.Fatalf("damage the ledger: %v", err)
+	}
+
+	logs := serveStopped(t, path)
+	if _, found := logged(t, logs, "spool_records_lost"); !found {
+		t.Fatalf("the agent did not report the record it could not read back:\n%s", logs)
+	}
+	if _, found := logged(t, logs, "spool_acknowledgements_lost"); !found {
+		t.Fatalf("the agent did not report the ledger it could not read back:\n%s", logs)
+	}
+	if strings.Contains(logs, password) || strings.Contains(logs, "marker-tail") {
+		t.Fatalf("the agent wrote down what its spool holds:\n%s", logs)
+	}
+}
+
 func TestEverythingTheInstallationHoldsIsPrivateToTheAccountTheAgentRunsAs(t *testing.T) {
 	state := stateDirectory(t)
 	enroll(t, state)
 	path := configured(t, state, nil)
 	serveStopped(t, path)
+	kept, release := spoolIn(t, state)
+	for _, stream := range []spool.Stream{spool.Events, spool.Inventory} {
+		if _, err := kept.Admit(stream, spool.Record{ID: "record-1", Payload: []byte("kept")}); err != nil {
+			t.Fatalf("admit a record: %v", err)
+		}
+	}
+	release()
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"-config", path, "installation", "replace"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr.String())
@@ -495,7 +617,7 @@ func TestEverythingTheInstallationHoldsIsPrivateToTheAccountTheAgentRunsAs(t *te
 	if err != nil {
 		t.Fatalf("walk %s: %v", state, err)
 	}
-	if held < 6 {
+	if held < 16 {
 		t.Fatalf("an enrolled installation that was replaced holds %d files and directories", held)
 	}
 }
@@ -801,6 +923,45 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 			recovery: "make %s and everything in it belong to the account the agent runs as",
 		},
 		{
+			name: "another account can read the spool",
+			prepare: func(t *testing.T, state string) {
+				_, release := spoolIn(t, state)
+				release()
+				if err := os.Chmod(filepath.Join(state, spoolDirectory, "inventory", "ledger"), 0o644); err != nil {
+					t.Fatalf("expose the spool: %v", err)
+				}
+			},
+			message:  "agent_not_started",
+			cause:    "the spool is not private to the account the agent runs as",
+			recovery: "make %s and everything in it belong to the account the agent runs as",
+		},
+		{
+			name: "the spool holds what the agent did not write",
+			prepare: func(t *testing.T, state string) {
+				_, release := spoolIn(t, state)
+				release()
+				if err := os.Mkdir(filepath.Join(state, spoolDirectory, "processes"), 0o700); err != nil {
+					t.Fatalf("add to the spool: %v", err)
+				}
+			},
+			message:  "agent_not_started",
+			cause:    "the spool holds what it did not write",
+			recovery: "take out of %s/spool what the agent did not write there",
+		},
+		{
+			name: "the spool was written by a newer agent",
+			prepare: func(t *testing.T, state string) {
+				_, release := spoolIn(t, state)
+				release()
+				if err := os.WriteFile(filepath.Join(state, spoolDirectory, "events", "ledger"), []byte("SGLG\x02\x00"+strings.Repeat("\x00", 40)), 0o600); err != nil {
+					t.Fatalf("write a newer ledger: %v", err)
+				}
+			},
+			message:  "agent_not_started",
+			cause:    "the spool was written by a newer agent",
+			recovery: "run the agent release that wrote this state",
+		},
+		{
 			name: "another agent holds the installation",
 			prepare: func(t *testing.T, state string) {
 				held, err := identity.Open(state)
@@ -872,6 +1033,33 @@ func enroll(t *testing.T, state string) string {
 		t.Fatalf("activate the first credential generation: %v", err)
 	}
 	return filepath.Join(state, keysDirectory, key.ID()+".pem")
+}
+
+// The spool of the installation in state, opened as the agent opens it and
+// held with the installation until release, as a running agent holds both.
+func spoolIn(t *testing.T, state string) (*spool.Spool, func()) {
+	t.Helper()
+	installation, err := identity.Open(state)
+	if err != nil {
+		t.Fatalf("open the installation: %v", err)
+	}
+	held, err := openSpool(installation, config.Spool{MaxBytes: 64 << 20}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		installation.Close()
+		t.Fatalf("open the spool: %v", err)
+	}
+	released := false
+	release := func() {
+		if released {
+			return
+		}
+		released = true
+		if err := errors.Join(held.Close(), installation.Close()); err != nil {
+			t.Errorf("close the spool and the installation: %v", err)
+		}
+	}
+	t.Cleanup(release)
+	return held, release
 }
 
 func exposesKeys(t *testing.T, logs, state string) bool {

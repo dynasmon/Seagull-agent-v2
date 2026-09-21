@@ -25,9 +25,13 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
+	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 )
 
-const keysDirectory = "keys"
+const (
+	keysDirectory  = "keys"
+	spoolDirectory = "spool"
+)
 
 const usage = `Usage:
   seagull-agent -config FILE run                    run the agent until it receives SIGINT or SIGTERM
@@ -95,7 +99,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	inventory(logger, granted)
 	memory(logger, withheld)
 	state := settings.Identity.StateDirectory
-	held := configuration{logger: logger, path: path, active: config.Activate(settings), level: level}
+	held := &configuration{logger: logger, path: path, active: config.Activate(settings), level: level}
 
 	asked := make(chan os.Signal, 1)
 	signal.Notify(asked, syscall.SIGHUP)
@@ -134,6 +138,14 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	}
 	posture := keys.Posture()
 	started = append(started, slog.String("key_provider", posture.Provider), slog.Bool("key_exportable", posture.Exportable))
+	spooled, err := openSpool(installation, settings.Spool, logger)
+	if err != nil {
+		logger.Error("agent_not_started", slog.Any("error", err), slog.String("recovery", recovery(path, state, err)))
+		return 1
+	}
+	defer spooled.Close()
+	held.spool = spooled
+	backlog(logger, spooled.Stats())
 	logger.Info("agent_starting", started...)
 	if err := agent.Run(ctx); err != nil {
 		logger.Error("agent_stopped", slog.Any("error", err))
@@ -208,9 +220,10 @@ type configuration struct {
 	path   string
 	active *config.Active
 	level  *slog.LevelVar
+	spool  *spool.Spool
 }
 
-func (c configuration) component(asked <-chan os.Signal) agentruntime.Component {
+func (c *configuration) component(asked <-chan os.Signal) agentruntime.Component {
 	return agentruntime.Component{
 		Name:   "configuration",
 		Policy: agentruntime.Essential,
@@ -227,7 +240,7 @@ func (c configuration) component(asked <-chan os.Signal) agentruntime.Component 
 	}
 }
 
-func (c configuration) reload() {
+func (c *configuration) reload() {
 	candidate, err := config.Load(c.path)
 	if err == nil {
 		err = c.active.Reload(candidate)
@@ -239,6 +252,9 @@ func (c configuration) reload() {
 		return
 	}
 	apply(candidate, c.level)
+	if c.spool != nil {
+		c.spool.Limit(limits(candidate.Spool))
+	}
 	c.logger.Info("configuration_reloaded", slog.String("config", c.path), slog.String("log_level", candidate.Logging.Level))
 }
 
@@ -255,6 +271,30 @@ func openKeys(installation *identity.Installation, provider string) (pki.KeyProv
 		return nil, err
 	}
 	return keys, nil
+}
+
+func openSpool(installation *identity.Installation, settings config.Spool, logger *slog.Logger) (*spool.Spool, error) {
+	directory, err := installation.Directory(spoolDirectory)
+	if err != nil {
+		return nil, err
+	}
+	return spool.Open(directory, limits(settings), logger)
+}
+
+func limits(settings config.Spool) spool.Limits {
+	return spool.Limits{MaxBytes: int64(settings.MaxBytes)}
+}
+
+func backlog(logger *slog.Logger, held spool.Stats) {
+	reported := []any{slog.Int64("max_bytes", held.MaxBytes), slog.Int64("bytes", held.Bytes)}
+	for _, stream := range held.Streams {
+		reported = append(reported, slog.Group(stream.Stream.String(),
+			slog.Uint64("outstanding", stream.Outstanding),
+			slog.Int64("bytes", stream.Bytes),
+			slog.Uint64("delivered", stream.Delivered),
+			slog.Uint64("lost", stream.Lost)))
+	}
+	logger.Info("spool_opened", reported...)
 }
 
 func check(path string, stdout, stderr io.Writer) int {
@@ -326,15 +366,17 @@ func recovery(path, state string, err error) string {
 		return "stop the agent and start it again for what it settles as it starts to change"
 	case errors.Is(err, privileges.ErrInconsistent):
 		return "start the agent as the account it runs as: its packaging never starts it through a setuid or setgid program"
-	case errors.Is(err, identity.ErrLocked):
+	case errors.Is(err, identity.ErrLocked), errors.Is(err, spool.ErrLocked):
 		return "stop the agent that holds " + state + ": two agents never share an installation"
-	case errors.Is(err, identity.ErrInsecure):
+	case errors.Is(err, identity.ErrInsecure), errors.Is(err, spool.ErrInsecure):
 		return "make " + state + " and everything in it belong to the account the agent runs as, closed to its group and to others"
 	case errors.Is(err, pki.ErrKeyInsecure):
 		return "make " + state + " and everything in it belong to the account the agent runs as, closed to its group and to others; " +
 			"if another account could read the key, revoke the certificate issued for it and discard the installation with " + replacement
-	case errors.Is(err, identity.ErrNewer):
+	case errors.Is(err, identity.ErrNewer), errors.Is(err, spool.ErrNewer):
 		return "run the agent release that wrote this state, or discard the installation with " + replacement
+	case errors.Is(err, spool.ErrDamaged):
+		return "take out of " + filepath.Join(state, spoolDirectory) + " what the agent did not write there, or discard the installation with " + replacement
 	case errors.Is(err, identity.ErrDamaged), errors.Is(err, pki.ErrKeyMissing), errors.Is(err, pki.ErrKeyDamaged):
 		return "restore " + state + " from a backup of this installation, or discard the installation with " + replacement + " and enroll the new one"
 	case errors.Is(err, identity.ErrNoInstallation):
