@@ -2,6 +2,7 @@ package spool
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -75,24 +76,45 @@ func FuzzRecover(f *testing.F) {
 	})
 }
 
-// Whatever a ledger holds, it is read back only when writing what was read
-// gives the same bytes, so no two files read as the same ledger.
+// Whatever a ledger holds, it is read back only when what was read is written
+// again as the same bytes, or, for the first format, as a ledger of the second
+// that reads back the same, so no two files read as the same ledger.
 func FuzzLedger(f *testing.F) {
 	f.Add(ledger{watermark: 1}.encode(Events))
-	f.Add(ledger{watermark: 5, spans: []span{{first: 7, end: 9}, {first: 12, end: 13}}, delivered: 6, lost: 1}.encode(Events))
+	f.Add(ledger{watermark: 5, spans: []span{{first: 7, end: 9}, {first: 12, end: 13}}, delivered: 6, lost: 1, expired: 2, quarantined: 1}.encode(Events))
 	f.Add(ledger{watermark: 3}.encode(Inventory))
+	f.Add(firstFormat(Events, 5, 3, 1, span{first: 7, end: 9}))
 	f.Fuzz(func(t *testing.T, content []byte) {
 		read, err := decodeLedger(Events, content)
 		if err != nil {
 			return
 		}
-		if written := read.encode(Events); !bytes.Equal(written, content) {
+		written := read.encode(Events)
+		if binary.LittleEndian.Uint16(content[4:]) == ledgerFormat && !bytes.Equal(written, content) {
 			t.Fatalf("%x reads as a ledger that is written as %x", content, written)
 		}
-		if again, newly := read.settle(nil); newly != 0 || !bytes.Equal(again.encode(Events), content) {
+		again, err := decodeLedger(Events, written)
+		if err != nil || !bytes.Equal(again.encode(Events), written) {
+			t.Fatalf("%x is written as %x, which does not read back as itself: %v", content, written, err)
+		}
+		if settled, newly := read.settle(nil); newly != 0 || !bytes.Equal(settled.encode(Events), written) {
 			t.Fatalf("settling nothing changed the ledger")
 		}
 	})
+}
+
+func firstFormat(stream Stream, watermark, delivered, lost uint64, spans ...span) []byte {
+	content := binary.LittleEndian.AppendUint16([]byte("SGLG"), 1)
+	content = append(content, byte(stream), 0)
+	for _, counted := range []uint64{watermark, delivered, lost} {
+		content = binary.LittleEndian.AppendUint64(content, counted)
+	}
+	content = binary.LittleEndian.AppendUint32(content, uint32(len(spans)))
+	for _, held := range spans {
+		content = binary.LittleEndian.AppendUint64(content, held.first)
+		content = binary.LittleEndian.AppendUint64(content, held.end)
+	}
+	return binary.LittleEndian.AppendUint32(content, checksum(content))
 }
 
 func TestTheLedgerSettlesWhatWasSettledAndNothingElse(t *testing.T) {
@@ -133,9 +155,7 @@ func TestTheLedgerSettlesWhatWasSettledAndNothingElse(t *testing.T) {
 
 // What recovery reads back does not depend on whether a sync reached the disk,
 // so the fuzzer spends its time reading segments rather than waiting on one.
-type volatile struct{}
-
-func (volatile) write(file *os.File, content []byte) (int, error) { return file.Write(content) }
+type volatile struct{ system }
 
 func (volatile) sync(*os.File) error { return nil }
 

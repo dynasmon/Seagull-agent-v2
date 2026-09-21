@@ -269,22 +269,13 @@ func TestWhatTheSpoolCannotKeepIsRefused(t *testing.T) {
 func TestTheBudgetBoundsWhatTheSpoolAdmits(t *testing.T) {
 	directory := spoolDirectory(t)
 	held, _ := open(t, directory, 4<<20)
-	admitted := 0
-	var refused error
-	for refused == nil {
-		_, refused = held.Admit(spool.Events, sized("event", admitted, 256<<10))
-		if refused == nil {
-			admitted++
-		}
-	}
-	if !errors.Is(refused, spool.ErrFull) || admitted < 12 || admitted > 16 {
-		t.Fatalf("a 4MiB spool admitted %d records of 256KiB before %v", admitted, refused)
+	admitted := fill(t, held, spool.Events, "event")
+	inventory := fill(t, held, spool.Inventory, "inventory")
+	if admitted < 10 || admitted > 14 || inventory < 1 {
+		t.Fatalf("a 4MiB spool admitted %d events and %d inventory records of 256KiB", admitted, inventory)
 	}
 	if used := held.Stats().Bytes; used > 4<<20 {
 		t.Fatalf("the spool holds %d bytes of a 4MiB budget", used)
-	}
-	if _, err := held.Admit(spool.Inventory, sized("inventory", 0, 256<<10)); !errors.Is(err, spool.ErrFull) {
-		t.Fatalf("another stream was admitted beyond the budget: %v", err)
 	}
 
 	var sequences []uint64
@@ -302,6 +293,33 @@ func TestTheBudgetBoundsWhatTheSpoolAdmits(t *testing.T) {
 	}
 	if limit := held.Stats().MaxBytes; limit != 256<<10 {
 		t.Fatalf("the spool keeps to %d bytes", limit)
+	}
+}
+
+func TestEachStreamKeepsRoomTheOtherCannotTake(t *testing.T) {
+	for name, c := range map[string]struct {
+		first, second           spool.Stream
+		firstShare, secondShare int64
+	}{
+		"events filling the spool first":    {first: spool.Events, second: spool.Inventory, firstShare: 7 << 20, secondShare: 1 << 20},
+		"inventory filling the spool first": {first: spool.Inventory, second: spool.Events, firstShare: 4 << 20, secondShare: 4 << 20},
+	} {
+		t.Run(name, func(t *testing.T) {
+			held, _ := open(t, spoolDirectory(t), 8<<20)
+			fill(t, held, c.first, "first")
+			fill(t, held, c.second, "second")
+			first, second := stream(t, held, c.first).Bytes, stream(t, held, c.second).Bytes
+			record := int64(frameHeaderBytes + len("first-000001") + 256<<10)
+			if first > c.firstShare || first < c.firstShare-record {
+				t.Fatalf("%s filled %d bytes of its share of %d", c.first, first, c.firstShare)
+			}
+			if second < c.secondShare-record-(64<<10) {
+				t.Fatalf("%s found %d bytes once %s held %d, and it keeps %d the other cannot take", c.second, second, c.first, first, c.secondShare)
+			}
+			if total := held.Stats().Bytes; total > 8<<20 {
+				t.Fatalf("the spool holds %d bytes of an 8MiB budget", total)
+			}
+		})
 	}
 }
 
@@ -642,7 +660,7 @@ func TestASpoolTheAgentCannotTrustIsRefused(t *testing.T) {
 		},
 		"a ledger written by a newer agent": {
 			prepare: func(t *testing.T, directory string) {
-				rewrite(t, filepath.Join(directory, "events", "ledger"), 4, []byte{2, 0})
+				rewrite(t, filepath.Join(directory, "events", "ledger"), 4, []byte{3, 0})
 			},
 			want: spool.ErrNewer,
 		},
@@ -729,6 +747,20 @@ func TestReadingBackASpoolTakesNoMoreMemoryThanOneRecord(t *testing.T) {
 	}
 	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 2<<20 {
 		t.Fatalf("opening a spool of 24MiB and reading one record of 64KiB back allocated %d bytes", allocated)
+	}
+}
+
+// Records of 256KiB go into a stream until the spool refuses one for room, and
+// the refusal is the only one it gives.
+func fill(t *testing.T, held *spool.Spool, kept spool.Stream, prefix string) int {
+	t.Helper()
+	for admitted := 0; ; admitted++ {
+		if _, err := held.Admit(kept, sized(prefix, admitted, 256<<10)); err != nil {
+			if !errors.Is(err, spool.ErrFull) {
+				t.Fatalf("%s refused record %d with %v", kept, admitted, err)
+			}
+			return admitted
+		}
 	}
 }
 

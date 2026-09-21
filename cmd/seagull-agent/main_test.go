@@ -953,7 +953,7 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 			prepare: func(t *testing.T, state string) {
 				_, release := spoolIn(t, state)
 				release()
-				if err := os.WriteFile(filepath.Join(state, spoolDirectory, "events", "ledger"), []byte("SGLG\x02\x00"+strings.Repeat("\x00", 40)), 0o600); err != nil {
+				if err := os.WriteFile(filepath.Join(state, spoolDirectory, "events", "ledger"), []byte("SGLG\x03\x00"+strings.Repeat("\x00", 40)), 0o600); err != nil {
 					t.Fatalf("write a newer ledger: %v", err)
 				}
 			},
