@@ -92,6 +92,17 @@ var dependencyRules = []dependencyRule{
 		transitive: true,
 		reason:     "the configuration is read before there is an installation, a key or a connection: it says what the agent runs on, and each component opens what its own settings name",
 	},
+	{
+		packages: "internal/spool",
+		forbidden: append([]string{
+			contractsPath,
+			modulePath + "/internal/identity",
+			modulePath + "/internal/pki",
+			modulePath + "/internal/config",
+		}, networkPackages...),
+		transitive: true,
+		reason:     "the spool keeps records as the bytes admission hands it, under their identity and in their order: it reads no contract, reaches no network, holds no key, and is given the directory and the budget it keeps them in",
+	},
 }
 
 func (r dependencyRule) violations(pkg buildPackage) []string {
@@ -284,6 +295,32 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				ImportPath: modulePath + "/internal/config",
 				Imports:    []string{"crypto/x509", modulePath + "/internal/platform/files"},
 				Deps:       []string{"crypto/x509", "net", "net/url", modulePath + "/internal/platform/files"},
+			},
+		},
+		{
+			name: "the spool reading the records it keeps",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/spool",
+				Imports:    []string{ingest, "hash/crc32"},
+				Deps:       []string{ingest, "google.golang.org/protobuf/proto", "hash/crc32"},
+			},
+			want: []string{ingest},
+		},
+		{
+			name: "the spool opening the installation it lives in",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/spool",
+				Imports:    []string{modulePath + "/internal/identity"},
+				Deps:       []string{modulePath + "/internal/identity", modulePath + "/internal/platform/files"},
+			},
+			want: []string{modulePath + "/internal/identity"},
+		},
+		{
+			name: "the spool keeping bytes in the directory it is given",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/spool",
+				Imports:    []string{"hash/crc32", "os", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
+				Deps:       []string{"hash/crc32", "os", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
 			},
 		},
 		{
