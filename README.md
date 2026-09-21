@@ -58,8 +58,10 @@ the enabled ones to `internal/runtime`, which owns their lifecycle.
   survive that just as it survives any other crash.
 
 One component is composed: the configuration the agent holds, which reads the
-file again whenever the agent is asked to. Collection, local admission, the
-spool and delivery will each arrive as a component of its own.
+file again whenever the agent is asked to. The spool is not a component, since
+it starts no work of its own: the agent opens it with the installation, reads
+back what it holds before it starts, and closes it as it stops. Collection,
+local admission and delivery will each arrive as a component of its own.
 
 ## Configuration
 
@@ -159,12 +161,13 @@ validates the whole candidate before anything changes:
   `identity.state_directory`, `identity.key_provider`, `logging.format` and
   `resources.shutdown_timeout` take stopping the agent and starting it again.
 
-What a setting does today follows what the agent has. `identity`, `logging` and
-`resources.memory_limit` and `resources.shutdown_timeout` are in force: they
-decide where the installation is opened, what the log says and what the agent
-spends. `server`, `transport`, `spool` and the concurrency budgets are validated
-here and take effect as the components that spend them arrive, so a deployment
-is configured once rather than as each one lands. `modules` and
+What a setting does today follows what the agent has. `identity`, `logging`,
+`spool.max_bytes`, `resources.memory_limit` and `resources.shutdown_timeout` are
+in force: they decide where the installation is opened, what the log says, how
+much the spool keeps and what the agent spends. `server`, `transport`,
+`spool.max_age` and the concurrency budgets are validated here and take effect
+as the components that spend them arrive, so a deployment is configured once
+rather than as each one lands. `modules` and
 `updates.enabled` are the settings this build refuses outright: an agent that
 accepted them would be promising collection it cannot do and updates it cannot
 install.
@@ -222,7 +225,7 @@ is not one.
 
 | What the agent does | What it needs |
 | --- | --- |
-| Keep its installation and its keys | a directory of its own, owned by the account it runs as |
+| Keep its installation, its keys and its spool | a directory of its own, owned by the account it runs as |
 | Read its configuration and its trust bundle | files that account, or root, writes and it reads |
 | Reach the platform | an outgoing TLS connection, which needs no privilege |
 | Collect | nothing yet: this build has no collector |
@@ -289,9 +292,9 @@ The state is the agent's alone:
 - a write lands in a temporary file that is synced and renamed over
   `installation.json` before the directory is synced, and a start discards what
   an interrupted write left behind;
-- whatever else the installation keeps, such as its keys, lives in a private
-  directory of its own inside the state directory, which the installation holds
-  under the same lock and closes when it is closed.
+- whatever else the installation keeps, such as its keys and its spool, lives
+  in a private directory of its own inside the state directory, which the
+  installation holds under the same lock and closes when it is closed.
 
 When the state cannot be used, the agent does not start: it logs
 `agent_not_started` with the reason and a `recovery`, and never creates a new
@@ -310,8 +313,8 @@ installation unenrolled and without keys. Keys set aside still authenticate as
 the agent they were certified for until its certificate expires or is revoked,
 so revoke it when the replaced installation was enrolled, and delete
 `replaced/` once nothing in it is needed. Records belong to the installation
-that admitted them, so a spool kept in the state directory is set aside with
-that installation rather than handed to its replacement.
+that admitted them, so its spool is set aside with it rather than handed to its
+replacement, and nothing it admitted is delivered as another installation.
 
 Packaging follows the same line: an uninstall leaves the state where it is, so
 a reinstall is the same installation, and only a purge removes the directory,
@@ -389,11 +392,136 @@ Providers never fall back to one another: when a protected provider is added,
 a host where it is unavailable will not have its keys quietly kept in files
 instead.
 
+## The spool
+
+`internal/spool` keeps what the agent admits until the platform has it. It lives
+in the installation, under `spool/` in the state directory, and holds two
+streams, `events` and `inventory`, because the platform takes each on a route of
+its own: each stream keeps its own order, and one the platform refuses holds
+back no other. A record is an identifier and the bytes admission hands the
+spool, kept with the sequence number it was admitted under and the moment it
+was. The spool never looks inside a record, and reads no contract.
+
+A record is admitted once it is durable, and not before:
+
+- admission writes the records at the end of the stream's last segment and
+  syncs it before it returns a receipt, and a new segment is synced, header and
+  directory, before any record goes into it;
+- a write that fails is undone, and admits none of the records it carried; one
+  that cannot be undone stops the stream as a failed sync does;
+- a sync that fails stops the stream admitting until the agent is started
+  again, and says so as `spool_unavailable`: after a failed sync the kernel may
+  have dropped what it had not written, and only reading the segment back tells
+  what reached the disk. Reading and acknowledging go on;
+- a sequence number a receipt named is never handed out again, not even once
+  everything the stream held was delivered and its files removed.
+
+A record is read back until it settles, and it settles once: as delivered when
+its acknowledgement is durable, or as lost when it cannot be read back.
+Each stream keeps what settled in its `ledger`, which is replaced whole: written
+to a temporary file, synced, renamed over the ledger, and the directory synced.
+The rename is what makes the replacement atomic and the syncs are what make it
+durable, and neither stands in for the other. Acknowledgements may arrive in
+any order, and the ledger keeps whatever settled above the oldest record still
+outstanding, so a record between two delivered ones stays outstanding. A
+segment is removed only once everything it holds has settled, and a removal a
+crash undid is done again when the spool opens. Reading follows admission
+order, skips what settled, and is bounded by a number of records and of bytes,
+though it always returns the first record there is.
+
+Opening the spool reads back what it holds before the agent starts:
+
+- a write the agent was interrupted in leaves the end of the last segment
+  missing: a record cut short, or sectors the disk never wrote, which read back
+  as zeros. The spool discards it and reports `spool_write_interrupted` with the
+  bytes it discarded. The write was never confirmed, so the collectors that
+  made it admit its records again, and nothing is counted as lost;
+- anything else that does not verify is damage. Each record carries two CRC-32C
+  checksums, one over its header and one over what it holds, and a record that
+  fails either is never delivered: the spool steps over it to the next record
+  that verifies, settles the records between as lost, and reports
+  `spool_records_lost` once, with the segment, the first record lost and how
+  many. Damage costs the records it touched and never the ones after it. Damage
+  at the end of the last segment that is not an interrupted write costs at least
+  the record it starts in, and a segment the spool no longer finds costs the
+  records it held, counted the same way;
+- the last segment of each stream is read back whole as the spool opens, since
+  it is the one a crash leaves unfinished. The segments before it were synced
+  whole, and are verified as they are read;
+- a ledger that is missing or does not verify is reported as
+  `spool_acknowledgements_lost`, and every record the stream holds is delivered
+  again. An acknowledgement is what lets the spool drop a record, so losing one
+  costs a duplicate and never a record;
+- the agent does not start on a spool another account can reach, on a spool
+  written by a newer agent, or on one that holds anything it did not write: a
+  file, a stream this build does not keep, a link, or a segment moved from
+  another stream. The spool never resets itself, and `agent_not_started` says
+  what to do instead.
+
+`spool.max_bytes` bounds every file the spool keeps, both streams together. A
+spool that is full refuses the records it is offered, keeping 64 KiB back so
+that a full spool can still record what it delivered, and admits again as
+delivery frees room. Segments are a sixteenth of that budget, between 1 MiB
+and 64 MiB, so freeing room never waits on more than that. A reload applies a
+new budget, and one lower than what the spool holds refuses records until
+delivery brings it under. Nothing is dropped to make room: deciding what to do
+while the platform is unreachable, and which records may expire, belongs to
+backpressure, and `spool.max_age` waits for it. What the spool holds in memory
+is the list of its segments, the spans that settled out of order and the
+records a read returns, never a segment: a record holds at most 8 MiB, and
+everything else is read through a buffer of 64 KiB.
+
+Only one process keeps a spool: the installation's lock already keeps a second
+agent out, and the spool also locks its own directory. Its files are private to
+the account the agent runs as, like everything else in the installation, and
+they are not encrypted. A key to decrypt them would have to sit on the same
+disk, readable by whoever could read the spool, so it would protect nothing and
+be one more secret to lose. There is therefore no storage key: none to lose,
+and none shared with the key the agent proves its identity with.
+
+The spool is an append-only log of checksummed records for each stream and a
+ledger replaced whole, written with the standard library alone. An embedded
+database was weighed against it: bbolt keeps no checksum over the pages that
+hold data and panics on some damage, which an agent that never recovers from a
+panic would meet at every start, and SQLite takes cgo or a large translated
+dependency and checksums no page unless it is built to. The evidence is in
+`internal/spool`:
+
+- a test kills, with SIGKILL, a process that admits and acknowledges as fast as
+  its spool allows, over and over, and checks after every kill that each record
+  whose receipt the process printed is read back unaltered and in order, and
+  that nothing whose acknowledgement it printed comes back;
+- tests cut, zero and flip the bytes a crash or a disk leaves behind, fail
+  writes and syncs part way, restore segments a compaction had removed and take
+  away ledgers and segments, and check what the spool reads back and reports;
+- `FuzzRecover` hands recovery arbitrary segments and requires that opening the
+  spool a second time finds nothing more to discard or count and reads back the
+  same records, and `FuzzLedger` requires that a ledger is read back only as it
+  was written;
+- a test opens a spool of 24 MiB and reads one record back allocating less than
+  2 MiB.
+
+What the spool does not claim:
+
+- a process that is killed is tested; a machine that loses power relies on its
+  disk keeping what it acknowledged as synced, and a disk or a volume that
+  acknowledges a sync it did not do can lose records the spool confirmed;
+- damage that leaves a record with checksums that still match what it holds is
+  not detected, and neither is the last segment of a stream taken away whole
+  when nothing the ledger settled came after it: what is left reads as a spool
+  that ended sooner;
+- a record whose write was interrupted after it reached the disk, but before
+  its receipt reached the collector, is read back and admitted again: the
+  platform receives it twice, under the same identifier;
+- records wait while the platform is unreachable for as long as the budget
+  holds them. When it does not, the spool refuses more rather than choose what
+  to lose.
+
 ## What the agent writes down
 
 The agent holds one secret, the private key of its installation, and it reads
 text it did not write: its configuration, its installation state, its trust
-bundle and its key files. `internal/secrets` is the one place that decides what
+bundle, its key files and what it finds in its spool. `internal/secrets` is the one place that decides what
 any of that may become in a log line, a refusal or a message on the terminal.
 
 - No message carries a key. A `Key` is a `crypto.Signer` with an identifier, so
@@ -443,8 +571,10 @@ What none of that claims:
   the one setting where a credential could arrive; it does not search text for
   what looks like a secret. When collection arrives, each collector drops what
   its source holds before it is admitted, where the source is understood;
-- nothing is delivered yet, so there is nothing to sanitize before a spool.
-  Admission will read the same rule when it arrives.
+- the spool keeps records as admission hands them and never looks inside one,
+  so what a record holds is decided before it is admitted: admission, which
+  arrives with the first collector, reads the same rule. What the agent writes
+  about a record is where it is in the spool, never what it holds.
 
 ## Boundaries
 
@@ -482,6 +612,9 @@ conventions:
 - `internal/secrets`, which decides what a message may carry of what the agent
   read, imports nothing of the agent, nothing of the contracts and neither `os`
   nor `net`: what may be written down is a question about text;
+- `internal/spool` reads no contract, reaches no network, holds no key and opens
+  neither the installation nor the configuration: it keeps records as the bytes
+  admission hands it, in the directory and within the budget it is given;
 - production code reads nothing from the environment the agent was started in;
 - production code never recovers from a panic.
 
