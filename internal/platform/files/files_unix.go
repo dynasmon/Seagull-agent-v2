@@ -32,6 +32,26 @@ func Lock(file *os.File) error {
 	return nil
 }
 
+// Available is what the filesystem holding file still lets an account that is
+// not the superuser write, which is the room the agent can count on.
+func Available(file *os.File) (int64, error) {
+	connection, err := file.SyscallConn()
+	if err != nil {
+		return 0, fmt.Errorf("measure the room left beside %s: %w", file.Name(), err)
+	}
+	var described syscall.Statfs_t
+	var measured error
+	if err := connection.Control(func(descriptor uintptr) {
+		measured = syscall.Fstatfs(int(descriptor), &described)
+	}); err != nil {
+		return 0, fmt.Errorf("measure the room left beside %s: %w", file.Name(), err)
+	}
+	if measured != nil {
+		return 0, fmt.Errorf("measure the room left beside %s: %w", file.Name(), measured)
+	}
+	return int64(described.Bavail) * int64(described.Bsize), nil
+}
+
 func Private(info fs.FileInfo) error {
 	described, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {

@@ -146,6 +146,33 @@ func TestWhatRootOwnsIsTrustedAndWhatAnotherAccountOwnsIsNot(t *testing.T) {
 	}
 }
 
+func TestTheRoomLeftIsWhatTheFilesystemStillTakes(t *testing.T) {
+	directory := open(t, t.TempDir())
+	before, err := files.Available(directory)
+	if err != nil || before <= 0 {
+		t.Fatalf("the filesystem has %d bytes left: %v", before, err)
+	}
+	written := filepath.Join(directory.Name(), "taken")
+	file, err := os.Create(written)
+	if err != nil {
+		t.Fatalf("create %s: %v", written, err)
+	}
+	defer file.Close()
+	if _, err := file.Write(make([]byte, 8<<20)); err != nil {
+		t.Fatalf("write %s: %v", written, err)
+	}
+	if err := file.Sync(); err != nil {
+		t.Fatalf("sync %s: %v", written, err)
+	}
+	after, err := files.Available(directory)
+	if err != nil {
+		t.Fatalf("measure the room left: %v", err)
+	}
+	if taken := before - after; taken < 4<<20 {
+		t.Skipf("the filesystem reports %d bytes taken by 8MiB written, so something else writes to it too", taken)
+	}
+}
+
 func open(t *testing.T, path string) *os.File {
 	t.Helper()
 	file, err := os.Open(path)
