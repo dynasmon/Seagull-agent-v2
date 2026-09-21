@@ -177,6 +177,47 @@ func TestAskingAgainStartsAModuleThatSpentItsBudget(t *testing.T) {
 	}
 }
 
+// An operator who reads that a module failed and asks for it again gets it
+// started again, however soon after the failure the request arrives: the
+// failure is only reported once the module's goroutine has let it go.
+func TestAModuleAskedForAgainAsItFailsForGoodIsStartedAgain(t *testing.T) {
+	failing := collector(t)
+	logs := &stalling{on: `"msg":"module_failed"`, reached: make(chan struct{}), release: make(chan struct{})}
+	collection, err := modules.New(slog.New(slog.NewJSONHandler(logs, nil)), modules.Policy{Backoff: time.Millisecond, Budget: 1},
+		modules.Module{Name: "auth", Enabled: true, Collect: failing.collect})
+	if err != nil {
+		t.Fatalf("compose the collection: %v", err)
+	}
+	stop, stopped := running(t, collection)
+	defer func() { stop(); _ = stopped() }()
+
+	failing.started(t)
+	failing.fail(t, errors.New("the journal moved"))
+	select {
+	case <-logs.reached:
+	case <-time.After(settle):
+		t.Fatal("the collection did not report the module that failed")
+	}
+	health(t, collection, map[string]modules.State{"auth": modules.Failed})
+	applied := make(chan error, 1)
+	go func() { applied <- collection.Apply([]string{"auth"}) }()
+	deadline := time.Now().Add(settle)
+	for collection.Health()[0].State == modules.Failed && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	close(logs.release)
+	select {
+	case err := <-applied:
+		if err != nil {
+			t.Fatalf("ask for auth again: %v", err)
+		}
+	case <-time.After(settle):
+		t.Fatal("asking for auth again did not return")
+	}
+	failing.started(t)
+	health(t, collection, map[string]modules.State{"auth": modules.Running})
+}
+
 func TestAModuleThatStopsWithoutFailingIsStartedAgain(t *testing.T) {
 	quiet := collector(t)
 	collection, logs := composed(t, modules.Policy{Backoff: time.Millisecond, Budget: 3},
@@ -416,6 +457,24 @@ func (d *driven) fail(t *testing.T, err error) {
 type journal struct {
 	mu   sync.Mutex
 	held bytes.Buffer
+}
+
+type stalling struct {
+	journal
+	on      string
+	reached chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *stalling) Write(line []byte) (int, error) {
+	if strings.Contains(string(line), s.on) {
+		s.once.Do(func() {
+			close(s.reached)
+			<-s.release
+		})
+	}
+	return s.journal.Write(line)
 }
 
 func (j *journal) Write(line []byte) (int, error) {
