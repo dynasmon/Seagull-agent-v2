@@ -16,10 +16,11 @@ var (
 	errIO      = errors.New("input/output error")
 )
 
-// A faulty disk fails the write or the sync it is told to, counting from now,
+// A faulty host fails the write or the sync it is told to, counting from now,
 // and behaves as the system does otherwise. A write that fails still writes
 // the first cut bytes it was given, as a disk that fills up part way does.
 type faulty struct {
+	system
 	writes int
 	syncs  int
 	cut    int
@@ -178,7 +179,7 @@ func spoolDirectory(t *testing.T) string {
 	return directory
 }
 
-func openWith(t *testing.T, directory string, disk disk) (*Spool, *strings.Builder) {
+func openWith(t *testing.T, directory string, disk host) (*Spool, *strings.Builder) {
 	t.Helper()
 	root, err := os.OpenRoot(directory)
 	if err != nil {

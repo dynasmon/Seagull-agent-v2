@@ -84,10 +84,13 @@ type Server struct {
 }
 
 type Transport struct {
-	ConnectTimeout   Duration `json:"connect_timeout"`
-	RequestTimeout   Duration `json:"request_timeout"`
-	MaxBatchBytes    Size     `json:"max_batch_bytes"`
-	MaxResponseBytes Size     `json:"max_response_bytes"`
+	ConnectTimeout              Duration `json:"connect_timeout"`
+	RequestTimeout              Duration `json:"request_timeout"`
+	MaxBatchBytes               Size     `json:"max_batch_bytes"`
+	MaxEventsPerBatch           int      `json:"max_events_per_batch"`
+	MaxInventoryRecordsPerBatch int      `json:"max_inventory_records_per_batch"`
+	MaxResponseBytes            Size     `json:"max_response_bytes"`
+	MaxUploadBytesPerSecond     Size     `json:"max_upload_bytes_per_second"`
 }
 
 type Spool struct {
@@ -124,10 +127,13 @@ func defaults() Config {
 		Format:   Format,
 		Identity: Identity{KeyProvider: KeysInFiles},
 		Transport: Transport{
-			ConnectTimeout:   Duration(10 * time.Second),
-			RequestTimeout:   Duration(30 * time.Second),
-			MaxBatchBytes:    4 << 20,
-			MaxResponseBytes: 64 << 10,
+			ConnectTimeout:              Duration(10 * time.Second),
+			RequestTimeout:              Duration(30 * time.Second),
+			MaxBatchBytes:               4 << 20,
+			MaxEventsPerBatch:           1000,
+			MaxInventoryRecordsPerBatch: 64,
+			MaxResponseBytes:            64 << 10,
+			MaxUploadBytesPerSecond:     1 << 20,
 		},
 		Spool:   Spool{MaxBytes: 512 << 20, MaxAge: Duration(72 * time.Hour)},
 		Modules: Modules{},
@@ -362,11 +368,22 @@ func (t *Transport) validate() []error {
 		duration("transport.connect_timeout", t.ConnectTimeout, Duration(time.Second), Duration(time.Minute)),
 		duration("transport.request_timeout", t.RequestTimeout, Duration(5*time.Second), Duration(10*time.Minute)),
 		size("transport.max_batch_bytes", t.MaxBatchBytes, 64<<10, 8<<20),
+		count("transport.max_events_per_batch", t.MaxEventsPerBatch, 1, 1000),
+		count("transport.max_inventory_records_per_batch", t.MaxInventoryRecordsPerBatch, 1, 64),
 		size("transport.max_response_bytes", t.MaxResponseBytes, 4<<10, 1<<20),
+		size("transport.max_upload_bytes_per_second", t.MaxUploadBytesPerSecond, 64<<10, 1<<30),
 	)
-	if len(found) == 0 && t.RequestTimeout < t.ConnectTimeout {
+	if len(found) > 0 {
+		return found
+	}
+	sending := time.Duration(float64(t.MaxBatchBytes) / float64(t.MaxUploadBytesPerSecond) * float64(time.Second))
+	switch {
+	case t.RequestTimeout < t.ConnectTimeout:
 		found = append(found, fmt.Errorf("transport.request_timeout is %s, and it covers the whole request, so it is never shorter than transport.connect_timeout, %s",
 			t.RequestTimeout, t.ConnectTimeout))
+	case Duration(sending)+t.ConnectTimeout > t.RequestTimeout:
+		found = append(found, fmt.Errorf("transport.request_timeout is %s, and it covers connecting, %s, and sending a batch of transport.max_batch_bytes, %s, at transport.max_upload_bytes_per_second, %s, which takes %s",
+			t.RequestTimeout, t.ConnectTimeout, t.MaxBatchBytes, t.MaxUploadBytesPerSecond, Duration(sending.Round(time.Second))))
 	}
 	return found
 }

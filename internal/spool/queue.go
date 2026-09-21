@@ -51,23 +51,34 @@ type loss struct {
 	bytes   int64
 }
 
-type disk interface {
-	write(file *os.File, content []byte) (int, error)
-	sync(file *os.File) error
-}
-
-type system struct{}
-
-func (system) write(file *os.File, content []byte) (int, error) { return file.Write(content) }
-
-func (system) sync(file *os.File) error { return file.Sync() }
-
 type appender struct {
 	file *os.File
-	disk disk
+	host host
 }
 
-func (a appender) Write(content []byte) (int, error) { return a.disk.write(a.file, content) }
+func (a appender) Write(content []byte) (int, error) { return a.host.write(a.file, content) }
+
+type settlement int
+
+const (
+	delivered settlement = iota + 1
+	lost
+	expired
+	quarantined
+)
+
+func (l *ledger) credit(kind settlement, records uint64) {
+	switch kind {
+	case delivered:
+		l.delivered += records
+	case lost:
+		l.lost += records
+	case expired:
+		l.expired += records
+	case quarantined:
+		l.quarantined += records
+	}
+}
 
 // A queue is the spool of one stream: its segments, which only ever grow at
 // the end of the last one, and its ledger. io is held across whatever changes
@@ -78,7 +89,7 @@ type queue struct {
 	root   *os.Root
 	budget *budget
 	logger *slog.Logger
-	disk   disk
+	host   host
 
 	io sync.Mutex
 
@@ -92,6 +103,11 @@ type queue struct {
 	held     int64
 	bytes    int64
 	cursor   cursor
+	maxAge   time.Duration
+	swept    time.Time
+	paused   time.Time
+	refused  uint64
+	withheld uint64
 }
 
 func (q *queue) recover() error {
@@ -250,8 +266,8 @@ func (q *queue) belongs(held segment, header []byte) error {
 	switch {
 	case !ok:
 		return nil
-	case described.format > format:
-		return fmt.Errorf("%w: %s is format %d, and this agent reads format %d", ErrNewer, q.path(held.name()), described.format, format)
+	case described.format > segmentFormat:
+		return fmt.Errorf("%w: %s is format %d, and this agent reads format %d", ErrNewer, q.path(held.name()), described.format, segmentFormat)
 	case described.stream != q.stream:
 		return fmt.Errorf("%w: %s holds records of %s", ErrDamaged, q.path(held.name()), described.stream)
 	case described.first != held.first:
@@ -315,7 +331,7 @@ func (q *queue) recoverLast(held *segment) (recovered, error) {
 		err = errors.Join(file.Close(), q.root.Remove(name), q.syncDirectory())
 		found.file = nil
 	} else {
-		err = errors.Join(file.Truncate(end), q.disk.sync(file))
+		err = errors.Join(file.Truncate(end), q.host.sync(file))
 		held.size = end
 	}
 	if err != nil {
@@ -336,14 +352,15 @@ func (q *queue) recoverLast(held *segment) (recovered, error) {
 
 func (q *queue) admit(records []Record) (Receipt, error) {
 	var frames int64
+	largest := q.budget.largest()
 	for i, record := range records {
 		switch {
 		case record.ID == "" || len(record.ID) > MaxIDBytes:
 			return Receipt{}, fmt.Errorf("%w: record %d has an identifier of %d bytes, and the spool keeps identifiers of 1 to %d bytes",
 				ErrRefused, i, len(record.ID), MaxIDBytes)
-		case len(record.Payload) == 0 || len(record.Payload) > MaxPayloadBytes:
-			return Receipt{}, fmt.Errorf("%w: record %d holds %d bytes, and the spool keeps records of 1 to %d bytes",
-				ErrRefused, i, len(record.Payload), MaxPayloadBytes)
+		case len(record.Payload) == 0 || int64(len(record.Payload)) > largest:
+			return Receipt{}, fmt.Errorf("%w: record %d holds %d bytes, and the spool keeps records of 1 to %d bytes, what one batch carries",
+				ErrRefused, i, len(record.Payload), largest)
 		}
 		frames += frameHeaderBytes + int64(len(record.ID)) + int64(len(record.Payload))
 	}
@@ -365,12 +382,12 @@ func (q *queue) admit(records []Record) (Receipt, error) {
 	if rotate {
 		needed += segmentHeaderBytes
 	}
-	if err := q.budget.reserve(needed); err != nil {
+	if err := q.budget.reserve(q.stream, needed); err != nil {
 		return Receipt{}, err
 	}
 	if rotate {
 		if err := q.rotate(first); err != nil {
-			q.budget.add(-needed)
+			q.budget.add(q.stream, -needed)
 			return Receipt{}, err
 		}
 	}
@@ -378,21 +395,21 @@ func (q *queue) admit(records []Record) (Receipt, error) {
 	q.mu.Lock()
 	file, last := q.active, q.segments[len(q.segments)-1]
 	q.mu.Unlock()
-	admitted := time.Now().UnixNano()
-	writer := bufio.NewWriterSize(appender{file: file, disk: q.disk}, chunkBytes)
+	admitted := q.host.now().UnixNano()
+	writer := bufio.NewWriterSize(appender{file: file, host: q.host}, chunkBytes)
 	for i, record := range records {
 		writer.Write(encodeFrameHeader(q.stream, first+uint64(i), admitted, record.ID, record.Payload))
 		writer.WriteString(record.ID)
 		writer.Write(record.Payload)
 	}
 	if err := writer.Flush(); err != nil {
-		q.budget.add(-frames)
-		if undone := errors.Join(file.Truncate(last.size), q.disk.sync(file)); undone != nil {
+		q.budget.add(q.stream, -frames)
+		if undone := errors.Join(file.Truncate(last.size), q.host.sync(file)); undone != nil {
 			q.fail(fmt.Errorf("discard an unfinished write to %s: %w", q.path(last.name()), undone))
 		}
 		return Receipt{}, fmt.Errorf("write to %s: %w", q.path(last.name()), err)
 	}
-	if err := q.disk.sync(file); err != nil {
+	if err := q.host.sync(file); err != nil {
 		failed := fmt.Errorf("sync %s: %w", q.path(last.name()), err)
 		q.fail(failed)
 		return Receipt{}, fmt.Errorf("%w: %w", ErrUnavailable, failed)
@@ -421,9 +438,9 @@ func (q *queue) rotate(first uint64) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", q.path(name), err)
 	}
-	_, err = q.disk.write(file, encodeSegmentHeader(q.stream, first))
+	_, err = q.host.write(file, encodeSegmentHeader(q.stream, first))
 	if err == nil {
-		err = q.disk.sync(file)
+		err = q.host.sync(file)
 	}
 	if err == nil {
 		err = q.syncDirectory()
@@ -451,6 +468,9 @@ func (q *queue) fail(err error) {
 }
 
 func (q *queue) read(from uint64, most, bytes int) ([]Entry, error) {
+	if _, err := q.expireDue(); err != nil {
+		return nil, err
+	}
 	q.mu.Lock()
 	if q.closed {
 		q.mu.Unlock()
@@ -492,8 +512,11 @@ func (q *queue) read(from uint64, most, bytes int) ([]Entry, error) {
 			start, prev = at.offset, at.prev
 		}
 		walked := newWalk(file, q.stream, start, held.size, buffer)
-		wanted := func(found frame) bool {
-			return found.sequence >= from && found.sequence > prev && found.sequence < upper && !settled.settled(found.sequence)
+		wanted := func(found frame) reading {
+			if found.sequence >= from && found.sequence > prev && found.sequence < upper && !settled.settled(found.sequence) {
+				return kept
+			}
+			return headerOnly
 		}
 		for !stopped {
 			found, body, skipped, err := walked.next(wanted)
@@ -551,7 +574,7 @@ func (q *queue) holds(first uint64) bool {
 	return slices.ContainsFunc(q.segments, func(held segment) bool { return held.first == first })
 }
 
-func (q *queue) acknowledge(sequences []uint64) error {
+func (q *queue) settle(sequences []uint64, kind settlement, reason string) error {
 	q.io.Lock()
 	defer q.io.Unlock()
 	q.mu.Lock()
@@ -565,22 +588,152 @@ func (q *queue) acknowledge(sequences []uint64) error {
 			return fmt.Errorf("%w: %s record %d was never admitted", ErrRefused, q.stream, sequence)
 		}
 	}
-	updated, newly := q.ledger.settle(consecutive(sequences))
+	runs := consecutive(sequences)
+	updated, newly := q.ledger.settle(runs)
 	q.mu.Unlock()
 	if newly == 0 {
 		return nil
 	}
-	updated.delivered += newly
+	updated.credit(kind, newly)
 	if err := q.store(updated); err != nil {
 		return err
+	}
+	if kind == quarantined {
+		q.logger.Warn("spool_records_quarantined", q.attributes(slog.Uint64("first", runs[0].first), slog.Uint64("records", newly),
+			slog.String("reason", secrets.Bounded(reason)),
+			slog.String("recovery", "none: the platform refuses them for good, so they are counted as quarantined rather than delivered"))...)
 	}
 	q.compact()
 	return nil
 }
 
-// A loss is settled before it is reported, so a record is reported lost once,
-// counted as lost for as long as the stream lasts, and its sequence is never
-// handed to another record.
+// What outlived its age settles as expired. Records are admitted in order, so
+// the first one still within its age ends the sweep: a clock set back only
+// keeps records longer. A sweep trusts the header of a record, which holds its
+// sequence and the moment it was admitted, and never reads what it carries.
+func (q *queue) expire() (uint64, error) {
+	q.mu.Lock()
+	if q.closed {
+		q.mu.Unlock()
+		return 0, ErrClosed
+	}
+	now, age := q.host.now(), q.maxAge
+	q.swept = now
+	segments, next, settled := slices.Clone(q.segments), q.next, q.ledger.clone()
+	q.mu.Unlock()
+	if age <= 0 {
+		return 0, nil
+	}
+	cutoff := now.Add(-age).UnixNano()
+	buffer := make([]byte, chunkBytes)
+	var runs []span
+	within := false
+	for i, held := range segments {
+		upper := next
+		if i+1 < len(segments) {
+			upper = segments[i+1].first
+		}
+		if within {
+			break
+		}
+		if settled.count(held.first, upper) == upper-held.first {
+			continue
+		}
+		file, _, err := q.open(held.name(), os.O_RDONLY)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		walked := newWalk(file, q.stream, segmentHeaderBytes, held.size, buffer)
+		prev := held.first - 1
+		for !within {
+			found, _, _, err := walked.next(func(frame) reading { return headerOnly })
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				file.Close()
+				return 0, fmt.Errorf("read %s: %w", q.path(held.name()), err)
+			}
+			if found.sequence <= prev || found.sequence >= upper {
+				continue
+			}
+			prev = found.sequence
+			switch n := len(runs); {
+			case settled.settled(found.sequence):
+			case found.admitted >= cutoff:
+				within = true
+			case n > 0 && runs[n-1].end == found.sequence:
+				runs[n-1].end++
+			default:
+				runs = append(runs, span{first: found.sequence, end: found.sequence + 1})
+			}
+		}
+		file.Close()
+	}
+	if len(runs) == 0 {
+		return 0, nil
+	}
+	q.io.Lock()
+	defer q.io.Unlock()
+	q.mu.Lock()
+	updated, newly := q.ledger.settle(runs)
+	q.mu.Unlock()
+	if newly == 0 {
+		return 0, nil
+	}
+	updated.expired += newly
+	if err := q.store(updated); err != nil {
+		return 0, err
+	}
+	q.logger.Warn("spool_records_expired", q.attributes(slog.Uint64("first", runs[0].first), slog.Uint64("records", newly),
+		slog.Duration("max_age", age),
+		slog.String("recovery", "none: they are older than the platform takes or the configuration keeps, so they are counted as expired rather than delivered"))...)
+	q.compact()
+	return newly, nil
+}
+
+func (q *queue) expireDue() (uint64, error) {
+	q.mu.Lock()
+	due := q.maxAge > 0 && q.host.now().Sub(q.swept) >= expiryInterval
+	q.mu.Unlock()
+	if !due {
+		return 0, nil
+	}
+	return q.expire()
+}
+
+func (q *queue) limit(age time.Duration) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.maxAge = age
+}
+
+func (q *queue) pressure(records int, err error) {
+	q.mu.Lock()
+	now, paused, withheld := q.host.now(), q.paused, q.withheld
+	switch {
+	case errors.Is(err, ErrFull):
+		q.refused += uint64(records)
+		q.withheld += uint64(records)
+		if paused.IsZero() {
+			q.paused = now
+		}
+	case err == nil:
+		q.paused, q.withheld = time.Time{}, 0
+	}
+	q.mu.Unlock()
+	switch {
+	case errors.Is(err, ErrFull) && paused.IsZero():
+		q.logger.Warn("spool_admission_paused", q.attributes(slog.Any("reason", err),
+			slog.String("recovery", "none: collectors keep their place in what they read and admit again once delivery frees room or records expire"))...)
+	case err == nil && !paused.IsZero():
+		q.logger.Info("spool_admission_resumed", q.attributes(slog.Duration("paused", now.Sub(paused)), slog.Uint64("refused", withheld))...)
+	}
+}
+
 func (q *queue) settleLost(losses []loss) error {
 	if len(losses) == 0 {
 		return nil
@@ -665,7 +818,7 @@ func (q *queue) compact() {
 			q.cursor = cursor{}
 		}
 		q.mu.Unlock()
-		q.budget.add(-held.size)
+		q.budget.add(q.stream, -held.size)
 		removed = true
 	}
 	if !removed {
@@ -690,9 +843,9 @@ func (q *queue) store(next ledger) error {
 	if err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
-	_, err = q.disk.write(file, content)
+	_, err = q.host.write(file, content)
 	if err == nil {
-		err = q.disk.sync(file)
+		err = q.host.sync(file)
 	}
 	err = errors.Join(err, file.Close())
 	if err == nil {
@@ -708,14 +861,25 @@ func (q *queue) store(next ledger) error {
 	grown := int64(len(content)) - q.held
 	q.ledger, q.held, q.bytes = next, int64(len(content)), q.bytes+grown
 	q.mu.Unlock()
-	q.budget.add(grown)
+	q.budget.add(q.stream, grown)
 	return nil
 }
 
 func (q *queue) stats() StreamStats {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	held := StreamStats{Stream: q.stream, Bytes: q.bytes, Delivered: q.ledger.delivered, Lost: q.ledger.lost, Unavailable: q.broken}
+	held := StreamStats{
+		Stream:      q.stream,
+		MaxAge:      q.maxAge,
+		Bytes:       q.bytes,
+		Delivered:   q.ledger.delivered,
+		Lost:        q.ledger.lost,
+		Expired:     q.ledger.expired,
+		Quarantined: q.ledger.quarantined,
+		Refused:     q.refused,
+		Paused:      q.paused,
+		Unavailable: q.broken,
+	}
 	if len(q.segments) > 0 {
 		first := q.segments[0].first
 		held.Outstanding = q.next - first - q.ledger.count(first, q.next)
@@ -775,7 +939,7 @@ func (q *queue) names() ([]string, error) {
 	return names, nil
 }
 
-func (q *queue) syncDirectory() error { return syncDirectory(q.root, q.disk) }
+func (q *queue) syncDirectory() error { return syncDirectory(q.root, q.host) }
 
 func (q *queue) path(name string) string { return filepath.Join(q.root.Name(), name) }
 

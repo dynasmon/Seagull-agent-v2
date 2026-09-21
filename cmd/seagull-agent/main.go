@@ -138,7 +138,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	}
 	posture := keys.Posture()
 	started = append(started, slog.String("key_provider", posture.Provider), slog.Bool("key_exportable", posture.Exportable))
-	spooled, err := openSpool(installation, settings.Spool, logger)
+	spooled, err := openSpool(installation, settings, logger)
 	if err != nil {
 		logger.Error("agent_not_started", slog.Any("error", err), slog.String("recovery", recovery(path, state, err)))
 		return 1
@@ -253,7 +253,7 @@ func (c *configuration) reload() {
 	}
 	apply(candidate, c.level)
 	if c.spool != nil {
-		c.spool.Limit(limits(candidate.Spool))
+		c.spool.Limit(limits(candidate))
 	}
 	c.logger.Info("configuration_reloaded", slog.String("config", c.path), slog.String("log_level", candidate.Logging.Level))
 }
@@ -273,7 +273,7 @@ func openKeys(installation *identity.Installation, provider string) (pki.KeyProv
 	return keys, nil
 }
 
-func openSpool(installation *identity.Installation, settings config.Spool, logger *slog.Logger) (*spool.Spool, error) {
+func openSpool(installation *identity.Installation, settings config.Config, logger *slog.Logger) (*spool.Spool, error) {
 	directory, err := installation.Directory(spoolDirectory)
 	if err != nil {
 		return nil, err
@@ -281,8 +281,16 @@ func openSpool(installation *identity.Installation, settings config.Spool, logge
 	return spool.Open(directory, limits(settings), logger)
 }
 
-func limits(settings config.Spool) spool.Limits {
-	return spool.Limits{MaxBytes: int64(settings.MaxBytes)}
+func limits(settings config.Config) spool.Limits {
+	kept := time.Duration(settings.Spool.MaxAge)
+	return spool.Limits{
+		MaxBytes:       int64(settings.Spool.MaxBytes),
+		MaxRecordBytes: int64(settings.Transport.MaxBatchBytes) - protocol.BatchEnvelopeBytes,
+		MaxAge: map[spool.Stream]time.Duration{
+			spool.Events:    min(kept, protocol.MaxEventAge),
+			spool.Inventory: min(kept, protocol.MaxInventoryAge),
+		},
+	}
 }
 
 func backlog(logger *slog.Logger, held spool.Stats) {
@@ -291,8 +299,11 @@ func backlog(logger *slog.Logger, held spool.Stats) {
 		reported = append(reported, slog.Group(stream.Stream.String(),
 			slog.Uint64("outstanding", stream.Outstanding),
 			slog.Int64("bytes", stream.Bytes),
+			slog.Duration("max_age", stream.MaxAge),
 			slog.Uint64("delivered", stream.Delivered),
-			slog.Uint64("lost", stream.Lost)))
+			slog.Uint64("lost", stream.Lost),
+			slog.Uint64("expired", stream.Expired),
+			slog.Uint64("quarantined", stream.Quarantined)))
 	}
 	logger.Info("spool_opened", reported...)
 }

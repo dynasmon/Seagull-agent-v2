@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -19,6 +20,16 @@ const (
 	Version                = 1
 	EventSchemaVersion     = 1
 	InventorySchemaVersion = 1
+)
+
+// What the recorded platform admits beyond the shape of a record: events and
+// inventory no older than these ages, and a batch within its body ceiling, of
+// which the batch identifier, the protocol version and the framing of a record
+// take less than BatchEnvelopeBytes when the batch carries one record.
+const (
+	MaxEventAge        = 168 * time.Hour
+	MaxInventoryAge    = 720 * time.Hour
+	BatchEnvelopeBytes = 1 << 10
 )
 
 const (

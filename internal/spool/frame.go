@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	format             = 1
+	segmentFormat      = 1
 	segmentHeaderBytes = 20
 	frameHeaderBytes   = 32
 	sectorBytes        = 512
@@ -27,7 +27,7 @@ func checksum(content []byte) uint32 { return crc32.Checksum(content, castagnoli
 func encodeSegmentHeader(stream Stream, first uint64) []byte {
 	header := make([]byte, 0, segmentHeaderBytes)
 	header = append(header, segmentMagic...)
-	header = binary.LittleEndian.AppendUint16(header, format)
+	header = binary.LittleEndian.AppendUint16(header, segmentFormat)
 	header = append(header, byte(stream), 0)
 	header = binary.LittleEndian.AppendUint64(header, first)
 	return binary.LittleEndian.AppendUint32(header, checksum(header))
@@ -51,9 +51,9 @@ func decodeSegmentHeader(header []byte) (segmentHeader, bool) {
 		first:  binary.LittleEndian.Uint64(header[8:]),
 	}
 	switch {
-	case described.format > format:
+	case described.format > segmentFormat:
 		return described, true
-	case described.format != format || header[7] != 0:
+	case described.format != segmentFormat || header[7] != 0:
 		return segmentHeader{}, false
 	case binary.LittleEndian.Uint32(header[16:]) != checksum(header[:16]):
 		return segmentHeader{}, false
@@ -119,7 +119,15 @@ func newWalk(file io.ReaderAt, stream Stream, at, end int64, buffer []byte) *wal
 	return &walk{file: file, stream: stream, at: at, end: end, buffer: buffer}
 }
 
-func (w *walk) next(keep func(frame) bool) (frame, []byte, int64, error) {
+type reading int
+
+const (
+	verified reading = iota
+	headerOnly
+	kept
+)
+
+func (w *walk) next(mode func(frame) reading) (frame, []byte, int64, error) {
 	start := w.at
 	w.headed = 0
 	for w.at < w.end {
@@ -138,9 +146,16 @@ func (w *walk) next(keep func(frame) bool) (frame, []byte, int64, error) {
 			w.at = w.end
 			break
 		}
-		body, valid, err := w.body(found, keep != nil && keep(found))
-		if err != nil {
-			return frame{}, nil, 0, err
+		read := verified
+		if mode != nil {
+			read = mode(found)
+		}
+		var body []byte
+		valid := true
+		if read != headerOnly {
+			if body, valid, err = w.body(found, read == kept); err != nil {
+				return frame{}, nil, 0, err
+			}
 		}
 		w.at += found.size()
 		if !valid {

@@ -115,7 +115,8 @@ func TestTheAgentReadsBackItsSpoolAsItStarts(t *testing.T) {
 	opened, found := logged(t, serveStopped(t, path), "spool_opened")
 	events, _ := opened["events"].(map[string]any)
 	inventory, _ := opened["inventory"].(map[string]any)
-	if !found || events["outstanding"] != float64(1) || events["delivered"] != float64(1) || events["lost"] != float64(0) {
+	if !found || events["outstanding"] != float64(1) || events["delivered"] != float64(1) || events["lost"] != float64(0) ||
+		events["expired"] != float64(0) || events["quarantined"] != float64(0) || events["max_age"] != float64(72*time.Hour) {
 		t.Fatalf("the agent reported its spool as %v", opened)
 	}
 	if inventory["outstanding"] != float64(0) || opened["bytes"].(float64) <= 0 {
@@ -390,10 +391,41 @@ func TestTheAgentReadsItsConfigurationAgainWhenItIsAsked(t *testing.T) {
 	}
 
 	held.spool, _ = spoolIn(t, state)
-	rewrite(t, path, state, map[string]string{"spool": `{"max_bytes": "32MiB"}`})
+	rewrite(t, path, state, map[string]string{"spool": `{"max_bytes": "32MiB", "max_age": "400h"}`})
 	held.reload()
-	if limit := held.spool.Stats().MaxBytes; limit != 32<<20 {
-		t.Fatalf("after the reload the spool keeps to %d bytes", limit)
+	spooled := held.spool.Stats()
+	if spooled.MaxBytes != 32<<20 {
+		t.Fatalf("after the reload the spool keeps to %d bytes", spooled.MaxBytes)
+	}
+	for _, stream := range spooled.Streams {
+		if want := map[spool.Stream]time.Duration{spool.Events: 168 * time.Hour, spool.Inventory: 400 * time.Hour}[stream.Stream]; stream.MaxAge != want {
+			t.Errorf("after the reload %s keeps records for %s, want %s", stream.Stream, stream.MaxAge, want)
+		}
+	}
+}
+
+func TestTheSpoolKeepsNothingLongerOrLargerThanThePlatformTakes(t *testing.T) {
+	for name, c := range map[string]struct {
+		kept              time.Duration
+		events, inventory time.Duration
+	}{
+		"a day":       {kept: 24 * time.Hour, events: 24 * time.Hour, inventory: 24 * time.Hour},
+		"a fortnight": {kept: 336 * time.Hour, events: 168 * time.Hour, inventory: 336 * time.Hour},
+		"thirty days": {kept: 720 * time.Hour, events: 168 * time.Hour, inventory: 720 * time.Hour},
+	} {
+		t.Run(name, func(t *testing.T) {
+			settings := loaded(t, configured(t, stateDirectory(t), map[string]string{
+				"spool":     fmt.Sprintf(`{"max_age": %q}`, c.kept),
+				"transport": `{"max_batch_bytes": "2MiB"}`,
+			}))
+			held := limits(settings)
+			if held.MaxAge[spool.Events] != c.events || held.MaxAge[spool.Inventory] != c.inventory {
+				t.Fatalf("a spool kept for %s keeps events for %s and inventory for %s", c.kept, held.MaxAge[spool.Events], held.MaxAge[spool.Inventory])
+			}
+			if held.MaxRecordBytes != 2<<20-protocol.BatchEnvelopeBytes || held.MaxBytes != 512<<20 {
+				t.Fatalf("the spool keeps records of up to %d bytes in %d", held.MaxRecordBytes, held.MaxBytes)
+			}
+		})
 	}
 }
 
@@ -953,7 +985,7 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 			prepare: func(t *testing.T, state string) {
 				_, release := spoolIn(t, state)
 				release()
-				if err := os.WriteFile(filepath.Join(state, spoolDirectory, "events", "ledger"), []byte("SGLG\x02\x00"+strings.Repeat("\x00", 40)), 0o600); err != nil {
+				if err := os.WriteFile(filepath.Join(state, spoolDirectory, "events", "ledger"), []byte("SGLG\x03\x00"+strings.Repeat("\x00", 40)), 0o600); err != nil {
 					t.Fatalf("write a newer ledger: %v", err)
 				}
 			},
@@ -1043,7 +1075,11 @@ func spoolIn(t *testing.T, state string) (*spool.Spool, func()) {
 	if err != nil {
 		t.Fatalf("open the installation: %v", err)
 	}
-	held, err := openSpool(installation, config.Spool{MaxBytes: 64 << 20}, slog.New(slog.DiscardHandler))
+	settings := config.Config{
+		Spool:     config.Spool{MaxBytes: 64 << 20, MaxAge: config.Duration(72 * time.Hour)},
+		Transport: config.Transport{MaxBatchBytes: 4 << 20},
+	}
+	held, err := openSpool(installation, settings, slog.New(slog.DiscardHandler))
 	if err != nil {
 		installation.Close()
 		t.Fatalf("open the spool: %v", err)
