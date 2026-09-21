@@ -314,7 +314,8 @@ func (c *Collection) waiting(names []string) []waiting {
 }
 
 func (c *Collection) collect(ctx context.Context, held *module) {
-	defer c.released(held)
+	var spent error
+	defer func() { c.released(held, spent) }()
 	for {
 		started := time.Now()
 		err := held.Collect(ctx)
@@ -322,8 +323,9 @@ func (c *Collection) collect(ctx context.Context, held *module) {
 			c.stopped(held)
 			return
 		}
-		wait, spent := c.failed(held, err, time.Since(started))
-		if spent {
+		wait, last := c.failed(held, err, time.Since(started))
+		if last != nil {
+			spent = last
 			return
 		}
 		timer := time.NewTimer(wait)
@@ -343,7 +345,7 @@ func (c *Collection) collect(ctx context.Context, held *module) {
 	}
 }
 
-func (c *Collection) failed(held *module, err error, ran time.Duration) (time.Duration, bool) {
+func (c *Collection) failed(held *module, err error, ran time.Duration) (time.Duration, error) {
 	c.mu.Lock()
 	if err == nil {
 		err = errStoppedEarly
@@ -353,19 +355,15 @@ func (c *Collection) failed(held *module, err error, ran time.Duration) (time.Du
 	}
 	held.running, held.failures, held.since = false, held.failures+1, time.Now()
 	held.reason = bounded(err.Error())
-	held.spent = held.failures >= c.policy.Budget
+	if held.failures >= c.policy.Budget {
+		c.mu.Unlock()
+		return 0, err
+	}
 	wait := c.backoff(held.failures)
 	attributes := append(held.attributes(), slog.Any("error", err), slog.Int("failures", held.failures))
-	spent := held.spent
 	c.mu.Unlock()
-
-	if spent {
-		c.logger.Error("module_failed", append(attributes,
-			slog.String("recovery", "correct what the module reports and ask the agent to collect with it again"))...)
-		return 0, true
-	}
 	c.logger.Warn("module_restarting", append(attributes, slog.Duration("in", wait))...)
-	return wait, false
+	return wait, nil
 }
 
 func (c *Collection) stopped(held *module) {
@@ -375,12 +373,18 @@ func (c *Collection) stopped(held *module) {
 	c.logger.Info("module_stopped", slog.String("module", held.Name))
 }
 
-func (c *Collection) released(held *module) {
+func (c *Collection) released(held *module, spent error) {
 	c.mu.Lock()
 	done := held.done
 	held.cancel, held.done, held.running = nil, nil, false
+	held.spent = held.spent || spent != nil
+	attributes := append(held.attributes(), slog.Any("error", spent), slog.Int("failures", held.failures))
 	c.mu.Unlock()
 	close(done)
+	if spent != nil {
+		c.logger.Error("module_failed", append(attributes,
+			slog.String("recovery", "correct what the module reports and ask the agent to collect with it again"))...)
+	}
 }
 
 func (c *Collection) backoff(failures int) time.Duration {
