@@ -116,9 +116,12 @@ The agent reads the file whole, or refuses it whole:
 | `transport.connect_timeout` | `10s` | `1s` to `1m` |
 | `transport.request_timeout` | `30s` | `5s` to `10m`, never shorter than the connect timeout |
 | `transport.max_batch_bytes` | `4MiB` | `64KiB` to `8MiB`, the recorded platform's request ceiling |
+| `transport.max_events_per_batch` | `1000` | 1 to 1000, the recorded platform's ceiling |
+| `transport.max_inventory_records_per_batch` | `64` | 1 to 64, the recorded platform's ceiling |
 | `transport.max_response_bytes` | `64KiB` | `4KiB` to `1MiB` |
+| `transport.max_upload_bytes_per_second` | `1MiB` | `64KiB` to `1GiB`, and enough to connect and send a whole batch within `transport.request_timeout` |
 | `spool.max_bytes` | `512MiB` | `16MiB` to `64GiB`, and at least four batches |
-| `spool.max_age` | `72h` | `1h` to `720h` |
+| `spool.max_age` | `72h` | `1h` to `720h`; events are kept `168h` at most |
 | `modules` | `{}` | the collectors this build has, which are none |
 | `resources.memory_limit` | `256MiB` | `64MiB` to `8GiB` |
 | `resources.max_concurrent_collections` | `2` | 1 to 64 |
@@ -129,9 +132,10 @@ The agent reads the file whole, or refuses it whole:
 | `updates.enabled` | `false` | `false`: this build installs no update |
 
 The defaults are what a supported deployment reaches the recorded platform with.
-Its ingest listener reads at most 8 MiB per request, and admits events up to
-seven days old and inventory up to thirty, so a spool kept far beyond that keeps
-records the platform will not take. `resources.memory_limit` is the target the
+Its ingest listener reads at most 8 MiB per request, takes at most 1000 events
+or 64 inventory records in a batch, and admits events up to seven days old and
+inventory up to thirty, so the agent keeps no event longer than seven days,
+whatever `spool.max_age` says. `resources.memory_limit` is the target the
 garbage collector works to, not a ceiling the kernel enforces: that one belongs
 to the service the agent is installed as. None of the defaults turns a check off
 or leaves a budget unlimited, and there is no setting that does either.
@@ -162,15 +166,15 @@ validates the whole candidate before anything changes:
   `resources.shutdown_timeout` take stopping the agent and starting it again.
 
 What a setting does today follows what the agent has. `identity`, `logging`,
-`spool.max_bytes`, `resources.memory_limit` and `resources.shutdown_timeout` are
-in force: they decide where the installation is opened, what the log says, how
-much the spool keeps and what the agent spends. `server`, `transport`,
-`spool.max_age` and the concurrency budgets are validated here and take effect
-as the components that spend them arrive, so a deployment is configured once
-rather than as each one lands. `modules` and
-`updates.enabled` are the settings this build refuses outright: an agent that
-accepted them would be promising collection it cannot do and updates it cannot
-install.
+`spool`, `transport.max_batch_bytes`, `resources.memory_limit` and
+`resources.shutdown_timeout` are in force: they decide where the installation
+is opened, what the log says, how much the spool keeps and for how long, how
+large a record it takes, and what the agent spends. `server`, the rest of
+`transport` and the concurrency budgets are validated here and take effect as
+the components that spend them arrive, so a deployment is configured once rather
+than as each one lands. `modules` and `updates.enabled` are the settings this
+build refuses outright: an agent that accepted them would be promising
+collection it cannot do and updates it cannot install.
 
 ## Collection
 
@@ -417,8 +421,10 @@ A record is admitted once it is durable, and not before:
   everything the stream held was delivered and its files removed.
 
 A record is read back until it settles, and it settles once: as delivered when
-its acknowledgement is durable, or as lost when it cannot be read back.
-Each stream keeps what settled in its `ledger`, which is replaced whole: written
+its acknowledgement is durable, as lost when it cannot be read back, or as
+expired or quarantined, which [Pressure](#pressure) describes. Each stream keeps
+what settled, and how many records settled each way, in its `ledger`, which is
+replaced whole: written
 to a temporary file, synced, renamed over the ledger, and the directory synced.
 The rename is what makes the replacement atomic and the syncs are what make it
 durable, and neither stands in for the other. Acknowledgements may arrive in
@@ -458,17 +464,12 @@ Opening the spool reads back what it holds before the agent starts:
   another stream. The spool never resets itself, and `agent_not_started` says
   what to do instead.
 
-`spool.max_bytes` bounds every file the spool keeps, both streams together. A
-spool that is full refuses the records it is offered, keeping 64 KiB back so
-that a full spool can still record what it delivered, and admits again as
-delivery frees room. Segments are a sixteenth of that budget, between 1 MiB
-and 64 MiB, so freeing room never waits on more than that. A reload applies a
-new budget, and one lower than what the spool holds refuses records until
-delivery brings it under. Nothing is dropped to make room: deciding what to do
-while the platform is unreachable, and which records may expire, belongs to
-backpressure, and `spool.max_age` waits for it. What the spool holds in memory
-is the list of its segments, the spans that settled out of order and the
-records a read returns, never a segment: a record holds at most 8 MiB, and
+`spool.max_bytes` bounds every file the spool keeps, both streams together, and
+[Pressure](#pressure) says what happens when records keep arriving that the
+platform does not take. Segments are a sixteenth of that budget, between 1 MiB
+and 64 MiB, so freeing room never waits on more than that. What the spool holds
+in memory is the list of its segments, the spans that settled out of order and
+the records a read returns, never a segment: a record holds at most 8 MiB, and
 everything else is read through a buffer of 64 KiB.
 
 Only one process keeps a spool: the installation's lock already keeps a second
@@ -513,16 +514,101 @@ What the spool does not claim:
 - a record whose write was interrupted after it reached the disk, but before
   its receipt reached the collector, is read back and admitted again: the
   platform receives it twice, under the same identifier;
-- records wait while the platform is unreachable for as long as the budget
-  holds them. When it does not, the spool refuses more rather than choose what
-  to lose.
+- records wait while the platform is unreachable for as long as the budget and
+  their age allow, and no longer.
+
+## Pressure
+
+The agent keeps what it cannot deliver yet within limits it names, and when a
+limit is reached it says what it does rather than choose in silence what to
+lose.
+
+| What | Bounded by | Spent by |
+| --- | --- | --- |
+| Records on disk | `spool.max_bytes`, both streams together | the spool |
+| How long a record is kept | `spool.max_age`, and never longer than the platform admits it | the spool |
+| Records in memory | none are queued: a record is on disk or it was refused | admission |
+| One record | a batch that carries it alone: `transport.max_batch_bytes` less 1 KiB | the spool |
+| One batch | `transport.max_batch_bytes`, `transport.max_events_per_batch` and `transport.max_inventory_records_per_batch` | delivery, when it arrives |
+| Uploads at once | `resources.max_concurrent_uploads` | delivery, when it arrives |
+| Upload bandwidth | `transport.max_upload_bytes_per_second` | delivery, when it arrives |
+| Collection | the room admission leaves, and each collector's own budget | collectors and the resource governor, when they arrive |
+
+Priority is the agent's own, and never travels on the wire: events are what a
+host cannot produce again, and inventory is collected again on the next scan.
+It decides what the spool keeps when it cannot keep everything, and it never
+reorders a stream, which keeps the order its records were admitted in:
+
+- events may hold seven eighths of the budget and inventory half of it, so
+  events always have at least half the spool, inventory at least an eighth, and
+  neither waits on the other however long the platform is away;
+- which stream is sent first belongs to delivery, and arrives with it.
+
+A spool that has no room for a record refuses it, and admission is paused:
+
+- the refusal is `ErrFull`, and whoever admits keeps its place in what it reads
+  and tries again later. `spool_admission_paused` says so once, with the limit
+  that was reached, and `spool_admission_resumed` says how long the pause lasted
+  and how many records were refused during it; the stream's stats say since
+  when it is paused and how many records it refused;
+- what a source loses while its collector waits, a journal rotated past the
+  place the collector kept, is a gap in that source, and the collector reports
+  it: the first one arrives with the authentication log;
+- before it refuses a record for room, the spool expires what outlived its age.
+
+A record older than its stream's maximum age expires: it settles as expired, is
+reported as `spool_records_expired`, and is never delivered. The maximum age is
+`spool.max_age`, and never more than the recorded platform admits, `168h` for
+events and `720h` for inventory: a spool kept for a fortnight still sends the
+inventory it collected while the platform was away, and no event the platform
+would refuse. The spool looks for expired records as it opens, before it
+refuses a record for room and before a read, at most once a minute for each
+stream. It judges a record by the moment it was admitted, stops at the first
+record still within its age, and so keeps records longer, never shorter, when
+the clock is set back.
+
+A record the platform refuses for good is quarantined: it settles as
+quarantined, is reported once as `spool_records_quarantined` with the reason the
+platform gave, cut to what one message carries, and is never sent again.
+Deciding which refusals are for good belongs to delivery.
+
+Nothing is evicted. The spool never drops a record to make room for another: a
+record leaves it undelivered only when it is counted as lost, expired or
+quarantined, and each of those is reported and counted apart from what was
+delivered, in the ledger, in `spool_opened` and in the spool's stats.
+
+What the agent must still write is never refused for room: the spool keeps
+64 KiB of its budget for its ledgers, and refuses a record that would leave the
+filesystem it is on with less than 64 MiB free, so its acknowledgements, the
+installation beside it and, once collectors keep their place there, their
+checkpoints can still be written while records are refused. An acknowledgement
+or a quarantine is never refused for room.
+
+The evidence is in `internal/spool`: a test admits through a simulated outage of
+two days, with no acknowledgement, and checks that the spool never holds more
+than its budget, pauses, expires what outlives a day, admits again, keeps its
+heap flat and accounts for every record it admitted; others fill each stream
+first and check the room left to the other, keep a spool full for two hours and
+count its reports, take away the filesystem's room, quarantine, and settle
+records every way at once to check that each is counted once under one reason.
+
+What pressure does not claim:
+
+- the platform judges a record by the times it carries, and the spool by the
+  moment it admitted it, so a record already old when it was admitted can be
+  refused by the platform before it expires here;
+- a record that expires while its delivery is on its way may reach the platform
+  and still be counted as expired;
+- the filesystem's 64 MiB protects what the agent writes, not what the rest of
+  the host does: sizing `spool.max_bytes` to the disk is the deployment's to do.
 
 ## What the agent writes down
 
 The agent holds one secret, the private key of its installation, and it reads
 text it did not write: its configuration, its installation state, its trust
-bundle, its key files and what it finds in its spool. `internal/secrets` is the one place that decides what
-any of that may become in a log line, a refusal or a message on the terminal.
+bundle, its key files and what it finds in its spool. `internal/secrets` is the
+one place that decides what any of that may become in a log line, a refusal or a
+message on the terminal.
 
 - No message carries a key. A `Key` is a `crypto.Signer` with an identifier, so
   no caller holds a private half to print; the buffers a key file is read and
