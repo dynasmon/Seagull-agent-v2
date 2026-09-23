@@ -60,8 +60,10 @@ the enabled ones to `internal/runtime`, which owns their lifecycle.
 One component is composed: the configuration the agent holds, which reads the
 file again whenever the agent is asked to. The spool is not a component, since
 it starts no work of its own: the agent opens it with the installation, reads
-back what it holds before it starts, and closes it as it stops. Collection,
-local admission and delivery will each arrive as a component of its own.
+back what it holds before it starts, and closes it as it stops. Neither is the
+governor, which bounds the expensive work of whoever asks it and starts none of
+its own. Collection, local admission and delivery will each arrive as a
+component of its own.
 
 ## Configuration
 
@@ -124,7 +126,8 @@ The agent reads the file whole, or refuses it whole:
 | `spool.max_age` | `72h` | `1h` to `720h`; events are kept `168h` at most |
 | `modules` | `{}` | the collectors this build has, which are none |
 | `resources.memory_limit` | `256MiB` | `64MiB` to `8GiB` |
-| `resources.max_concurrent_collections` | `2` | 1 to 64 |
+| `resources.max_concurrent_scans` | `2` | 1 to 64 |
+| `resources.max_scan_bytes_per_second` | `8MiB` | `1MiB` to `1GiB` |
 | `resources.max_concurrent_uploads` | `1` | 1 to 16 |
 | `resources.shutdown_timeout` | `10s` | `1s` to `5m` |
 | `logging.level` | `info` | `debug`, `info`, `warn` or `error` |
@@ -166,13 +169,15 @@ validates the whole candidate before anything changes:
   `resources.shutdown_timeout` take stopping the agent and starting it again.
 
 What a setting does today follows what the agent has. `identity`, `logging`,
-`spool`, `transport.max_batch_bytes`, `resources.memory_limit` and
-`resources.shutdown_timeout` are in force: they decide where the installation
-is opened, what the log says, how much the spool keeps and for how long, how
-large a record it takes, and what the agent spends. `server`, the rest of
-`transport` and the concurrency budgets are validated here and take effect as
-the components that spend them arrive, so a deployment is configured once rather
-than as each one lands. `modules` and `updates.enabled` are the settings this
+`spool`, `resources`, `transport.max_batch_bytes` and
+`transport.max_upload_bytes_per_second` are in force: they decide where the
+installation is opened, what the log says, how much the spool keeps and for how
+long, how large a record it takes, and what the agent and its expensive work
+may spend. The governor keeps the budgets for scans and uploads before anything
+spends them, since no collector scans and nothing delivers yet. `server` and the
+rest of `transport` are validated here and take effect as the components that
+spend them arrive, so a deployment is configured once rather than as each one
+lands. `modules` and `updates.enabled` are the settings this
 build refuses outright: an agent that accepted them would be promising
 collection it cannot do and updates it cannot install.
 
@@ -530,9 +535,10 @@ lose.
 | Records in memory | none are queued: a record is on disk or it was refused | admission |
 | One record | a batch that carries it alone: `transport.max_batch_bytes` less 1 KiB | the spool |
 | One batch | `transport.max_batch_bytes`, `transport.max_events_per_batch` and `transport.max_inventory_records_per_batch` | delivery, when it arrives |
-| Uploads at once | `resources.max_concurrent_uploads` | delivery, when it arrives |
-| Upload bandwidth | `transport.max_upload_bytes_per_second` | delivery, when it arrives |
-| Collection | the room admission leaves, and each collector's own budget | collectors and the resource governor, when they arrive |
+| Uploads at once | `resources.max_concurrent_uploads` | the governor, for delivery when it arrives |
+| Upload bandwidth | `transport.max_upload_bytes_per_second` | the governor, for delivery when it arrives |
+| Scans | `resources.max_concurrent_scans`, `resources.max_scan_bytes_per_second` and the room left in the stream a scan admits to | the governor, for collectors when they arrive |
+| Reading a source as it is written | the room admission leaves | collectors, when they arrive |
 
 Priority is the agent's own, and never travels on the wire: events are what a
 host cannot produce again, and inventory is collected again on the next scan.
@@ -542,7 +548,8 @@ reorders a stream, which keeps the order its records were admitted in:
 - events may hold seven eighths of the budget and inventory half of it, so
   events always have at least half the spool, inventory at least an eighth, and
   neither waits on the other however long the platform is away;
-- which stream is sent first belongs to delivery, and arrives with it.
+- which stream is sent first is the governor's: events go before inventory
+  when both wait to be sent, as [Resources](#resources) describes.
 
 A spool that has no room for a record refuses it, and admission is paused:
 
@@ -601,6 +608,153 @@ What pressure does not claim:
   and still be counted as expired;
 - the filesystem's 64 MiB protects what the agent writes, not what the rest of
   the host does: sizing `spool.max_bytes` to the disk is the deployment's to do.
+
+## Resources
+
+The agent bounds what it spends in two ways, and says which is which. What it
+keeps to on its own is a budget: the memory its garbage collector works to, and
+what `internal/governor` lets expensive work spend. A budget binds the work that
+asks for it, is kept as well as the process is scheduled, and is measured by the
+tests below. What the operating system holds the agent to is a ceiling: the
+memory, processor time and tasks the cgroup of its service allows, and the
+descriptors it may open. A ceiling holds whatever the agent does, and belongs to
+the service the agent is installed as.
+
+| What | Budget the agent keeps to | Ceiling the system enforces |
+| --- | --- | --- |
+| Memory | `resources.memory_limit`, the target of the garbage collector | `memory.max` of its cgroup, which `MemoryMax=` sets |
+| Processor | `resources.max_concurrent_scans` and `resources.max_scan_bytes_per_second`, for expensive work | `cpu.max` of its cgroup, which `CPUQuota=` sets, and which Go follows in how many threads run goroutines at once |
+| Disk | `spool.max_bytes`, and the scan budget for what scans read | the filesystem the installation is on |
+| Network | `resources.max_concurrent_uploads` and `transport.max_upload_bytes_per_second` | none |
+| Tasks and descriptors | none | `pids.max` of its cgroup, which `TasksMax=` sets, and `RLIMIT_NOFILE`, which `LimitNOFILE=` sets |
+
+`agent_resources` says both as the agent starts and after every reload:
+`budgets` as configured; `ceilings` as read from the cgroup the process runs in,
+each the tightest limit on the way from that cgroup to the root of the hierarchy
+the process sees, and from its descriptor limit; `unenforced`, what nothing
+outside the agent bounds; and `processors`, how many threads Go runs goroutines
+on at once. The line is a warning with a `recovery` when anything is unenforced,
+or when `resources.memory_limit` is not below the memory ceiling, since the
+kernel would end the agent before its garbage collector works to that target.
+The agent reads ceilings on Linux, from a cgroup v2 hierarchy at
+`/sys/fs/cgroup`; elsewhere, or on a host that keeps only v1 controllers, the
+line is a warning that says the agent cannot tell, and never that nothing is
+enforced.
+
+The governor owns no work and starts none. A collector or delivery asks it
+before something expensive, and waits on it in a goroutine of its own:
+
+- a scan is expensive work a module does in one go, such as enumerating what is
+  installed or hashing a file. At most `resources.max_concurrent_scans` run at
+  once, and together they read and hash at most
+  `resources.max_scan_bytes_per_second`. A scan is one unit of work, a file or
+  a kind of inventory, and a module asks again for the next, so a long baseline
+  never keeps another module waiting for its end;
+- an upload is one batch on its way to the platform, from connecting to the
+  reply. At most `resources.max_concurrent_uploads` run at once, and together
+  they send at most `transport.max_upload_bytes_per_second`;
+- reading a source as it is written, as the authentication log will be read,
+  is not a scan: it never waits on the scan budget, and the room admission
+  leaves bounds it instead.
+
+A budget of bytes paces work rather than cutting it off: work charges what it
+reads or sends as it goes, and waits once it has spent what the budget allows
+so far. After a pause, work may spend an eighth of a second of its budget at
+once, and at least 64 KiB, and never faster than the budget after that. A wait
+lasts at least 20ms, so work kept waiting wakes at most fifty times a second:
+waking a goroutine costs the processor more than a shorter wait would save.
+
+What the governor keeps for critical work, and the order it serves the rest:
+
+- events are critical and inventory is bulk. When both wait to be sent, events
+  go first, and inventory goes after at most four event uploads in a row have
+  passed it, so events delay inventory and never starve it. The same order
+  holds for bandwidth when both send at once;
+- when two or more uploads may run at once, inventory takes one fewer, so an
+  event batch never waits for inventory to finish sending. With the default of
+  one, it waits at most for the inventory batch already on its way, which
+  `transport.request_timeout` bounds;
+- scans are served in turn, and the module holding the fewest slots goes first,
+  so a module that scans in parallel never keeps another's first scan waiting;
+- events always have at least half of the spool, as [Pressure](#pressure) says.
+
+Pressure reaches the governor as room. A scan that admits to a stream names what
+it needs there, and waits for that much room before it takes a slot, so it never
+holds a slot it cannot use: `scan_deferred` says so once, with the room there
+was, and `scan_resumed` says how long it waited. It looks again at growing
+intervals, from a quarter of a second up to five seconds, because what frees
+room, a delivery or an expiry, tells nobody who waits for it. A collector that
+admission refuses for room waits the same way, and keeps its place in its source
+meanwhile.
+
+Periodic work runs once an interval, at a phase drawn from the installation and
+the task: the SHA-256 digest of both, reduced to the interval.
+
+- installations draw their identifiers at random, so a fleet started at the
+  same moment, after a mass reboot or an upgrade, spreads each task across its
+  interval, and one installation's tasks do not all run at once;
+- runs fall at the same points of the clock whenever the agent started, so
+  neither a restart, a crash loop nor a reload runs a task before its turn;
+- a run the work kept waiting past its successor is not made up, and a clock
+  set back never brings back a run that already happened.
+
+Whatever the governor hands out comes back however the work ends. A scan or an
+upload gives its slot back when its work returns, whether it succeeded, failed
+or was cancelled; a wait for a slot, for bytes or for room ends as soon as its
+context does, and takes nothing with it. A module the collection disables is
+cancelled and waited for, so it leaves nothing scheduled, held or waiting
+behind. A reload replaces the budget whole: a lower one takes effect as the
+work already running ends, since nothing running is stopped for it, and a
+higher one serves what waits at once.
+
+The evidence is in `internal/governor`, on the clock of `testing/synctest`, so
+what a budget allows is checked exactly rather than waited for:
+
+- three modules hash real files over and over at the scan budget, inventory
+  sends at the upload budget, and an authentication event is admitted to a real
+  spool every half second. Over three minutes, scans spend exactly their budget
+  and never more over any stretch of time, at most two of them run at once,
+  every event is admitted and delivered within 2.5 seconds, no event upload
+  waits longer than one inventory upload, and inventory is sent throughout;
+- eight senders reconnect at once after a five-minute outage: no more attempts
+  run at once than the budget, one of them is kept for events, and a 64 MiB
+  backlog drains at the upload budget without a burst;
+- a fleet of ten thousand random installations started at the same moment
+  spreads each task across every hundredth of its interval, for intervals of a
+  minute, an hour and a day;
+- tests take slots away with cancellations, failures and lower budgets, and
+  check the order critical, bulk and parallel work is served in; a test in
+  `internal/modules` disables modules while they wait for their turn, for a slot
+  and for their budget, and finds the governor holding nothing;
+- hashing 16 MiB through the governor allocates less than 1 MiB, and hashing
+  8 MiB paced at 16 MiB/s takes about twice the processor time of the hashing
+  itself, 12 ms rather than 6 ms over 0.38 seconds, on the AMD Ryzen 7 5700X,
+  8 processors and Linux 7.0 the tests were developed on. The test prints both
+  on whatever host runs it.
+
+`internal/platform/ceilings` reads cgroup hierarchies written for its tests,
+and a test starts a process under a transient systemd scope with `MemoryMax=`,
+`CPUQuota=` and `TasksMax=` and finds the process reading back what the scope
+sets. It runs wherever the account running the tests has a systemd user manager
+that hands a scope those controllers, and is skipped elsewhere.
+
+What the budgets do not claim:
+
+- a budget binds only work that asks the governor. Nothing stops code from
+  reading a file without charging for it, so every collector is reviewed for it
+  as it arrives;
+- the scan budget counts bytes, not the processor time or the disk operations
+  they cost: a scan charges what it reads, and each collector decides what to
+  charge for work that reads little, such as listing a large directory;
+- the processor time above is one host's. What the agent spends on a
+  deployment is measured when its collectors exist, and until then no footprint
+  is claimed;
+- the governor keeps no memory budget of its own: each collector bounds what it
+  holds, and `resources.memory_limit` and the memory ceiling bound the process;
+- the events of different collectors are not kept apart in the spool: while the
+  authentication log is the only source of events, none has to be;
+- the phase spreads a fleet whose installations drew their own identifiers: a
+  copied installation shares its origin's phase, as it shares its identity.
 
 ## What the agent writes down
 
@@ -701,6 +855,9 @@ conventions:
 - `internal/spool` reads no contract, reaches no network, holds no key and opens
   neither the installation nor the configuration: it keeps records as the bytes
   admission hands it, in the directory and within the budget it is given;
+- `internal/governor` imports nothing of the agent and nothing of the contracts,
+  and reaches no network: it bounds work and knows none of it, so what a scan
+  reads, what an upload carries and how it travels stay with the work;
 - production code reads nothing from the environment the agent was started in;
 - production code never recovers from a panic.
 
