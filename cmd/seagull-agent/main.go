@@ -19,8 +19,10 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
+	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/pki"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dumps"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
@@ -98,6 +100,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	apply(settings, level)
 	inventory(logger, granted)
 	memory(logger, withheld)
+	resources(logger, settings)
 	state := settings.Identity.StateDirectory
 	held := &configuration{logger: logger, path: path, active: config.Activate(settings), level: level}
 
@@ -146,6 +149,12 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	defer spooled.Close()
 	held.spool = spooled
 	backlog(logger, spooled.Stats())
+	governed, err := governor.New(logger, installation.ID(), budget(settings))
+	if err != nil {
+		logger.Error("agent_not_started", slog.Any("error", err), slog.String("recovery", recovery(path, state, err)))
+		return 1
+	}
+	held.governor = governed
 	logger.Info("agent_starting", started...)
 	if err := agent.Run(ctx); err != nil {
 		logger.Error("agent_stopped", slog.Any("error", err))
@@ -216,11 +225,12 @@ func apply(settings config.Config, level *slog.LevelVar) {
 // it does when an operator asks it to read the file again. The agent keeps the
 // one it holds whenever it refuses the file.
 type configuration struct {
-	logger *slog.Logger
-	path   string
-	active *config.Active
-	level  *slog.LevelVar
-	spool  *spool.Spool
+	logger   *slog.Logger
+	path     string
+	active   *config.Active
+	level    *slog.LevelVar
+	spool    *spool.Spool
+	governor *governor.Governor
 }
 
 func (c *configuration) component(asked <-chan os.Signal) agentruntime.Component {
@@ -233,14 +243,16 @@ func (c *configuration) component(asked <-chan os.Signal) agentruntime.Component
 				case <-ctx.Done():
 					return nil
 				case <-asked:
-					c.reload()
+					if err := c.reload(); err != nil {
+						return err
+					}
 				}
 			}
 		},
 	}
 }
 
-func (c *configuration) reload() {
+func (c *configuration) reload() error {
 	candidate, err := config.Load(c.path)
 	if err == nil {
 		err = c.active.Reload(candidate)
@@ -249,13 +261,20 @@ func (c *configuration) reload() {
 		c.logger.Error("configuration_not_reloaded", slog.Any("error", err),
 			slog.String("running_on", "the configuration the agent read before"),
 			slog.String("recovery", recovery(c.path, "", err)))
-		return
+		return nil
 	}
 	apply(candidate, c.level)
 	if c.spool != nil {
 		c.spool.Limit(limits(candidate))
 	}
+	if c.governor != nil {
+		if err := c.governor.Limit(budget(candidate)); err != nil {
+			return fmt.Errorf("apply the configuration read from %s: %w", c.path, err)
+		}
+	}
 	c.logger.Info("configuration_reloaded", slog.String("config", c.path), slog.String("log_level", candidate.Logging.Level))
+	resources(c.logger, candidate)
+	return nil
 }
 
 func openKeys(installation *identity.Installation, provider string) (pki.KeyProvider, error) {
@@ -291,6 +310,61 @@ func limits(settings config.Config) spool.Limits {
 			spool.Inventory: min(kept, protocol.MaxInventoryAge),
 		},
 	}
+}
+
+func budget(settings config.Config) governor.Budget {
+	return governor.Budget{
+		Scans:                settings.Resources.MaxConcurrentScans,
+		ScanBytesPerSecond:   int64(settings.Resources.MaxScanBytesPerSecond),
+		Uploads:              settings.Resources.MaxConcurrentUploads,
+		UploadBytesPerSecond: int64(settings.Transport.MaxUploadBytesPerSecond),
+	}
+}
+
+func resources(logger *slog.Logger, settings config.Config) {
+	enforced, err := ceilings.Enforced()
+	spending(logger, settings, enforced, err)
+}
+
+func spending(logger *slog.Logger, settings config.Config, enforced ceilings.Ceilings, err error) {
+	reported := []any{
+		slog.Group("budgets",
+			slog.Int64("memory_limit", int64(settings.Resources.MemoryLimit)),
+			slog.Int("max_concurrent_scans", settings.Resources.MaxConcurrentScans),
+			slog.Int64("max_scan_bytes_per_second", int64(settings.Resources.MaxScanBytesPerSecond)),
+			slog.Int("max_concurrent_uploads", settings.Resources.MaxConcurrentUploads),
+			slog.Int64("max_upload_bytes_per_second", int64(settings.Transport.MaxUploadBytesPerSecond))),
+		slog.Int("processors", runtime.GOMAXPROCS(0)),
+	}
+	bound := "let the service that runs the agent bound it, with MemoryMax=, CPUQuota= and TasksMax= or what the platform calls them, and keep resources.memory_limit below the memory it allows"
+	if err != nil {
+		logger.Warn("agent_resources", append(reported, slog.Any("error", err), slog.String("recovery", bound))...)
+		return
+	}
+	var held []any
+	if enforced.Memory > 0 {
+		held = append(held, slog.Int64("memory", enforced.Memory))
+	}
+	if enforced.CPUs > 0 {
+		held = append(held, slog.Float64("cpus", enforced.CPUs))
+	}
+	if enforced.Tasks > 0 {
+		held = append(held, slog.Int64("tasks", enforced.Tasks))
+	}
+	if enforced.Descriptors > 0 {
+		held = append(held, slog.Int64("descriptors", enforced.Descriptors))
+	}
+	unenforced := enforced.Unenforced()
+	reported = append(reported, slog.Group("ceilings", held...), slog.Any("unenforced", unenforced))
+	above := enforced.Memory > 0 && int64(settings.Resources.MemoryLimit) >= enforced.Memory
+	if len(unenforced) == 0 && !above {
+		logger.Info("agent_resources", reported...)
+		return
+	}
+	if above {
+		reported = append(reported, slog.String("reason", "resources.memory_limit is not below the memory the agent may hold, so the kernel stops it before the garbage collector works to it"))
+	}
+	logger.Warn("agent_resources", append(reported, slog.String("recovery", bound))...)
 }
 
 func backlog(logger *slog.Logger, held spool.Stats) {

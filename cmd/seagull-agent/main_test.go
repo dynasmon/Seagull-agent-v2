@@ -31,7 +31,9 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
+	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
@@ -377,7 +379,7 @@ func TestTheAgentReadsItsConfigurationAgainWhenItIsAsked(t *testing.T) {
 	}
 
 	rewrite(t, path, state, map[string]string{"logging": `{"level": "debug"}`, "spool": `{"max_bytes": "1GiB"}`})
-	held.reload()
+	reload(t, &held)
 
 	reloaded, found := logged(t, logs.String(), "configuration_reloaded")
 	if !found || reloaded["log_level"] != "debug" || reloaded["config"] != path {
@@ -391,8 +393,14 @@ func TestTheAgentReadsItsConfigurationAgainWhenItIsAsked(t *testing.T) {
 	}
 
 	held.spool, _ = spoolIn(t, state)
-	rewrite(t, path, state, map[string]string{"spool": `{"max_bytes": "32MiB", "max_age": "400h"}`})
-	held.reload()
+	held.governor, _ = governor.New(held.logger, "8a4a6c52-3a3b-4f0e-9c38-1f2d7f0c9b11", budget(held.active.Settings()))
+	rewrite(t, path, state, map[string]string{
+		"spool":     `{"max_bytes": "32MiB", "max_age": "400h"}`,
+		"resources": `{"max_concurrent_scans": 3, "max_scan_bytes_per_second": "16MiB", "max_concurrent_uploads": 2}`,
+		"transport": `{"max_upload_bytes_per_second": "2MiB"}`,
+	})
+	logs.Reset()
+	reload(t, &held)
 	spooled := held.spool.Stats()
 	if spooled.MaxBytes != 32<<20 {
 		t.Fatalf("after the reload the spool keeps to %d bytes", spooled.MaxBytes)
@@ -401,6 +409,22 @@ func TestTheAgentReadsItsConfigurationAgainWhenItIsAsked(t *testing.T) {
 		if want := map[spool.Stream]time.Duration{spool.Events: 168 * time.Hour, spool.Inventory: 400 * time.Hour}[stream.Stream]; stream.MaxAge != want {
 			t.Errorf("after the reload %s keeps records for %s, want %s", stream.Stream, stream.MaxAge, want)
 		}
+	}
+	want := governor.Budget{Scans: 3, ScanBytesPerSecond: 16 << 20, Uploads: 2, UploadBytesPerSecond: 2 << 20}
+	if governed := held.governor.Stats().Budget; governed != want {
+		t.Fatalf("after the reload the governor keeps to %+v, want %+v", governed, want)
+	}
+	reported, found := logged(t, logs.String(), "agent_resources")
+	spends, _ := reported["budgets"].(map[string]any)
+	if !found || spends["max_concurrent_scans"] != float64(3) || spends["max_upload_bytes_per_second"] != float64(2<<20) {
+		t.Fatalf("after the reload the agent reported what it spends as %v", reported)
+	}
+}
+
+func reload(t *testing.T, held *configuration) {
+	t.Helper()
+	if err := held.reload(); err != nil {
+		t.Fatalf("the agent stopped as it read its configuration again: %v", err)
 	}
 }
 
@@ -462,7 +486,7 @@ func TestAReloadTheAgentRefusesKeepsTheConfigurationItRunsOn(t *testing.T) {
 			held.level.Set(started.Logging.Severity())
 
 			ask(t, path, state)
-			held.reload()
+			reload(t, &held)
 
 			refused, found := logged(t, logs.String(), "configuration_not_reloaded")
 			if !found || refused["level"] != "ERROR" || refused["recovery"] == nil {
@@ -651,6 +675,92 @@ func TestEverythingTheInstallationHoldsIsPrivateToTheAccountTheAgentRunsAs(t *te
 	}
 	if held < 16 {
 		t.Fatalf("an enrolled installation that was replaced holds %d files and directories", held)
+	}
+}
+
+func TestTheAgentSaysWhatItSpendsApartFromWhatBoundsIt(t *testing.T) {
+	path := configured(t, stateDirectory(t), map[string]string{
+		"resources": `{"memory_limit": "128MiB", "max_concurrent_scans": 3, "max_scan_bytes_per_second": "4MiB", "max_concurrent_uploads": 2}`,
+	})
+	reported, found := logged(t, serveStopped(t, path), "agent_resources")
+	if !found {
+		t.Fatal("the agent did not say what it spends and what bounds it")
+	}
+	want := map[string]any{
+		"memory_limit":                float64(128 << 20),
+		"max_concurrent_scans":        float64(3),
+		"max_scan_bytes_per_second":   float64(4 << 20),
+		"max_concurrent_uploads":      float64(2),
+		"max_upload_bytes_per_second": float64(1 << 20),
+	}
+	if spends, _ := reported["budgets"].(map[string]any); !maps.Equal(spends, want) {
+		t.Fatalf("the agent reported its budgets as %v, want %v", spends, want)
+	}
+	if reported["processors"] != float64(runtime.GOMAXPROCS(0)) {
+		t.Errorf("the agent reported %v processors, and Go runs it on %d", reported["processors"], runtime.GOMAXPROCS(0))
+	}
+	enforced, err := ceilings.Enforced()
+	if err != nil {
+		if reported["level"] != "WARN" || reported["error"] == nil || reported["recovery"] == nil {
+			t.Fatalf("an agent that cannot tell what bounds it reported %v", reported)
+		}
+		return
+	}
+	bounds, _ := reported["ceilings"].(map[string]any)
+	if enforced.Descriptors > 0 && bounds["descriptors"] != float64(enforced.Descriptors) {
+		t.Errorf("the agent reported the ceilings %v, and the process may open %d descriptors", bounds, enforced.Descriptors)
+	}
+	if enforced.Memory > 0 && bounds["memory"] != float64(enforced.Memory) {
+		t.Errorf("the agent reported the ceilings %v, and its cgroup may hold %d bytes", bounds, enforced.Memory)
+	}
+	unenforced, _ := reported["unenforced"].([]any)
+	if len(unenforced) != len(enforced.Unenforced()) {
+		t.Errorf("the agent reported %v as unenforced, and %v are", unenforced, enforced.Unenforced())
+	}
+	if warned := len(enforced.Unenforced()) > 0 || enforced.Memory <= 128<<20; warned != (reported["level"] == "WARN") {
+		t.Errorf("the agent reported what bounds it at %v, with %v unenforced and a memory ceiling of %d", reported["level"], unenforced, enforced.Memory)
+	}
+}
+
+func TestAMemoryTargetTheKernelWouldCutShortIsReported(t *testing.T) {
+	settings := loaded(t, configured(t, stateDirectory(t), map[string]string{"resources": `{"memory_limit": "256MiB"}`}))
+	bounded := ceilings.Ceilings{Memory: 1 << 30, CPUs: 1.5, Tasks: 512, Descriptors: 1 << 16}
+	for name, c := range map[string]struct {
+		enforced   ceilings.Ceilings
+		err        error
+		level      string
+		unenforced []any
+		says       string
+	}{
+		"a service that bounds everything": {enforced: bounded, level: "INFO", unenforced: []any{}},
+		"a memory ceiling below the target": {
+			enforced: ceilings.Ceilings{Memory: 128 << 20, CPUs: 1.5, Tasks: 512, Descriptors: 1 << 16}, level: "WARN", unenforced: []any{},
+			says: "the kernel stops it before the garbage collector works to it",
+		},
+		"a memory ceiling equal to the target": {
+			enforced: ceilings.Ceilings{Memory: 256 << 20, CPUs: 1.5, Tasks: 512, Descriptors: 1 << 16}, level: "WARN", unenforced: []any{},
+			says: "is not below the memory the agent may hold",
+		},
+		"nothing that bounds it":         {level: "WARN", unenforced: []any{"memory", "cpu", "tasks", "descriptors"}},
+		"a platform that cannot tell it": {err: errors.ErrUnsupported, level: "WARN"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			spending(slog.New(slog.NewJSONHandler(&logs, nil)), settings, c.enforced, c.err)
+			reported, _ := logged(t, logs.String(), "agent_resources")
+			if reported["level"] != c.level || (c.level == "WARN") != (reported["recovery"] != nil) {
+				t.Fatalf("reported %v", reported)
+			}
+			if unenforced, _ := reported["unenforced"].([]any); c.err == nil && !slices.Equal(unenforced, c.unenforced) {
+				t.Errorf("reported %v as unenforced, want %v", unenforced, c.unenforced)
+			}
+			if note, _ := reported["reason"].(string); !strings.Contains(note, c.says) || (c.says == "") != (note == "") {
+				t.Errorf("reported the memory target as %q", note)
+			}
+			if c.err != nil && (reported["error"] == nil || reported["ceilings"] != nil) {
+				t.Errorf("a platform that cannot tell what bounds the agent reported %v", reported)
+			}
+		})
 	}
 }
 

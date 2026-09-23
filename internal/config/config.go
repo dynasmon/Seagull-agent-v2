@@ -105,10 +105,11 @@ type Module struct {
 }
 
 type Resources struct {
-	MemoryLimit              Size     `json:"memory_limit"`
-	MaxConcurrentCollections int      `json:"max_concurrent_collections"`
-	MaxConcurrentUploads     int      `json:"max_concurrent_uploads"`
-	ShutdownTimeout          Duration `json:"shutdown_timeout"`
+	MemoryLimit           Size     `json:"memory_limit"`
+	MaxConcurrentScans    int      `json:"max_concurrent_scans"`
+	MaxScanBytesPerSecond Size     `json:"max_scan_bytes_per_second"`
+	MaxConcurrentUploads  int      `json:"max_concurrent_uploads"`
+	ShutdownTimeout       Duration `json:"shutdown_timeout"`
 }
 
 type Logging struct {
@@ -138,10 +139,11 @@ func defaults() Config {
 		Spool:   Spool{MaxBytes: 512 << 20, MaxAge: Duration(72 * time.Hour)},
 		Modules: Modules{},
 		Resources: Resources{
-			MemoryLimit:              256 << 20,
-			MaxConcurrentCollections: 2,
-			MaxConcurrentUploads:     1,
-			ShutdownTimeout:          Duration(10 * time.Second),
+			MemoryLimit:           256 << 20,
+			MaxConcurrentScans:    2,
+			MaxScanBytesPerSecond: 8 << 20,
+			MaxConcurrentUploads:  1,
+			ShutdownTimeout:       Duration(10 * time.Second),
 		},
 		Logging: Logging{Level: "info", Format: JSONLogs},
 	}
@@ -411,7 +413,8 @@ func (m Modules) validate() []error {
 func (r *Resources) validate() []error {
 	return problems(
 		size("resources.memory_limit", r.MemoryLimit, 64<<20, 8<<30),
-		count("resources.max_concurrent_collections", r.MaxConcurrentCollections, 1, 64),
+		count("resources.max_concurrent_scans", r.MaxConcurrentScans, 1, 64),
+		size("resources.max_scan_bytes_per_second", r.MaxScanBytesPerSecond, 1<<20, 1<<30),
 		count("resources.max_concurrent_uploads", r.MaxConcurrentUploads, 1, 16),
 		duration("resources.shutdown_timeout", r.ShutdownTimeout, Duration(time.Second), Duration(5*time.Minute)),
 	)
