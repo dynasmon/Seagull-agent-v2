@@ -228,3 +228,30 @@ func inventoryOf(records ...*inventoryv1.Record) func(*ingestv1.Rejection) (*pro
 		return protocol.IncompatibleInventory(inventory(records...), refused)
 	}
 }
+
+func TestOnlyARefusalOfTheAgentItselfExcludesIt(t *testing.T) {
+	cases := []struct {
+		refusal *ingestv1.Rejection
+		reason  protocol.Reason
+	}{
+		{refusal: &ingestv1.Rejection{Code: "unauthenticated_agent", Detail: "no usable agent identity", EventIndex: -1}, reason: protocol.Unidentified},
+		{refusal: &ingestv1.Rejection{Code: "agent_not_registered", Detail: "no registration", EventIndex: -1}, reason: protocol.Unregistered},
+		{refusal: &ingestv1.Rejection{Code: "agent_not_admitted", Detail: "no longer admitted", EventIndex: -1}, reason: protocol.Unadmitted},
+		{refusal: &ingestv1.Rejection{Code: "agent_not_admitted", Detail: "pointing at a record", EventIndex: 3}, reason: protocol.Unadmitted},
+		{refusal: &ingestv1.Rejection{Code: "agent_not_registered", Detail: "leaving the index unset"}, reason: protocol.Unregistered},
+		{refusal: &ingestv1.Rejection{Code: "rate_limited", Detail: "too fast", EventIndex: -1}},
+		{refusal: &ingestv1.Rejection{Code: "invalid_event", Field: "time.event_time", EventIndex: 0}},
+		{refusal: &ingestv1.Rejection{Code: "unsupported_protocol_version", EventIndex: -1}},
+		{refusal: &ingestv1.Rejection{}},
+		{refusal: nil},
+	}
+	for _, c := range cases {
+		exclusion, excluded := protocol.Excluded(c.refusal)
+		if excluded != (c.reason != 0) || (excluded && (exclusion.Reason != c.reason || exclusion.Detail != c.refusal.GetDetail())) {
+			t.Errorf("%v was read as %v, %t", c.refusal, exclusion, excluded)
+		}
+		if excluded && !strings.Contains(exclusion.Error(), c.reason.String()) {
+			t.Errorf("the exclusion reads %q", exclusion.Error())
+		}
+	}
+}
