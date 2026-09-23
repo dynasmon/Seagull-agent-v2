@@ -8,9 +8,12 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
 )
 
@@ -327,6 +330,97 @@ func TestWhatAModuleReportsIsBoundedBeforeItIsKept(t *testing.T) {
 	held := health(t, collection, map[string]modules.State{"auth": modules.Failed})
 	if len(held["auth"].Reason) > 300 {
 		t.Fatalf("the agent kept %d bytes of what a module reported", len(held["auth"].Reason))
+	}
+}
+
+// Inventory scans once an hour at its phase, and each scan reads for longer
+// than the test runs; fim holds the only scan slot for as long as it runs.
+// Each is disabled while it waits for its turn, the slot or its budget.
+func TestADisabledModuleLeavesNothingScheduledOrHeldBehind(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		governed, err := governor.New(slog.New(slog.DiscardHandler), "8a4a6c52-3a3b-4f0e-9c38-1f2d7f0c9b11",
+			governor.Budget{Scans: 1, ScanBytesPerSecond: 1 << 20, Uploads: 1, UploadBytesPerSecond: 1 << 20})
+		if err != nil {
+			t.Fatalf("compose the governor: %v", err)
+		}
+		hourly, err := governed.Periodic("inventory", time.Hour)
+		if err != nil {
+			t.Fatalf("schedule inventory: %v", err)
+		}
+		var scanned atomic.Int32
+		inventory := func(ctx context.Context) error {
+			for {
+				if _, err := hourly.Wait(ctx); err != nil {
+					return nil
+				}
+				err := governed.Scan(ctx, governor.Scan{Module: "inventory"}, func(ctx context.Context, meter *governor.Meter) error {
+					scanned.Add(1)
+					return meter.Charge(ctx, 1<<40)
+				})
+				if ctx.Err() != nil {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+			}
+		}
+		fim := func(ctx context.Context) error {
+			governed.Scan(ctx, governor.Scan{Module: "fim"}, func(ctx context.Context, _ *governor.Meter) error {
+				<-ctx.Done()
+				return nil
+			})
+			return nil
+		}
+		collection, _ := composed(t, modules.Policy{},
+			modules.Module{Name: "inventory", Enabled: true, Collect: inventory},
+			modules.Module{Name: "fim", Enabled: true, Collect: fim})
+		stop, stopped := running(t, collection)
+		time.Sleep(2 * time.Hour)
+		synctest.Wait()
+		if held := governed.Stats(); held.Scans != (governor.Use{Bulk: 1, Waiting: 1}) || scanned.Load() != 0 {
+			t.Fatalf("with fim holding the slot inventory reached, the governor holds %+v", held)
+		}
+
+		apply(t, collection, "fim")
+		if held := governed.Stats(); held.Scans != (governor.Use{Bulk: 1}) {
+			t.Fatalf("inventory, disabled while it waited for a slot, left the governor with %+v", held)
+		}
+		apply(t, collection)
+		if held := governed.Stats(); held.Scans != (governor.Use{}) {
+			t.Fatalf("fim, disabled while it held the slot, left the governor with %+v", held)
+		}
+
+		apply(t, collection, "inventory")
+		time.Sleep(90 * time.Minute)
+		synctest.Wait()
+		if held := governed.Stats(); held.Scans != (governor.Use{Bulk: 1}) || held.Reading != 1 || scanned.Load() != 1 {
+			t.Fatalf("inventory enabled again scanned %d times and left the governor with %+v", scanned.Load(), held)
+		}
+		apply(t, collection)
+		if held := governed.Stats(); held.Scans != (governor.Use{}) || held.Reading != 0 {
+			t.Fatalf("inventory, disabled while it read, left the governor with %+v", held)
+		}
+
+		apply(t, collection, "inventory")
+		synctest.Wait()
+		apply(t, collection)
+		time.Sleep(48 * time.Hour)
+		synctest.Wait()
+		if scanned.Load() != 1 {
+			t.Fatalf("inventory, disabled while it waited for its turn, scanned %d times in two days", scanned.Load())
+		}
+		stop()
+		if err := stopped(); err != nil {
+			t.Fatalf("the collection stopped with %v", err)
+		}
+	})
+}
+
+func apply(t *testing.T, collection *modules.Collection, enabled ...string) {
+	t.Helper()
+	if err := collection.Apply(enabled); err != nil {
+		t.Fatalf("collect with %v: %v", enabled, err)
 	}
 }
 
