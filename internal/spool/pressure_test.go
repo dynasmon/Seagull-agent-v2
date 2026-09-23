@@ -369,6 +369,61 @@ func TestEverySettledRecordIsCountedOnceUnderItsOwnReason(t *testing.T) {
 	}
 }
 
+func TestRoomIsWhatAStreamMayStillAdmitBeforeItIsRefused(t *testing.T) {
+	clock := newPressured()
+	clock.quick = true
+	held, _ := openPressured(t, spoolDirectory(t), aged(4<<20, time.Hour, time.Hour), clock)
+	admitted := map[Stream][]uint64{}
+	for _, stream := range []Stream{Inventory, Events} {
+		for n := 0; ; n++ {
+			record := sizedRecord(stream.String(), n, 96<<10)
+			frame := int64(frameHeaderBytes + len(record.ID) + len(record.Payload))
+			room := held.Room(stream)
+			receipt, err := held.Admit(stream, record)
+			switch {
+			case room >= frame+segmentHeaderBytes && err != nil:
+				t.Fatalf("%s had room for %d bytes and refused a record of %d: %v", stream, room, frame, err)
+			case room < frame && !errors.Is(err, ErrFull):
+				t.Fatalf("%s had room for %d bytes and did not refuse a record of %d for room: %v", stream, room, frame, err)
+			}
+			if err != nil {
+				break
+			}
+			admitted[stream] = append(admitted[stream], receipt.First)
+		}
+	}
+	if kept := held.Stats(); held.Room(Inventory) > 2<<20-streamStats(t, held, Inventory).Bytes || kept.Bytes > 4<<20-reserved {
+		t.Fatalf("the spool holds %d bytes of 4MiB and reports room for %d more inventory", kept.Bytes, held.Room(Inventory))
+	}
+
+	full := held.Room(Inventory)
+	if err := held.Acknowledge(Inventory, admitted[Inventory][:len(admitted[Inventory])-1]...); err != nil {
+		t.Fatalf("acknowledge all the inventory but its last record: %v", err)
+	}
+	if freed := held.Room(Inventory) - full; freed < 1<<20 {
+		t.Fatalf("delivering the inventory of every segment but the last made room for %d bytes", freed)
+	}
+
+	clock.set(start.Add(2*time.Hour), 1<<40)
+	room := held.Room(Events)
+	if left := min(4<<20/8*7-streamStats(t, held, Events).Bytes, 4<<20-reserved-held.Stats().Bytes); room != left || room < 3<<20-64<<10 {
+		t.Fatalf("once every event outlived its age the stream has room for %d bytes, and the budget leaves %d", room, left)
+	}
+	clock.set(start.Add(2*time.Hour), minFree+64<<10)
+	if room := held.Room(Events); room != 64<<10 {
+		t.Fatalf("with 64KiB free beyond what the agent must still write, events have room for %d bytes", room)
+	}
+	clock.set(start.Add(2*time.Hour), 1<<40)
+	held.queues[0].fail(errors.New("the disk went away"))
+	if room := held.Room(held.queues[0].stream); room != 0 {
+		t.Fatalf("a stream that can no longer make records durable has room for %d bytes", room)
+	}
+	closed(t, held)
+	if room := held.Room(Inventory); room != 0 {
+		t.Fatalf("a closed spool has room for %d bytes", room)
+	}
+}
+
 func openPressured(t *testing.T, directory string, limits Limits, clock host) (*Spool, *strings.Builder) {
 	t.Helper()
 	root, err := os.OpenRoot(directory)

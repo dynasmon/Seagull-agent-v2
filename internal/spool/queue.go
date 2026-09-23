@@ -705,6 +705,12 @@ func (q *queue) expireDue() (uint64, error) {
 	return q.expire()
 }
 
+func (q *queue) admitting() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return !q.closed && q.broken == nil
+}
+
 func (q *queue) limit(age time.Duration) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
