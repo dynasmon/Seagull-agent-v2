@@ -34,6 +34,7 @@ type dependencyRule struct {
 	packages   string
 	exempt     string
 	forbidden  []string
+	allowed    []string
 	transitive bool
 	reason     string
 }
@@ -93,6 +94,13 @@ var dependencyRules = []dependencyRule{
 		reason:     "the configuration is read before there is an installation, a key or a connection: it says what the agent runs on, and each component opens what its own settings name",
 	},
 	{
+		packages:   "internal/transport",
+		forbidden:  []string{modulePath, contractsPath},
+		allowed:    []string{modulePath + "/internal/secrets"},
+		transitive: true,
+		reason:     "the transport authenticates connections and moves bytes: what they carry, whose records they are and where the credential it presents is kept belong to others, and what it repeats of what it read is bounded by the secrets package alone",
+	},
+	{
 		packages:   "internal/governor",
 		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
 		transitive: true,
@@ -124,7 +132,8 @@ func (r dependencyRule) violations(pkg buildPackage) []string {
 	}
 	var reached []string
 	for _, dependency := range dependencies {
-		if slices.ContainsFunc(r.forbidden, func(forbidden string) bool { return within(dependency, forbidden) }) {
+		if slices.ContainsFunc(r.forbidden, func(forbidden string) bool { return within(dependency, forbidden) }) &&
+			!slices.ContainsFunc(r.allowed, func(allowed string) bool { return within(dependency, allowed) }) {
 			reached = append(reached, dependency)
 		}
 	}
@@ -327,6 +336,32 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				ImportPath: modulePath + "/internal/spool",
 				Imports:    []string{"hash/crc32", "os", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
 				Deps:       []string{"hash/crc32", "os", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
+			},
+		},
+		{
+			name: "the transport opening the keys it presents",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/transport",
+				Imports:    []string{"crypto/tls", modulePath + "/internal/pki"},
+				Deps:       []string{"crypto/tls", modulePath + "/internal/pki", modulePath + "/internal/platform/files"},
+			},
+			want: []string{modulePath + "/internal/pki", modulePath + "/internal/platform/files"},
+		},
+		{
+			name: "the transport reading the batches it sends",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/transport",
+				Imports:    []string{ingest, "net/http"},
+				Deps:       []string{"crypto/tls", ingest, "net/http"},
+			},
+			want: []string{ingest},
+		},
+		{
+			name: "the transport bounding what it repeats of the platform's certificate",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/transport",
+				Imports:    []string{"crypto/tls", "crypto/x509", "net/http", modulePath + "/internal/secrets"},
+				Deps:       []string{"crypto/tls", "crypto/x509", "net", "net/http", modulePath + "/internal/secrets"},
 			},
 		},
 		{
