@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -15,9 +16,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"log/slog"
 	"maps"
 	"math/big"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +31,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -355,7 +361,7 @@ func TestReadingTheConfigurationDoesNotStartTheAgent(t *testing.T) {
 	}
 
 	refused := configured(t, state, map[string]string{"updates": `{"enabled": true}`})
-	for _, command := range [][]string{{"config", "check"}, {"config", "print"}} {
+	for _, command := range [][]string{{"config", "check"}, {"config", "print"}, {"platform", "check"}} {
 		stdout.Reset()
 		stderr.Reset()
 		if code := run(append([]string{"-config", refused}, command...), &stdout, &stderr); code != 1 || stdout.Len() != 0 {
@@ -365,6 +371,148 @@ func TestReadingTheConfigurationDoesNotStartTheAgent(t *testing.T) {
 			t.Errorf("%q: refused the configuration with %q", command, stderr.String())
 		}
 	}
+}
+
+func TestCheckingThePlatformAuthenticatesItWithoutAnInstallation(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	platform := listening(t, trustBundle(path))
+	ingest, renewal := platform.listen(t), platform.listen(t)
+	rewrite(t, path, state, map[string]string{"server": servers(ingest.URL, renewal.URL, trustBundle(path))})
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-config", path, "platform", "check"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("exit code %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	for i, endpoint := range []struct{ name, address string }{{"ingest", ingest.URL}, {"renewal", renewal.URL}} {
+		if i >= len(lines) || !strings.HasPrefix(lines[i], endpoint.name+" "+endpoint.address+" is authenticated: tls 1.3") ||
+			!strings.Contains(lines[i], `"127.0.0.1"`) || !strings.Contains(lines[i], `issued by "Seagull platform"`) ||
+			!strings.Contains(lines[i], "asks for the certificate of an enrolled agent") {
+			t.Fatalf("the agent reported the platform as\n%s", stdout.String())
+		}
+	}
+	if served := ingest.served.Load() + renewal.served.Load(); served != 0 {
+		t.Fatalf("checking the platform sent it %d requests", served)
+	}
+	if _, err := os.Lstat(state); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("checking the platform reached the installation state: %v", err)
+	}
+}
+
+func TestAPlatformTheAgentCannotAuthenticateOrReachFailsTheCheck(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	listening(t, trustBundle(path))
+	impostor := listening(t, filepath.Join(t.TempDir(), "impostor-ca.pem")).listen(t)
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	unreachable := "https://" + closed.Addr().String()
+	closed.Close()
+	rewrite(t, path, state, map[string]string{"server": servers(impostor.URL, unreachable, trustBundle(path))})
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-config", path, "platform", "check"}, &stdout, &stderr); code != 1 || stdout.Len() != 0 {
+		t.Fatalf("exit code %d, stdout %q", code, stdout.String())
+	}
+	for _, said := range []string{
+		"seagull-agent: ingest: the platform could not be authenticated: " + impostor.URL,
+		"holds the authority that issued the platform's certificate",
+		"seagull-agent: renewal: the platform could not be reached: " + unreachable,
+		"can be reached from this machine over the network",
+	} {
+		if !strings.Contains(stderr.String(), said) {
+			t.Errorf("the agent did not say %q:\n%s", said, stderr.String())
+		}
+	}
+	if impostor.served.Load() != 0 {
+		t.Fatal("the agent sent a request to a platform it could not authenticate")
+	}
+}
+
+func trustBundle(path string) string { return filepath.Join(filepath.Dir(path), "platform-ca.pem") }
+
+func servers(ingest, renewal, bundle string) string {
+	return fmt.Sprintf(`{"ingest_url": %q, "renewal_url": %q, "trust_bundle": %q}`, ingest, renewal, bundle)
+}
+
+type issuing struct {
+	certificate *x509.Certificate
+	key         *ecdsa.PrivateKey
+}
+
+type served struct {
+	*httptest.Server
+	served atomic.Int32
+}
+
+// An authority for the platform, written where bundle says, and listeners it
+// issued certificates for that ask every client for the certificate of an
+// agent, as the platform's agent listeners do.
+func listening(t *testing.T, bundle string) *issuing {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("draw the key of the platform authority: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Seagull platform"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
+	if err != nil {
+		t.Fatalf("sign the certificate of the platform authority: %v", err)
+	}
+	if err := os.WriteFile(bundle, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		t.Fatalf("write %s: %v", bundle, err)
+	}
+	certificate, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parse the certificate of the platform authority: %v", err)
+	}
+	return &issuing{certificate: certificate, key: key}
+}
+
+func (i *issuing) listen(t *testing.T) *served {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("draw the key of a listener: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: "ingest-gateway"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, i.certificate, key.Public(), i.key)
+	if err != nil {
+		t.Fatalf("issue the certificate of a listener: %v", err)
+	}
+	listener := &served{}
+	listener.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { listener.served.Add(1) }))
+	listener.Config.ErrorLog = log.New(io.Discard, "", 0)
+	agents := x509.NewCertPool()
+	agents.AddCert(i.certificate)
+	listener.TLS = &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    agents,
+	}
+	listener.StartTLS()
+	t.Cleanup(listener.Close)
+	return listener
 }
 
 func TestTheAgentReadsItsConfigurationAgainWhenItIsAsked(t *testing.T) {
@@ -857,6 +1005,8 @@ func TestAnythingButACommandIsAUsageError(t *testing.T) {
 		{"-config", path, "config", "reload"},
 		{"-config", path, "installation"},
 		{"-config", path, "installation", "show"},
+		{"-config", path, "platform"},
+		{"-config", path, "platform", "check", "extra"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 2 {

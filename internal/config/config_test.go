@@ -214,6 +214,9 @@ func TestTheAgentVerifiesThePlatformAgainstCertificatesItRead(t *testing.T) {
 		"a bundle that holds a key": func(t *testing.T, directory string) string {
 			return write(t, directory, "key.pem", string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("key")})))
 		},
+		"a bundle that pins the platform's own certificate": func(t *testing.T, directory string) string {
+			return write(t, directory, "gateway.pem", string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signed(t, false)})))
+		},
 		"a bundle that is not a file": func(t *testing.T, directory string) string {
 			held := filepath.Join(directory, "bundle.d")
 			if err := os.Mkdir(held, 0o700); err != nil {
@@ -239,6 +242,53 @@ func TestTheAgentVerifiesThePlatformAgainstCertificatesItRead(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTheAgentTrustsTheAuthoritiesTheBundleHoldsAndNothingElse(t *testing.T) {
+	path := configured(t, nil)
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("load %s: %v", path, err)
+	}
+	held, err := settings.Server.Authorities()
+	if err != nil || len(held) != 1 || held[0].Subject.CommonName != "Seagull platform" || !held[0].IsCA {
+		t.Fatalf("the agent trusts %v: %v", held, err)
+	}
+
+	bundle := authority(path)
+	both := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signed(t, true)})) +
+		string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signed(t, false)}))
+	if err := os.WriteFile(bundle, []byte(both), 0o644); err != nil {
+		t.Fatalf("write %s: %v", bundle, err)
+	}
+	if held, err := settings.Server.Authorities(); err == nil || !strings.Contains(err.Error(), "not a certificate authority") {
+		t.Fatalf("a bundle that came to hold a certificate of the platform itself was trusted as %v: %v", held, err)
+	}
+}
+
+func signed(t *testing.T, authority bool) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("draw a key: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: "gateway.example"},
+		DNSNames:              []string{"gateway.example"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  authority,
+		BasicConstraintsValid: true,
+	}
+	if authority {
+		template.Subject.CommonName, template.DNSNames, template.KeyUsage = "Another platform authority", nil, x509.KeyUsageCertSign
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, key.Public(), key)
+	if err != nil {
+		t.Fatalf("sign a certificate: %v", err)
+	}
+	return der
 }
 
 func TestEverySettingTheFileGetsWrongIsReportedAtOnce(t *testing.T) {

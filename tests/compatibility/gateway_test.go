@@ -145,6 +145,49 @@ func TestARecordedRefusalOfARecordTheAgentBuiltWrongIsNoIncompatibility(t *testi
 	}
 }
 
+// The platform refuses the agent itself, before it reads what a batch carries,
+// when the certificate it verified names no agent it can read, an agent it
+// never registered or one it no longer admits. None of that is about a record.
+func TestARecordedRefusalOfTheAgentItselfExcludesItAndRefusesNoRecord(t *testing.T) {
+	cases := map[string]protocol.Reason{
+		"events-unusable-identity":       protocol.Unidentified,
+		"events-agent-not-registered":    protocol.Unregistered,
+		"events-agent-not-admitted":      protocol.Unadmitted,
+		"inventory-unusable-identity":    protocol.Unidentified,
+		"inventory-agent-not-registered": protocol.Unregistered,
+		"inventory-agent-not-admitted":   protocol.Unadmitted,
+	}
+	for _, recorded := range recordings(t) {
+		for name, reason := range cases {
+			t.Run(recorded.name()+"/"+name, func(t *testing.T) {
+				sent := recorded.exchange(t, name)
+				if sent.Status != http.StatusForbidden {
+					t.Fatalf("the platform refused the agent with status %d", sent.Status)
+				}
+				var refusal ingestv1.Rejection
+				recorded.decode(t, sent.Name, "reply", &refusal)
+				exclusion, excluded := protocol.Excluded(&refusal)
+				if !excluded || exclusion.Reason != reason || exclusion.Detail != refusal.GetDetail() {
+					t.Fatalf("read %v from %v, want the agent excluded as %s", exclusion, &refusal, reason)
+				}
+				if found, incompatible := incompatibility(t, recorded.batch(t, sent), recorded.payload(t, sent.Name, "reply")); incompatible {
+					t.Fatalf("read the refusal of the agent as the incompatibility %+v", *found)
+				}
+			})
+		}
+		for _, sent := range recorded.Exchanges {
+			if _, excluding := cases[sent.Name]; excluding || sent.Status == http.StatusOK {
+				continue
+			}
+			var refusal ingestv1.Rejection
+			recorded.decode(t, sent.Name, "reply", &refusal)
+			if exclusion, excluded := protocol.Excluded(&refusal); excluded {
+				t.Errorf("%s/%s refused a batch and was read as excluding the agent, %v", recorded.name(), sent.Name, exclusion)
+			}
+		}
+	}
+}
+
 // A gateway refuses a value its contracts do not declare the same way whether
 // or not the sender's contracts declare it. So a platform built from contracts
 // older than the agent's answers a value only the agent's declare with the

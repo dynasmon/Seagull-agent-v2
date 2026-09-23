@@ -114,7 +114,7 @@ The agent reads the file whole, or refuses it whole:
 | `identity.key_provider` | `filesystem` | `filesystem` |
 | `server.ingest_url` | — | an `https` URL, with no credentials and nothing to resolve |
 | `server.renewal_url` | — | an `https` URL, for the platform's renewal listener |
-| `server.trust_bundle` | — | an absolute path to PEM certificates |
+| `server.trust_bundle` | — | an absolute path to the PEM certificates of the authorities that issue the platform's |
 | `transport.connect_timeout` | `10s` | `1s` to `1m` |
 | `transport.request_timeout` | `30s` | `5s` to `10m`, never shorter than the connect timeout |
 | `transport.max_batch_bytes` | `4MiB` | `64KiB` to `8MiB`, the recorded platform's request ceiling |
@@ -150,8 +150,11 @@ the agent does:
   as or to root, and neither their group nor anybody else may write them. They
   may be read by anyone: the settings are public;
 - `server.trust_bundle` is read under the same rule, and has to hold
-  certificates the agent can parse. Whoever changes it decides which platform
-  the agent trusts, and the agent verifies against that bundle alone;
+  certificates the agent can parse, each of them a certificate authority.
+  Whoever changes it decides which platform the agent trusts, and the agent
+  verifies against that bundle alone. A certificate of the platform's own is
+  refused there, since trusting it would pin the platform to it and the next
+  certificate the platform installed would not be trusted;
 - no setting carries a secret. A setting names where credential material is
   kept, and the agent's own keys live in the installation, so the file can be
   read, copied into a ticket or written by configuration management without
@@ -169,15 +172,16 @@ validates the whole candidate before anything changes:
   `resources.shutdown_timeout` take stopping the agent and starting it again.
 
 What a setting does today follows what the agent has. `identity`, `logging`,
-`spool`, `resources`, `transport.max_batch_bytes` and
-`transport.max_upload_bytes_per_second` are in force: they decide where the
-installation is opened, what the log says, how much the spool keeps and for how
-long, how large a record it takes, and what the agent and its expensive work
-may spend. The governor keeps the budgets for scans and uploads before anything
-spends them, since no collector scans and nothing delivers yet. `server` and the
-rest of `transport` are validated here and take effect as the components that
-spend them arrive, so a deployment is configured once rather than as each one
-lands. `modules` and `updates.enabled` are the settings this
+`spool`, `resources`, `server`, `transport.connect_timeout`,
+`transport.max_batch_bytes` and `transport.max_upload_bytes_per_second` are in
+force: they decide where the installation is opened, what the log says, how
+much the spool keeps and for how long, how large a record it takes, what the
+agent and its expensive work may spend, and which platform `platform check`
+authenticates and how long it waits for it. The governor keeps the budgets for
+scans and uploads before anything spends them, since no collector scans and
+nothing delivers yet. The rest of `transport` is validated here and takes effect
+as delivery arrives, so a deployment is configured once rather than as each
+component lands. `modules` and `updates.enabled` are the settings this
 build refuses outright: an agent that accepted them would be promising
 collection it cannot do and updates it cannot install.
 
@@ -756,6 +760,135 @@ What the budgets do not claim:
 - the phase spreads a fleet whose installations drew their own identifiers: a
   copied installation shares its origin's phase, as it shares its identity.
 
+## Reaching the platform
+
+`internal/transport` is how the agent reaches the platform, and the only part
+of it that opens a connection. It authenticates the listener before it sends
+anything, presents the agent's credential with everything it sends, and bounds
+what a request may take. It moves bytes and knows nothing of what they carry:
+delivery decides what to send and what an answer means, and the credential it
+presents is handed to it by whoever keeps it.
+
+The platform is authenticated, never assumed:
+
+- the agent speaks TLS 1.3 and nothing older. At the recorded backend commit
+  the platform's agent listeners, ingest and renewal, speak 1.3 alone, so no
+  supported deployment needs 1.2, and a listener that offers nothing newer is
+  refused;
+- the listener's certificate has to chain to an authority in
+  `server.trust_bundle`, be allowed to authenticate a server, be valid now, and
+  name the host the address names, as a DNS name or an IP address. Nothing
+  turns a check off: `tests/architecture` refuses any production code that
+  names `InsecureSkipVerify`;
+- the bundle holds authorities and never a certificate of the platform's own,
+  so the platform replaces its certificates, and brings a new authority in
+  beside the old one, without the agent's configuration changing;
+- the agent follows no redirect and uses no proxy. Go's default client and
+  transport, and the proxy variables of the environment that they follow, are
+  refused in production code as the environment is: a batch goes to the address
+  in the configuration file and nowhere else.
+
+What the agent presents:
+
+- the platform knows an agent by the certificate it verified on the connection,
+  and takes the agent and its tenant from that certificate and its roster: the
+  agent sends no identity of its own in a header, and nothing a batch says
+  stands in for the certificate;
+- a request is only ever sent as the enrolled agent. The transport takes the
+  credential before it connects, and one it cannot use stops the request before
+  a connection is opened: an installation that is not enrolled, a key that
+  cannot be opened, a certificate that expired or that the host's clock says is
+  not valid yet, one issued for another key, one that does not authenticate a
+  client or whose key may not sign. Each is `ErrUnauthenticated`, with the
+  reason;
+- a credential is a certificate chain and a `crypto.Signer`, so the key signs
+  the handshake where it is kept and the transport never holds it whole. A new
+  credential generation is presented from the next request on, over new
+  connections, and idle connections made with the one before are closed;
+- the agent does not keep the certificate the platform issues yet: enrollment
+  arrives with AG-006, and until then no installation has a credential to
+  present, so the agent sends nothing.
+
+What the agent is told, apart:
+
+- `ErrUntrusted`: the listener could not be authenticated, for its certificate,
+  its name or a TLS version the two could not agree on. Nothing is sent, and it
+  is a question for whoever wrote the trust bundle and the address;
+- `ErrUnauthenticated`: the agent had no credential to present;
+- `ErrRefused`: the listener refused the agent's certificate during the
+  handshake, as issued by an authority it does not know, expired or revoked;
+- `ErrUnreachable`: the network, a timeout, or a listener that never finished
+  the handshake;
+- a reply, whatever its status: a refusal is an answer like any other, read
+  whole up to `transport.max_response_bytes` or not at all, as
+  `ErrReplyTooLarge`.
+
+Being authenticated is not being admitted. Once the handshake is done, the
+platform decides whether it still admits the agent its certificate names, and
+`internal/protocol` reads that refusal as an `Exclusion`, apart from any refusal
+of a record: a certificate naming no agent the platform reads
+(`unauthenticated_agent`), an agent it never registered
+(`agent_not_registered`), and one it no longer admits because it was revoked,
+decommissioned or disabled (`agent_not_admitted`). An exclusion refuses no record, whatever record it
+points at: every record stays as valid as it was, none is quarantined for it,
+and none is sent as that agent until an operator acts. Delivery, when it
+arrives, keeps to that.
+
+What a request may take:
+
+- connecting and the TLS handshake take at most `transport.connect_timeout`, and
+  a whole request, from dialing to the end of the reply, at most
+  `transport.request_timeout`;
+- at most `resources.max_concurrent_uploads` connections are open to a listener
+  at once, one idles for 30 seconds at most, below the idle timeouts of the
+  platform's listeners, and the headers of a reply are read up to 16 KiB;
+- a request that is cancelled returns at once, its connection is closed, and
+  the platform sees the request abandoned.
+
+`seagull-agent -config FILE platform check` authenticates both listeners the
+configuration names, presenting nothing and sending nothing, and closes each
+connection as soon as the listener is authenticated. It says what each listener
+presented, until when, and whether it asks for an agent's certificate, and exits
+with 1, saying what to check, when a listener could not be authenticated or
+reached. It opens no installation, so it runs before there is one and while the
+agent runs.
+
+The evidence:
+
+- `internal/transport` is tested against listeners set up as the platform's
+  agent listeners are, TLS 1.3 alone and a client certificate required and
+  verified, with keys drawn by the agent's own key provider. The tests send
+  nothing to a listener with an untrusted authority, another name, an expired
+  certificate, a client's certificate or TLS 1.2 alone; open no connection
+  without a usable credential; tell a refused certificate from a closed port, a
+  listener that never answers the handshake and one that never answers the
+  request; release a cancelled request and its connection, and every goroutine
+  it started; stop reading an endless reply and never reuse its connection;
+  keep to the connection limit; present a renewed credential from the next
+  request on; and accept a platform that replaced its certificate or its
+  authority;
+- the refusals of the agent itself were recorded from the ingest gateway of the
+  recorded backend commit, driven by that commit's own end-to-end harness: a
+  certificate for an agent the roster never named, for an agent it revoked while
+  the certificate stayed valid, and one naming no agent, sent to both routes.
+  `tests/compatibility` reads each as an exclusion, and none as a refusal of a
+  record or as an incompatibility;
+- `platform check` is tested against listeners set up the same way, including
+  one whose certificate an impostor authority issued and a closed port, and
+  opens no installation while it checks.
+
+What it does not claim:
+
+- revocation is the platform's to enforce. A certificate that still verifies is
+  refused by the platform's roster, and the agent learns of it from the answer
+  to its next request, as soon as the roster does;
+- the transport checks that a credential can be used, not that it is the
+  enrolled one: which agent and which generation belong to enrollment;
+- the agent pins no certificate, so any certificate an authority in the bundle
+  issued for the name is the platform, and which authorities those are is the
+  operator's decision;
+- a deployment that reaches the platform only through a proxy is not supported.
+
 ## What the agent writes down
 
 The agent holds one secret, the private key of its installation, and it reads
@@ -858,6 +991,14 @@ conventions:
 - `internal/governor` imports nothing of the agent and nothing of the contracts,
   and reaches no network: it bounds work and knows none of it, so what a scan
   reads, what an upload carries and how it travels stay with the work;
+- `internal/transport` imports nothing of the agent but `internal/secrets`, and
+  nothing of the contracts: it authenticates connections and moves bytes, while
+  what they carry, whose records they are and where the credential it presents
+  is kept belong to others;
+- no production code names `InsecureSkipVerify`, or uses the default client,
+  the default transport or the environment's proxy of `net/http`: the agent
+  sends only to a platform it authenticated, over a client whose every bound it
+  set;
 - production code reads nothing from the environment the agent was started in;
 - production code never recovers from a panic.
 
@@ -892,7 +1033,9 @@ with `internal/protocol` instead:
   an inventory kind or a service state: the platform was built from contracts
   that lack it;
 - a refused value the agent left unset, or one no contracts declare, is the
-  agent's own mistake, and like every other refusal it is no incompatibility.
+  agent's own mistake, and like every other refusal it is no incompatibility;
+- a refusal of the agent itself is an `Exclusion`, never an incompatibility:
+  [Reaching the platform](#reaching-the-platform) says what it means.
 
 An `Incompatibility` names the field, the value and the record the platform
 refused, with the platform's own explanation. It does not make those records
@@ -912,7 +1055,8 @@ What one side does not know follows from the same rule:
 
 `tests/compatibility/testdata` holds exchanges recorded from the ingest gateway
 of a backend commit, driven in process by that commit's end-to-end harness: the
-bytes of every batch sent and of every answer. The suite fails when `go.mod`
+bytes of every batch sent and of every answer, including batches sent under a
+certificate the platform refuses the agent of. The suite fails when `go.mod`
 pins contracts no recorded platform was built with, when a recorded platform
 never durably accepted a version the agent speaks, or when a recorded refusal
 reads differently. Compatibility is claimed only with recorded platforms, and

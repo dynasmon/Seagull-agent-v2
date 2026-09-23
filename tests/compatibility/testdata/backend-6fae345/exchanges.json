@@ -69,6 +69,36 @@
       "name": "inventory-invalid-record",
       "route": "POST /v1/inventory",
       "status": 422
+    },
+    {
+      "name": "events-agent-not-registered",
+      "route": "POST /v1/events",
+      "status": 403
+    },
+    {
+      "name": "events-agent-not-admitted",
+      "route": "POST /v1/events",
+      "status": 403
+    },
+    {
+      "name": "events-unusable-identity",
+      "route": "POST /v1/events",
+      "status": 403
+    },
+    {
+      "name": "inventory-agent-not-registered",
+      "route": "POST /v1/inventory",
+      "status": 403
+    },
+    {
+      "name": "inventory-agent-not-admitted",
+      "route": "POST /v1/inventory",
+      "status": 403
+    },
+    {
+      "name": "inventory-unusable-identity",
+      "route": "POST /v1/inventory",
+      "status": 403
     }
   ]
 }

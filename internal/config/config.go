@@ -359,7 +359,7 @@ func (s *Server) validate() []error {
 		}
 		*endpoint.value = reached
 	}
-	if err := bundle("server.trust_bundle", s.TrustBundle); err != nil {
+	if _, err := bundle("server.trust_bundle", s.TrustBundle); err != nil {
 		found = append(found, err)
 	}
 	return found
@@ -483,56 +483,67 @@ func absolute(name, path, what, example string) error {
 	return nil
 }
 
-func bundle(name, path string) error {
+func (s Server) Authorities() ([]*x509.Certificate, error) {
+	return bundle("server.trust_bundle", s.TrustBundle)
+}
+
+func bundle(name, path string) ([]*x509.Certificate, error) {
 	if err := absolute(name, path,
 		"the certificates the agent verifies the platform with", "/etc/seagull-agent/platform-ca.pem"); err != nil {
-		return err
+		return nil, err
 	}
 	described, err := os.Lstat(path)
 	named := secrets.Bounded(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return fmt.Errorf("%s names %s, and there is no such file", name, named)
+		return nil, fmt.Errorf("%s names %s, and there is no such file", name, named)
 	case err != nil:
-		return fmt.Errorf("%s names %s, which the agent cannot inspect: %s", name, named, secrets.Bounded(err.Error()))
+		return nil, fmt.Errorf("%s names %s, which the agent cannot inspect: %s", name, named, secrets.Bounded(err.Error()))
 	case !described.Mode().IsRegular():
-		return fmt.Errorf("%s names %s, which is not a regular file", name, named)
+		return nil, fmt.Errorf("%s names %s, which is not a regular file", name, named)
 	}
 	if err := files.Trusted(described); err != nil {
-		return fmt.Errorf("%s names %s, and it %v: whoever changes it decides which platform the agent trusts", name, named, err)
+		return nil, fmt.Errorf("%s names %s, and it %v: whoever changes it decides which platform the agent trusts", name, named, err)
 	}
 	content, err := contents(path, described, maxBundleBytes)
 	if err != nil {
-		return fmt.Errorf("%s names %s, which %v", name, named, err)
+		return nil, fmt.Errorf("%s names %s, which %v", name, named, err)
 	}
-	if err := authorities(content); err != nil {
-		return fmt.Errorf("%s names %s, which %v", name, named, err)
+	held, err := authorities(content)
+	if err != nil {
+		return nil, fmt.Errorf("%s names %s, which %v", name, named, err)
 	}
-	return nil
+	return held, nil
 }
 
-func authorities(content []byte) error {
-	certificates := 0
-	for rest := content; len(bytes.TrimSpace(rest)) > 0; certificates++ {
-		if certificates == maxCertificates {
-			return fmt.Errorf("holds more than %d certificates", maxCertificates)
+func authorities(content []byte) ([]*x509.Certificate, error) {
+	var held []*x509.Certificate
+	for rest := content; len(bytes.TrimSpace(rest)) > 0; {
+		if len(held) == maxCertificates {
+			return nil, fmt.Errorf("holds more than %d certificates", maxCertificates)
 		}
 		block, remainder := pem.Decode(rest)
 		switch {
 		case block == nil:
-			return errors.New("holds something that is not PEM")
+			return nil, errors.New("holds something that is not PEM")
 		case block.Type != "CERTIFICATE":
-			return fmt.Errorf("holds a %s block, and a trust bundle holds certificates", secrets.Shown(block.Type))
+			return nil, fmt.Errorf("holds a %s block, and a trust bundle holds certificates", secrets.Shown(block.Type))
 		}
-		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
-			return fmt.Errorf("holds a block that is not a certificate: %s", secrets.Bounded(err.Error()))
+		certificate, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("holds a block that is not a certificate: %s", secrets.Bounded(err.Error()))
 		}
+		if !certificate.BasicConstraintsValid || !certificate.IsCA {
+			return nil, fmt.Errorf("holds %s, which is not a certificate authority: the agent trusts the authorities that issue the platform's certificates, never one of those certificates, so the platform can replace them",
+				secrets.Shown(certificate.Subject.CommonName))
+		}
+		held = append(held, certificate)
 		rest = remainder
 	}
-	if certificates == 0 {
-		return errors.New("holds no certificate")
+	if len(held) == 0 {
+		return nil, errors.New("holds no certificate")
 	}
-	return nil
+	return held, nil
 }
 
 func address(name, raw string) (string, error) {
