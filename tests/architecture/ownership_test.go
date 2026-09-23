@@ -93,6 +93,12 @@ var dependencyRules = []dependencyRule{
 		reason:     "the configuration is read before there is an installation, a key or a connection: it says what the agent runs on, and each component opens what its own settings name",
 	},
 	{
+		packages:   "internal/governor",
+		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
+		transitive: true,
+		reason:     "the governor bounds work and knows none of it: what a scan reads, which records an upload carries and how they travel belong to the work it paces",
+	},
+	{
 		packages: "internal/spool",
 		forbidden: append([]string{
 			contractsPath,
@@ -321,6 +327,32 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				ImportPath: modulePath + "/internal/spool",
 				Imports:    []string{"hash/crc32", "os", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
 				Deps:       []string{"hash/crc32", "os", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
+			},
+		},
+		{
+			name: "the governor measuring the room left in the spool itself",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/governor",
+				Imports:    []string{"context", modulePath + "/internal/spool"},
+				Deps:       []string{"context", modulePath + "/internal/platform/files", modulePath + "/internal/spool"},
+			},
+			want: []string{modulePath + "/internal/platform/files", modulePath + "/internal/spool"},
+		},
+		{
+			name: "the governor pacing uploads through the transport",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/governor",
+				Imports:    []string{"net/http"},
+				Deps:       []string{"crypto/tls", "net/http"},
+			},
+			want: []string{"crypto/tls", "net/http"},
+		},
+		{
+			name: "the governor on the standard library alone",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/governor",
+				Imports:    []string{"context", "crypto/sha256", "log/slog", "math/rand/v2", "sync", "time"},
+				Deps:       []string{"context", "crypto/sha256", "log/slog", "math/rand/v2", "sync", "time"},
 			},
 		},
 		{

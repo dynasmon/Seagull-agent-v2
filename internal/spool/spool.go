@@ -282,6 +282,17 @@ func (s *Spool) Quarantine(stream Stream, reason string, sequences ...uint64) er
 	return kept.settle(sequences, quarantined, reason)
 }
 
+func (s *Spool) Room(stream Stream) int64 {
+	kept, err := s.queue(stream)
+	if err != nil {
+		return 0
+	}
+	if _, err := kept.expireDue(); err != nil || !kept.admitting() {
+		return 0
+	}
+	return s.budget.left(stream)
+}
+
 func (s *Spool) Limit(limits Limits) {
 	s.budget.set(limits)
 	for _, kept := range s.queues {
@@ -374,6 +385,18 @@ func (b *budget) reserve(stream Stream, bytes int64) error {
 	b.used += bytes
 	b.held[stream] += bytes
 	return nil
+}
+
+func (b *budget) left(stream Stream) int64 {
+	b.mu.Lock()
+	numerator, denominator := stream.share()
+	left := min(b.limit-reserved-b.used, b.limit/denominator*numerator-b.held[stream])
+	b.mu.Unlock()
+	free, err := b.room()
+	if err != nil {
+		return 0
+	}
+	return max(min(left, free-minFree), 0)
 }
 
 func (b *budget) add(stream Stream, bytes int64) {
