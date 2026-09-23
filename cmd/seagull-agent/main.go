@@ -27,7 +27,9 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
+	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
+	"github.com/dynasmon/Seagull-agent-v2/internal/transport"
 )
 
 const (
@@ -39,6 +41,7 @@ const usage = `Usage:
   seagull-agent -config FILE run                    run the agent until it receives SIGINT or SIGTERM
   seagull-agent -config FILE config check           read the configuration, report what it refuses, and exit
   seagull-agent -config FILE config print           print the configuration the agent would run on, and exit
+  seagull-agent -config FILE platform check         authenticate the platform the configuration names, presenting and sending nothing, and exit
   seagull-agent -config FILE installation replace   replace the installation with a new one that is not enrolled
   seagull-agent -version                            print the build identity and the wire versions it speaks, and exit
 
@@ -78,6 +81,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return check(*path, stdout, stderr)
 	case configured && slices.Equal(flags.Args(), []string{"config", "print"}):
 		return show(*path, stdout, stderr)
+	case configured && slices.Equal(flags.Args(), []string{"platform", "check"}):
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return reach(ctx, *path, stdout, stderr)
 	case configured && slices.Equal(flags.Args(), []string{"installation", "replace"}):
 		return replace(*path, stdout, stderr)
 	}
@@ -406,6 +413,58 @@ func show(path string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func reach(ctx context.Context, path string, stdout, stderr io.Writer) int {
+	settings, err := config.Load(path)
+	if err != nil {
+		return refuse(path, "", err, stderr)
+	}
+	client, err := platform(settings, nil)
+	if err != nil {
+		return refuse(path, "", err, stderr)
+	}
+	defer client.Close()
+	reached := 0
+	endpoints := []struct{ name, address string }{{"ingest", settings.Server.IngestURL}, {"renewal", settings.Server.RenewalURL}}
+	for _, endpoint := range endpoints {
+		peer, err := client.Check(ctx, endpoint.address)
+		if err != nil {
+			fmt.Fprintf(stderr, "seagull-agent: %s: %v\n", endpoint.name, err)
+			fmt.Fprintf(stderr, "seagull-agent: %s\n", recovery(path, "", err))
+			continue
+		}
+		reached++
+		asks := "asks for no certificate, so it is not an agent listener"
+		if peer.Asks {
+			asks = "asks for the certificate of an enrolled agent"
+		}
+		names := make([]string, 0, len(peer.Names))
+		for _, name := range peer.Names {
+			names = append(names, secrets.Shown(name))
+		}
+		fmt.Fprintf(stdout, "%s %s is authenticated: tls 1.3, a certificate for %s issued by %s and valid until %s; it %s\n",
+			endpoint.name, endpoint.address, strings.Join(names, ", "), secrets.Shown(peer.Issuer), peer.NotAfter.UTC().Format(time.RFC3339), asks)
+	}
+	if reached < len(endpoints) {
+		return 1
+	}
+	return 0
+}
+
+func platform(settings config.Config, credentials transport.Credentials) (*transport.Client, error) {
+	authorities, err := settings.Server.Authorities()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", config.ErrInvalid, err)
+	}
+	return transport.New(transport.Options{
+		Authorities:      authorities,
+		Credentials:      credentials,
+		ConnectTimeout:   time.Duration(settings.Transport.ConnectTimeout),
+		RequestTimeout:   time.Duration(settings.Transport.RequestTimeout),
+		MaxResponseBytes: int64(settings.Transport.MaxResponseBytes),
+		MaxConnections:   settings.Resources.MaxConcurrentUploads,
+	})
+}
+
 func replace(path string, stdout, stderr io.Writer) int {
 	settings, err := config.Load(path)
 	if err != nil {
@@ -466,6 +525,10 @@ func recovery(path, state string, err error) string {
 		return "restore " + state + " from a backup of this installation, or discard the installation with " + replacement + " and enroll the new one"
 	case errors.Is(err, identity.ErrNoInstallation):
 		return "run the agent to create an installation"
+	case errors.Is(err, transport.ErrUntrusted):
+		return "check that server.trust_bundle in " + path + " holds the authority that issued the platform's certificate, and that the address names a host that certificate was issued for"
+	case errors.Is(err, transport.ErrUnreachable):
+		return "check that the host the address names resolves and can be reached from this machine over the network"
 	case errors.Is(err, fs.ErrNotExist):
 		return "write the agent's configuration at " + path
 	}
