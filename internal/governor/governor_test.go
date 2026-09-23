@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -623,4 +625,20 @@ func (j *journal) entries(t *testing.T, message string) []map[string]any {
 		}
 	}
 	return found
+}
+
+func files(t *testing.T, count, size int) []string {
+	t.Helper()
+	directory := t.TempDir()
+	content := make([]byte, size)
+	var paths []string
+	for n := range count {
+		content[0] = byte(n)
+		path := filepath.Join(directory, fmt.Sprintf("file-%03d", n))
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+		paths = append(paths, path)
+	}
+	return paths
 }

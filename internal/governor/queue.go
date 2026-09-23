@@ -15,6 +15,11 @@ const favoured = 4
 
 const minBurst = 64 << 10
 
+// Waking a goroutine costs the processor far more than the bytes a short wait
+// pays for, so a wait for the budget lasts at least a step: saturated work
+// wakes at most fifty times a second, and what it saved up serves what follows.
+const step = 20 * time.Millisecond
+
 type waiter struct {
 	module  string
 	class   Class
@@ -203,8 +208,8 @@ func (p *pace) take(ctx context.Context, class Class, want int64) (int64, error)
 		var due <-chan time.Time
 		var timer *time.Timer
 		if head == w {
-			missing := (float64(need) - p.tokens) / p.rate
-			timer = time.NewTimer(time.Duration(math.Ceil(missing * float64(time.Second))))
+			missing := time.Duration(math.Ceil((float64(need) - p.tokens) / p.rate * float64(time.Second)))
+			timer = time.NewTimer(max(missing, step))
 			due = timer.C
 		}
 		p.mu.Unlock()
