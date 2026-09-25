@@ -33,49 +33,30 @@ var (
 // after the fingerprint of its leaf. A certificate is public: the directory is
 // private so that no other account decides what the agent presents.
 type CertificateFiles struct {
+	files pemFiles
+}
+
+type pemFiles struct {
 	directory *os.Root
+	most      int
 }
 
 func OpenCertificateFiles(directory *os.Root) (*CertificateFiles, error) {
 	if err := settle(directory, ErrCertificateInsecure); err != nil {
 		return nil, err
 	}
-	return &CertificateFiles{directory: directory}, nil
+	return &CertificateFiles{files: pemFiles{directory: directory, most: MaxChain}}, nil
 }
 
 // Store keeps chain, leaf first, under the fingerprint of its leaf and returns
 // that fingerprint once the chain is durable. A chain already kept is left as
 // it is; whatever else a file of that name holds is replaced.
 func (c *CertificateFiles) Store(chain [][]byte) (string, error) {
-	written, err := encodeChain(chain)
-	if err != nil {
-		return "", err
+	if len(chain) == 0 {
+		return "", errors.New("a chain of no certificate is not one the agent keeps")
 	}
 	fingerprint := Fingerprint(chain[0])
-	name := fingerprint + keySuffix
-	if held, err := c.read(name); err == nil && bytes.Equal(held, written) {
-		return fingerprint, nil
-	}
-	temporary := "." + name + ".tmp"
-	file, err := c.directory.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return "", fmt.Errorf("write %s: %w", c.path(name), err)
-	}
-	_, err = file.Write(written)
-	if err == nil {
-		err = file.Sync()
-	}
-	err = errors.Join(err, file.Close())
-	if err == nil {
-		err = c.directory.Rename(temporary, name)
-	}
-	if err != nil {
-		return "", errors.Join(fmt.Errorf("write %s: %w", c.path(name), err), ignoreMissing(c.directory.Remove(temporary)))
-	}
-	if err := syncDirectory(c.directory); err != nil {
-		return "", err
-	}
-	return fingerprint, nil
+	return fingerprint, c.files.store(fingerprint, chain)
 }
 
 // Open returns the chain whose leaf fingerprint names, leaf first, and refuses
@@ -84,19 +65,12 @@ func (c *CertificateFiles) Open(fingerprint string) ([][]byte, error) {
 	if !keyIDPattern.MatchString(fingerprint) {
 		return nil, fmt.Errorf("%s is not a certificate fingerprint", secrets.Shown(fingerprint))
 	}
-	name := fingerprint + keySuffix
-	content, err := c.read(name)
-	if err != nil {
-		return nil, err
-	}
-	chain, err := decodeChain(content)
-	if err == nil && Fingerprint(chain[0]) != fingerprint {
-		err = fmt.Errorf("holds certificate %s", Fingerprint(chain[0]))
-	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s %v", ErrCertificateDamaged, c.path(name), err)
-	}
-	return chain, nil
+	return c.files.open(fingerprint, func(chain [][]byte) error {
+		if Fingerprint(chain[0]) != fingerprint {
+			return fmt.Errorf("holds certificate %s", Fingerprint(chain[0]))
+		}
+		return nil
+	})
 }
 
 // Fingerprint names a certificate by the SHA-256 digest of its DER encoding, in
@@ -106,9 +80,55 @@ func Fingerprint(certificate []byte) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func (c *CertificateFiles) read(name string) ([]byte, error) {
-	path := c.path(name)
-	described, err := c.directory.Lstat(name)
+func (c *CertificateFiles) path(name string) string { return c.files.path(name) }
+
+func (f pemFiles) store(digest string, certificates [][]byte) error {
+	written, err := encodeChain(certificates, f.most)
+	if err != nil {
+		return err
+	}
+	name := digest + keySuffix
+	if held, err := f.read(name); err == nil && bytes.Equal(held, written) {
+		return nil
+	}
+	temporary := "." + name + ".tmp"
+	file, err := f.directory.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("write %s: %w", f.path(name), err)
+	}
+	_, err = file.Write(written)
+	if err == nil {
+		err = file.Sync()
+	}
+	err = errors.Join(err, file.Close())
+	if err == nil {
+		err = f.directory.Rename(temporary, name)
+	}
+	if err != nil {
+		return errors.Join(fmt.Errorf("write %s: %w", f.path(name), err), ignoreMissing(f.directory.Remove(temporary)))
+	}
+	return syncDirectory(f.directory)
+}
+
+func (f pemFiles) open(digest string, named func([][]byte) error) ([][]byte, error) {
+	name := digest + keySuffix
+	content, err := f.read(name)
+	if err != nil {
+		return nil, err
+	}
+	certificates, err := decodeChain(content, f.most)
+	if err == nil {
+		err = named(certificates)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s %v", ErrCertificateDamaged, f.path(name), err)
+	}
+	return certificates, nil
+}
+
+func (f pemFiles) read(name string) ([]byte, error) {
+	path := f.path(name)
+	described, err := f.directory.Lstat(name)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, fmt.Errorf("%w: there is no %s", ErrCertificateMissing, path)
@@ -120,7 +140,7 @@ func (c *CertificateFiles) read(name string) ([]byte, error) {
 	if err := private(path, described, ErrCertificateInsecure); err != nil {
 		return nil, err
 	}
-	file, err := c.directory.Open(name)
+	file, err := f.directory.Open(name)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
@@ -138,11 +158,11 @@ func (c *CertificateFiles) read(name string) ([]byte, error) {
 	return content, nil
 }
 
-func (c *CertificateFiles) path(name string) string { return filepath.Join(c.directory.Name(), name) }
+func (f pemFiles) path(name string) string { return filepath.Join(f.directory.Name(), name) }
 
-func encodeChain(chain [][]byte) ([]byte, error) {
-	if len(chain) == 0 || len(chain) > MaxChain {
-		return nil, fmt.Errorf("a chain of %d certificates is not one the agent keeps, which holds 1 to %d", len(chain), MaxChain)
+func encodeChain(chain [][]byte, most int) ([]byte, error) {
+	if len(chain) == 0 || len(chain) > most {
+		return nil, fmt.Errorf("%d certificates are not what the agent keeps together, which is 1 to %d", len(chain), most)
 	}
 	var written []byte
 	for _, certificate := range chain {
@@ -154,11 +174,11 @@ func encodeChain(chain [][]byte) ([]byte, error) {
 	return written, nil
 }
 
-func decodeChain(content []byte) ([][]byte, error) {
+func decodeChain(content []byte, most int) ([][]byte, error) {
 	var chain [][]byte
 	for rest := content; len(rest) > 0; {
-		if len(chain) == MaxChain {
-			return nil, fmt.Errorf("holds more than %d certificates", MaxChain)
+		if len(chain) == most {
+			return nil, fmt.Errorf("holds more than %d certificates", most)
 		}
 		block, remainder := pem.Decode(rest)
 		switch {
@@ -170,7 +190,7 @@ func decodeChain(content []byte) ([][]byte, error) {
 		chain = append(chain, block.Bytes)
 		rest = remainder
 	}
-	written, err := encodeChain(chain)
+	written, err := encodeChain(chain, most)
 	switch {
 	case err != nil:
 		return nil, err
