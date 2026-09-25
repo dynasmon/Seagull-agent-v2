@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -541,6 +542,108 @@ func TestAReplacementAsksForNothing(t *testing.T) {
 	}
 }
 
+func TestWhenEachKeyWasDrawnIsKeptWithItsGeneration(t *testing.T) {
+	directory := stateDirectory(t)
+	installation := open(t, directory)
+	drawn := enrollment("web-01", 1, firstKey)
+	drawn.KeyDrawnAt = time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+	if err := installation.Activate(drawn); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	if err := installation.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if active, ok := open(t, directory).Enrollment(); !ok || !equal(active, drawn) {
+		t.Fatalf("after a restart the active generation is %+v (%t), want %+v", active, ok, drawn)
+	}
+	if !strings.Contains(readState(t, directory), `"key_drawn_at": "2026-09-25T12:00:00Z"`) {
+		t.Fatalf("the state does not say when the key was drawn:\n%s", readState(t, directory))
+	}
+}
+
+func TestTheAuthoritiesAnInstallationAdoptedAreReadWithoutHoldingIt(t *testing.T) {
+	directory := stateDirectory(t)
+	if trusted, found, err := identity.Adopted(directory); err != nil || found {
+		t.Fatalf("an installation that does not exist adopted %+v (%t): %v", trusted, found, err)
+	}
+	if _, err := os.Lstat(directory); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("reading what an installation adopted created it: %v", err)
+	}
+
+	installation := open(t, directory)
+	if trusted, found := installation.Trust(); found {
+		t.Fatalf("a new installation trusts %+v", trusted)
+	}
+	adopted := identity.Trust{Authorities: strings.Repeat("ab", 32), Configured: strings.Repeat("cd", 32), AdoptedAt: time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)}
+	if err := installation.Adopt(adopted); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	for name, refused := range map[string]identity.Trust{
+		"authorities named by no digest": {Authorities: "0123", Configured: adopted.Configured, AdoptedAt: adopted.AdoptedAt},
+		"a configuration named by none":  {Authorities: adopted.Authorities, Configured: "", AdoptedAt: adopted.AdoptedAt},
+		"no moment of adoption":          {Authorities: adopted.Authorities, Configured: adopted.Configured},
+	} {
+		if err := installation.Adopt(refused); !errors.Is(err, identity.ErrUnadopted) {
+			t.Errorf("%s: adopting returned %v", name, err)
+		}
+	}
+	if trusted, found, err := identity.Adopted(directory); err != nil || !found || trusted != adopted {
+		t.Fatalf("while the installation is held, it reads as adopting %+v (%t): %v", trusted, found, err)
+	}
+	if err := installation.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if trusted, found := open(t, directory).Trust(); !found || trusted != adopted {
+		t.Fatalf("after a restart the installation trusts %+v (%t)", trusted, found)
+	}
+
+	if err := os.Chmod(directory, 0o750); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if _, _, err := identity.Adopted(directory); !errors.Is(err, identity.ErrInsecure) {
+		t.Fatalf("reading what an installation others can reach adopted returned %v", err)
+	}
+}
+
+func TestAnInstallationCanBeReadWhileItChanges(t *testing.T) {
+	installation := open(t, stateDirectory(t))
+	done := make(chan struct{})
+	var readers sync.WaitGroup
+	for range 4 {
+		readers.Go(func() {
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				if active, ok := installation.Enrollment(); ok && active.Certificate.Subject != active.AgentID {
+					t.Errorf("read a generation of %s certified for %s", active.AgentID, active.Certificate.Subject)
+				}
+				installation.Pending()
+				installation.Trust()
+				_ = installation.ID()
+			}
+		})
+	}
+	for generation := range uint64(24) {
+		key := fmt.Sprintf("%064x", generation+1)
+		if err := installation.Ask(request("web-01", key)); err != nil {
+			t.Errorf("ask: %v", err)
+			break
+		}
+		if err := installation.Activate(enrollment("web-01", generation+1, key)); err != nil {
+			t.Errorf("activate generation %d: %v", generation+1, err)
+			break
+		}
+	}
+	close(done)
+	readers.Wait()
+	if active, _ := installation.Enrollment(); active.Generation != 24 {
+		t.Fatalf("the installation ended at generation %d", active.Generation)
+	}
+}
+
 func TestReplacementStartsANewInstallationAndKeepsThePreviousOne(t *testing.T) {
 	directory := stateDirectory(t)
 	previous := open(t, directory)
@@ -972,7 +1075,7 @@ func request(agentID, key string) identity.Request {
 }
 
 func equal(a, b identity.Enrollment) bool {
-	return a.AgentID == b.AgentID && a.Generation == b.Generation && a.KeyID == b.KeyID &&
+	return a.AgentID == b.AgentID && a.Generation == b.Generation && a.KeyID == b.KeyID && a.KeyDrawnAt.Equal(b.KeyDrawnAt) &&
 		a.Certificate.Subject == b.Certificate.Subject && a.Certificate.Serial == b.Certificate.Serial &&
 		a.Certificate.FingerprintSHA256 == b.Certificate.FingerprintSHA256 &&
 		a.Certificate.NotBefore.Equal(b.Certificate.NotBefore) && a.Certificate.NotAfter.Equal(b.Certificate.NotAfter)

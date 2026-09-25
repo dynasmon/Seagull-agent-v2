@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
@@ -34,6 +36,7 @@ var (
 	ErrNoInstallation = errors.New("there is no installation to replace")
 	ErrRefused        = errors.New("the installation refuses the credential generation")
 	ErrUnasked        = errors.New("the installation refuses to ask for that certificate")
+	ErrUnadopted      = errors.New("the installation refuses to trust those authorities")
 )
 
 var (
@@ -53,13 +56,16 @@ type Certificate struct {
 }
 
 // The credential generation the installation authenticates with: the agent the
-// platform issued it for, the key that proves it and what the certificate says.
-// A Request is the certificate it asked for and was not issued yet. Neither
-// holds a key or a secret, so a copy of them authenticates nothing.
+// platform issued it for, the key that proves it, when that key was drawn and
+// what the certificate says. A Request is the certificate it asked for and was
+// not issued yet, and a Trust the authorities the platform published to it over
+// its own credential. None holds a key or a secret, so a copy of them
+// authenticates nothing.
 type Enrollment struct {
 	AgentID     string      `json:"agent_id"`
 	Generation  uint64      `json:"generation"`
 	KeyID       string      `json:"key_id"`
+	KeyDrawnAt  time.Time   `json:"key_drawn_at,omitzero"`
 	Certificate Certificate `json:"certificate"`
 }
 
@@ -69,6 +75,12 @@ type Request struct {
 	RequestedAt time.Time `json:"requested_at"`
 }
 
+type Trust struct {
+	Authorities string    `json:"authorities_sha256"`
+	Configured  string    `json:"configured_sha256"`
+	AdoptedAt   time.Time `json:"adopted_at"`
+}
+
 type state struct {
 	Format         int         `json:"format"`
 	InstallationID string      `json:"installation_id"`
@@ -76,13 +88,15 @@ type state struct {
 	Replaces       string      `json:"replaces,omitempty"`
 	Enrollment     *Enrollment `json:"enrollment,omitempty"`
 	Request        *Request    `json:"request,omitempty"`
+	Trust          *Trust      `json:"trust,omitempty"`
 }
 
 type Installation struct {
 	directory   string
 	root        *os.Root
 	lock        *os.File
-	state       state
+	mu          sync.Mutex
+	state       atomic.Pointer[state]
 	created     bool
 	directories []*os.Root
 }
@@ -98,7 +112,7 @@ func Open(directory string) (*Installation, error) {
 	loaded, found, err := installation.read()
 	switch {
 	case err == nil && found:
-		installation.state = loaded
+		installation.state.Store(&loaded)
 	case err == nil:
 		err = installation.start()
 	}
@@ -132,31 +146,41 @@ func Replace(directory string) (*Installation, error) {
 	return installation, nil
 }
 
-func (i *Installation) ID() string { return i.state.InstallationID }
+func (i *Installation) ID() string { return i.state.Load().InstallationID }
 
-func (i *Installation) Replaces() string { return i.state.Replaces }
+func (i *Installation) Replaces() string { return i.state.Load().Replaces }
 
 func (i *Installation) Created() bool { return i.created }
 
 func (i *Installation) Enrollment() (Enrollment, bool) {
-	if i.state.Enrollment == nil {
-		return Enrollment{}, false
+	if held := i.state.Load().Enrollment; held != nil {
+		return *held, true
 	}
-	return *i.state.Enrollment, true
+	return Enrollment{}, false
 }
 
 func (i *Installation) Pending() (Request, bool) {
-	if i.state.Request == nil {
-		return Request{}, false
+	if held := i.state.Load().Request; held != nil {
+		return *held, true
 	}
-	return *i.state.Request, true
+	return Request{}, false
+}
+
+func (i *Installation) Trust() (Trust, bool) {
+	if held := i.state.Load().Trust; held != nil {
+		return *held, true
+	}
+	return Trust{}, false
 }
 
 func (i *Installation) Activate(next Enrollment) error {
 	if err := next.validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrRefused, err)
 	}
-	switch current, pending := i.state.Enrollment, i.state.Request; {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	held := i.state.Load()
+	switch current, pending := held.Enrollment, held.Request; {
 	case current == nil && next.Generation != 1:
 		return fmt.Errorf("%w: the first credential generation is 1, not %d", ErrRefused, next.Generation)
 	case current != nil && next.AgentID != current.AgentID:
@@ -169,7 +193,7 @@ func (i *Installation) Activate(next Enrollment) error {
 		return fmt.Errorf("%w: key %s was asked to be agent %s, not %s",
 			ErrRefused, next.KeyID, secrets.Shown(pending.AgentID), secrets.Shown(next.AgentID))
 	}
-	updated := i.state
+	updated := *held
 	updated.Enrollment = &next
 	if updated.Request != nil && updated.Request.KeyID == next.KeyID {
 		updated.Request = nil
@@ -178,23 +202,38 @@ func (i *Installation) Activate(next Enrollment) error {
 }
 
 func (i *Installation) MayAsk(agentID string) error {
+	return mayAsk(i.state.Load(), agentID)
+}
+
+func (i *Installation) Ask(next Request) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	held := i.state.Load()
+	if err := mayAsk(held, next.AgentID); err != nil {
+		return err
+	}
+	updated := *held
+	updated.Request = &next
+	return i.commit(updated, ErrUnasked)
+}
+
+func (i *Installation) Adopt(next Trust) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	updated := *i.state.Load()
+	updated.Trust = &next
+	return i.commit(updated, ErrUnadopted)
+}
+
+func mayAsk(held *state, agentID string) error {
 	if !agentIDPattern.MatchString(agentID) {
 		return fmt.Errorf("%w: %s is not an agent the platform issues certificates for", ErrUnasked, secrets.Shown(agentID))
 	}
-	if current := i.state.Enrollment; current != nil && current.AgentID != agentID {
+	if current := held.Enrollment; current != nil && current.AgentID != agentID {
 		return fmt.Errorf("%w: the installation is enrolled as %s, and enrolling it as %s takes a replacement installation",
 			ErrUnasked, secrets.Shown(current.AgentID), secrets.Shown(agentID))
 	}
 	return nil
-}
-
-func (i *Installation) Ask(next Request) error {
-	if err := i.MayAsk(next.AgentID); err != nil {
-		return err
-	}
-	updated := i.state
-	updated.Request = &next
-	return i.commit(updated, ErrUnasked)
 }
 
 func (i *Installation) commit(updated state, refused error) error {
@@ -204,7 +243,7 @@ func (i *Installation) commit(updated state, refused error) error {
 	if err := i.write(updated); err != nil {
 		return err
 	}
-	i.state = updated
+	i.state.Store(&updated)
 	return nil
 }
 
@@ -215,6 +254,8 @@ func (i *Installation) Directory(name string) (*os.Root, error) {
 	if !directoryPattern.MatchString(name) || name == replacedDir {
 		return nil, fmt.Errorf("%q does not name a directory of the installation", name)
 	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	path := i.path(name)
 	if err := i.root.Mkdir(name, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		return nil, fmt.Errorf("create %s: %w", path, err)
@@ -245,6 +286,8 @@ func (i *Installation) Directory(name string) (*os.Root, error) {
 }
 
 func (i *Installation) Close() error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	closed := make([]error, 0, len(i.directories)+2)
 	for _, directory := range i.directories {
 		closed = append(closed, directory.Close())
@@ -299,8 +342,36 @@ func claim(directory string, create bool) (*Installation, error) {
 }
 
 func (i *Installation) read() (state, bool, error) {
-	path := i.path(stateFile)
-	described, err := i.root.Lstat(stateFile)
+	return readState(i.root, i.path(stateFile))
+}
+
+func Adopted(directory string) (Trust, bool, error) {
+	described, err := os.Lstat(directory)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return Trust{}, false, nil
+	case err != nil:
+		return Trust{}, false, fmt.Errorf("inspect the installation state directory: %w", err)
+	case !described.IsDir():
+		return Trust{}, false, fmt.Errorf("%w: %s is not a directory", ErrInsecure, directory)
+	}
+	if err := private(directory, described); err != nil {
+		return Trust{}, false, err
+	}
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return Trust{}, false, fmt.Errorf("open the installation state directory: %w", err)
+	}
+	defer root.Close()
+	held, found, err := readState(root, filepath.Join(directory, stateFile))
+	if err != nil || !found || held.Trust == nil {
+		return Trust{}, false, err
+	}
+	return *held.Trust, true, nil
+}
+
+func readState(root *os.Root, path string) (state, bool, error) {
+	described, err := root.Lstat(stateFile)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return state{}, false, nil
@@ -312,7 +383,7 @@ func (i *Installation) read() (state, bool, error) {
 	if err := private(path, described); err != nil {
 		return state{}, false, err
 	}
-	file, err := i.root.Open(stateFile)
+	file, err := root.Open(stateFile)
 	if err != nil {
 		return state{}, false, fmt.Errorf("open %s: %w", path, err)
 	}
@@ -354,7 +425,8 @@ func (i *Installation) create(replaces string) error {
 	if err := i.write(fresh); err != nil {
 		return err
 	}
-	i.state, i.created = fresh, true
+	i.state.Store(&fresh)
+	i.created = true
 	return nil
 }
 
@@ -523,6 +595,21 @@ func (s state) validate() error {
 		if s.Enrollment != nil && s.Request.AgentID != s.Enrollment.AgentID {
 			return fmt.Errorf("the installation is enrolled as %s and asks to be %s", secrets.Shown(s.Enrollment.AgentID), secrets.Shown(s.Request.AgentID))
 		}
+	}
+	if s.Trust != nil {
+		return s.Trust.validate()
+	}
+	return nil
+}
+
+func (t Trust) validate() error {
+	switch {
+	case !digestPattern.MatchString(t.Authorities):
+		return fmt.Errorf("the trust names authorities_sha256 %s, which is not a SHA-256 digest in lower-case hexadecimal", secrets.Shown(t.Authorities))
+	case !digestPattern.MatchString(t.Configured):
+		return fmt.Errorf("the trust names configured_sha256 %s, which is not a SHA-256 digest in lower-case hexadecimal", secrets.Shown(t.Configured))
+	case t.AdoptedAt.IsZero():
+		return errors.New("the trust says nothing of when it was adopted")
 	}
 	return nil
 }

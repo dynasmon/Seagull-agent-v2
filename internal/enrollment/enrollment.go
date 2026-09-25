@@ -117,9 +117,12 @@ func Import(installation *identity.Installation, keys pki.KeyProvider, certifica
 	if _, err := certificates.Store(verified.Chain); err != nil {
 		return Imported{}, err
 	}
-	next := identity.Enrollment{AgentID: pending.AgentID, Generation: 1, KeyID: pending.KeyID, Certificate: verified.Certificate}
+	next := identity.Enrollment{AgentID: pending.AgentID, Generation: 1, KeyID: pending.KeyID, KeyDrawnAt: pending.RequestedAt, Certificate: verified.Certificate}
 	if enrolled {
 		next.Generation = active.Generation + 1
+	}
+	if enrolled && pending.KeyID == active.KeyID {
+		next.KeyDrawnAt = active.KeyDrawnAt
 	}
 	if err := installation.Activate(next); err != nil {
 		return Imported{}, err
