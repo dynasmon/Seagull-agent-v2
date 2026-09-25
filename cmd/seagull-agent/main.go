@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
+	"github.com/dynasmon/Seagull-agent-v2/internal/enrollment"
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/pki"
@@ -33,17 +34,20 @@ import (
 )
 
 const (
-	keysDirectory  = "keys"
-	spoolDirectory = "spool"
+	keysDirectory         = "keys"
+	certificatesDirectory = "certificates"
+	spoolDirectory        = "spool"
 )
 
 const usage = `Usage:
-  seagull-agent -config FILE run                    run the agent until it receives SIGINT or SIGTERM
-  seagull-agent -config FILE config check           read the configuration, report what it refuses, and exit
-  seagull-agent -config FILE config print           print the configuration the agent would run on, and exit
-  seagull-agent -config FILE platform check         authenticate the platform the configuration names, presenting and sending nothing, and exit
-  seagull-agent -config FILE installation replace   replace the installation with a new one that is not enrolled
-  seagull-agent -version                            print the build identity and the wire versions it speaks, and exit
+  seagull-agent -config FILE run                          run the agent until it receives SIGINT or SIGTERM
+  seagull-agent -config FILE config check                 read the configuration, report what it refuses, and exit
+  seagull-agent -config FILE config print                 print the configuration the agent would run on, and exit
+  seagull-agent -config FILE platform check               authenticate the platform the configuration names, presenting and sending nothing, and exit
+  seagull-agent -config FILE enrollment request AGENT_ID  ask for a certificate as AGENT_ID, printing the request the platform issues it from
+  seagull-agent -config FILE enrollment import ISSUED     activate the certificate the platform answered the request with, held in ISSUED
+  seagull-agent -config FILE installation replace         replace the installation with a new one that is not enrolled
+  seagull-agent -version                                  print the build identity and the wire versions it speaks, and exit
 
 A running agent reads its configuration again when it receives SIGHUP, and
 keeps the one it has when it refuses the file.
@@ -85,6 +89,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		return reach(ctx, *path, stdout, stderr)
+	case configured && flags.NArg() == 3 && flags.Arg(0) == "enrollment" && flags.Arg(1) == "request":
+		return ask(*path, flags.Arg(2), stdout, stderr)
+	case configured && flags.NArg() == 3 && flags.Arg(0) == "enrollment" && flags.Arg(1) == "import":
+		return accept(*path, flags.Arg(2), stdout, stderr)
 	case configured && slices.Equal(flags.Args(), []string{"installation", "replace"}):
 		return replace(*path, stdout, stderr)
 	}
@@ -134,13 +142,18 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 		logger.Error("agent_not_started", slog.Any("error", err), slog.String("recovery", recovery(path, state, err)))
 		return 1
 	}
+	certificates, err := openCertificates(installation)
+	if err != nil {
+		logger.Error("agent_not_started", slog.Any("error", err), slog.String("recovery", recovery(path, state, err)))
+		return 1
+	}
 	started := []any{slog.String("build", buildIdentity()), slog.String("config", path)}
 	for _, spoken := range wireVersions() {
 		started = append(started, slog.Int(spoken.name, spoken.version))
 	}
 	started = append(started, slog.String("installation_id", installation.ID()))
 	if enrolled, ok := installation.Enrollment(); ok {
-		if _, err := keys.Open(enrolled.KeyID); err != nil {
+		if _, err := (credentials{installation: installation, keys: keys, certificates: certificates}).Credential(); err != nil {
 			logger.Error("agent_not_started", slog.Any("error", err), slog.String("recovery", recovery(path, state, err)))
 			return 1
 		}
@@ -297,6 +310,32 @@ func openKeys(installation *identity.Installation, provider string) (pki.KeyProv
 		return nil, err
 	}
 	return keys, nil
+}
+
+func openCertificates(installation *identity.Installation) (*pki.CertificateFiles, error) {
+	directory, err := installation.Directory(certificatesDirectory)
+	if err != nil {
+		return nil, err
+	}
+	return pki.OpenCertificateFiles(directory)
+}
+
+type credentials struct {
+	installation *identity.Installation
+	keys         pki.KeyProvider
+	certificates *pki.CertificateFiles
+}
+
+func (c credentials) Credential() (transport.Credential, error) {
+	active, enrolled := c.installation.Enrollment()
+	if !enrolled {
+		return transport.Credential{}, errors.New("the installation is not enrolled")
+	}
+	held, err := pki.OpenCredential(c.keys, c.certificates, active.KeyID, active.Certificate.FingerprintSHA256)
+	if err != nil {
+		return transport.Credential{}, err
+	}
+	return transport.Credential{Chain: held.Chain, Signer: held.Key}, nil
 }
 
 func openSpool(installation *identity.Installation, settings config.Config, logger *slog.Logger) (*spool.Spool, error) {
@@ -465,6 +504,110 @@ func platform(settings config.Config, credentials transport.Credentials) (*trans
 	})
 }
 
+func ask(path, agentID string, stdout, stderr io.Writer) int {
+	settings, err := config.Load(path)
+	if err != nil {
+		return refuse(path, "", err, stderr)
+	}
+	state := settings.Identity.StateDirectory
+	installation, err := identity.Open(state)
+	if err != nil {
+		return refuse(path, state, err, stderr)
+	}
+	defer installation.Close()
+	keys, err := openKeys(installation, settings.Identity.KeyProvider)
+	if err != nil {
+		return refuse(path, state, err, stderr)
+	}
+	asked, err := enrollment.Request(installation, keys, agentID, time.Now())
+	if err != nil {
+		return refuse(path, state, err, stderr)
+	}
+	if _, err := stdout.Write(asked.Request); err != nil {
+		return refuse(path, state, err, stderr)
+	}
+	switch {
+	case asked.Again:
+		fmt.Fprintf(stderr, "seagull-agent: installation %s asks again to be agent %s, with the key it asked with before, %s\n", installation.ID(), asked.AgentID, asked.KeyID)
+	case asked.Abandoned != "":
+		fmt.Fprintf(stderr, "seagull-agent: installation %s asks to be agent %s with a new key, %s, since the key it asked with before, %s, is gone: a certificate issued for that one cannot be imported\n",
+			installation.ID(), asked.AgentID, asked.KeyID, asked.Abandoned)
+	default:
+		fmt.Fprintf(stderr, "seagull-agent: installation %s asks to be agent %s with key %s\n", installation.ID(), asked.AgentID, asked.KeyID)
+	}
+	fmt.Fprintf(stderr, "seagull-agent: have the platform issue the certificate from this request, as an operator and off this host: POST /v1/agents/%s/certificate on its control plane, with the request as csr_pem\n", asked.AgentID)
+	fmt.Fprintf(stderr, "seagull-agent: then activate it with \"seagull-agent -config %s enrollment import ISSUED\", ISSUED holding what the platform answered, as it answered\n", path)
+	return 0
+}
+
+func accept(path, answer string, stdout, stderr io.Writer) int {
+	settings, err := config.Load(path)
+	if err != nil {
+		return refuse(path, "", err, stderr)
+	}
+	authorities, err := settings.Server.Authorities()
+	if err != nil {
+		return refuse(path, "", fmt.Errorf("%w: %w", config.ErrInvalid, err), stderr)
+	}
+	issued, err := answered(answer)
+	if err != nil {
+		return refuse(path, "", err, stderr)
+	}
+	state := settings.Identity.StateDirectory
+	installation, err := identity.Open(state)
+	if err != nil {
+		return refuse(path, state, err, stderr)
+	}
+	defer installation.Close()
+	keys, err := openKeys(installation, settings.Identity.KeyProvider)
+	if err != nil {
+		return refuse(path, state, err, stderr)
+	}
+	certificates, err := openCertificates(installation)
+	if err != nil {
+		return refuse(path, state, err, stderr)
+	}
+	imported, err := enrollment.Import(installation, keys, certificates, authorities, issued, time.Now())
+	if err != nil {
+		return refuse(path, state, err, stderr)
+	}
+	active := imported.Enrollment
+	already := ""
+	if imported.Already {
+		already = ", already"
+	}
+	fmt.Fprintf(stdout, "installation %s is enrolled as agent %s%s: credential generation %d, certificate %s issued by %s and valid until %s\n",
+		installation.ID(), active.AgentID, already, active.Generation, active.Certificate.Serial, secrets.Shown(imported.Issuer), active.Certificate.NotAfter.Format(time.RFC3339))
+	for _, authority := range imported.Unheld {
+		fmt.Fprintf(stderr, "seagull-agent: the platform tells its agents to trust %s, which server.trust_bundle does not hold: add it to %s before the platform serves or issues certificates from it\n",
+			secrets.Shown(authority.Subject.CommonName), settings.Server.TrustBundle)
+	}
+	return 0
+}
+
+func answered(answer string) ([]byte, error) {
+	described, err := os.Stat(answer)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", enrollment.ErrUnreadable, secrets.Bounded(err.Error()))
+	}
+	if !described.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %s is not a regular file", enrollment.ErrUnreadable, secrets.Shown(answer))
+	}
+	file, err := os.Open(answer)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", enrollment.ErrUnreadable, secrets.Bounded(err.Error()))
+	}
+	defer file.Close()
+	if opened, err := file.Stat(); err != nil || !os.SameFile(opened, described) {
+		return nil, fmt.Errorf("%w: %s changed while it was being opened", enrollment.ErrUnreadable, secrets.Shown(answer))
+	}
+	content, err := io.ReadAll(io.LimitReader(file, enrollment.MaxIssuedBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", enrollment.ErrUnreadable, secrets.Bounded(err.Error()))
+	}
+	return content, nil
+}
+
 func replace(path string, stdout, stderr io.Writer) int {
 	settings, err := config.Load(path)
 	if err != nil {
@@ -480,8 +623,8 @@ func replace(path string, stdout, stderr io.Writer) int {
 	if replaced := installation.Replaces(); replaced != "" {
 		fmt.Fprintf(stdout, "replaces %s\n", replaced)
 	}
-	fmt.Fprintf(stderr, "seagull-agent: everything the replaced installation held, its keys included, is kept under %s; enroll the new installation before it delivers anything\n",
-		filepath.Join(state, "replaced"))
+	fmt.Fprintf(stderr, "seagull-agent: everything the replaced installation held, its keys included, is kept under %s; enroll the new installation with \"seagull-agent -config %s enrollment request AGENT_ID\" before it delivers anything\n",
+		filepath.Join(state, "replaced"), path)
 	return 0
 }
 
@@ -499,6 +642,8 @@ func refuse(path, state string, err error, stderr io.Writer) int {
 func recovery(path, state string, err error) string {
 	replacement := fmt.Sprintf(`"seagull-agent -config %s installation replace"`, path)
 	reading := fmt.Sprintf(`"seagull-agent -config %s config check"`, path)
+	requesting := fmt.Sprintf(`"seagull-agent -config %s enrollment request AGENT_ID"`, path)
+	importing := fmt.Sprintf(`"seagull-agent -config %s enrollment import ISSUED"`, path)
 	switch {
 	case errors.Is(err, config.ErrInvalid):
 		return "correct " + path + ", which " + reading + " reads without starting the agent"
@@ -512,7 +657,7 @@ func recovery(path, state string, err error) string {
 		return "start the agent as the account it runs as: its packaging never starts it through a setuid or setgid program"
 	case errors.Is(err, identity.ErrLocked), errors.Is(err, spool.ErrLocked):
 		return "stop the agent that holds " + state + ": two agents never share an installation"
-	case errors.Is(err, identity.ErrInsecure), errors.Is(err, spool.ErrInsecure):
+	case errors.Is(err, identity.ErrInsecure), errors.Is(err, spool.ErrInsecure), errors.Is(err, pki.ErrCertificateInsecure):
 		return "make " + state + " and everything in it belong to the account the agent runs as, closed to its group and to others"
 	case errors.Is(err, pki.ErrKeyInsecure):
 		return "make " + state + " and everything in it belong to the account the agent runs as, closed to its group and to others; " +
@@ -521,8 +666,22 @@ func recovery(path, state string, err error) string {
 		return "run the agent release that wrote this state, or discard the installation with " + replacement
 	case errors.Is(err, spool.ErrDamaged):
 		return "take out of " + filepath.Join(state, spoolDirectory) + " what the agent did not write there, or discard the installation with " + replacement
-	case errors.Is(err, identity.ErrDamaged), errors.Is(err, pki.ErrKeyMissing), errors.Is(err, pki.ErrKeyDamaged):
+	case errors.Is(err, identity.ErrDamaged):
 		return "restore " + state + " from a backup of this installation, or discard the installation with " + replacement + " and enroll the new one"
+	case errors.Is(err, pki.ErrKeyMissing), errors.Is(err, pki.ErrKeyDamaged), errors.Is(err, pki.ErrCertificateMissing), errors.Is(err, pki.ErrCertificateDamaged):
+		return "restore " + state + " from a backup of this installation, or have the platform issue it a new certificate: ask with " + requesting + " and activate what it answers with " + importing
+	case errors.Is(err, identity.ErrUnasked), errors.Is(err, identity.ErrRefused):
+		return "ask to be the agent the platform registered, by the identifier it registered it under: an installation enrolled as one agent never becomes another, which takes a new installation made with " + replacement
+	case errors.Is(err, enrollment.ErrNotAsked):
+		return "ask for a certificate with " + requesting + ", have the platform issue it, and activate what it answers with " + importing
+	case errors.Is(err, enrollment.ErrUnreadable):
+		return "import what the platform answered the certificate request with, a seagull.agent.v1.IssuedCertificate, as it answered"
+	case errors.Is(err, enrollment.ErrMismatched):
+		return "import the certificate the platform issued for the request this installation made, or ask again with " + requesting + " and have the platform issue that one"
+	case errors.Is(err, enrollment.ErrUntrusted):
+		return "have the certificate issued by the platform server.trust_bundle in " + path + " authenticates, and check that the bundle holds the authority that issues its agents' certificates"
+	case errors.Is(err, enrollment.ErrNotCurrent):
+		return "check the clock of this host, or have the platform issue the certificate again from the same request"
 	case errors.Is(err, identity.ErrNoInstallation):
 		return "run the agent to create an installation"
 	case errors.Is(err, transport.ErrUntrusted):

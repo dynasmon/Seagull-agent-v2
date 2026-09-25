@@ -7,9 +7,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -36,7 +38,11 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
+	"github.com/dynasmon/Seagull-agent-v2/internal/enrollment"
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
@@ -45,6 +51,8 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
+	"github.com/dynasmon/Seagull-agent-v2/internal/transport"
+	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
 
 const childArguments = "SEAGULL_AGENT_TEST_ARGUMENTS"
@@ -170,11 +178,314 @@ func TestTheAgentKeepsItsInstallationAcrossRestarts(t *testing.T) {
 	}
 }
 
+func TestAnInstallationIsEnrolledWithTheCertificateThePlatformIssuedForItsRequest(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	signing := listening(t, trustBundle(path))
+	gateway := signing.listen(t)
+
+	var asked, told bytes.Buffer
+	if code := run([]string{"-config", path, "enrollment", "request", "web-01"}, &asked, &told); code != 0 {
+		t.Fatalf("exit code %d: %s", code, told.String())
+	}
+	block, rest := pem.Decode(asked.Bytes())
+	if block == nil || block.Type != "CERTIFICATE REQUEST" || len(rest) > 0 {
+		t.Fatalf("the agent printed %q rather than a certificate request", asked.String())
+	}
+	requested, err := x509.ParseCertificateRequest(block.Bytes)
+	if err != nil || requested.CheckSignature() != nil || requested.Subject.CommonName != "web-01" {
+		t.Fatalf("the agent asked with %v: %v", requested, err)
+	}
+	keys, err := filepath.Glob(filepath.Join(state, keysDirectory, "*.pem"))
+	digest := sha256.Sum256(requested.RawSubjectPublicKeyInfo)
+	if err != nil || len(keys) != 1 || filepath.Base(keys[0]) != hex.EncodeToString(digest[:])+".pem" {
+		t.Fatalf("the installation holds %q and asked with key %x: %v", keys, digest, err)
+	}
+	for _, said := range []string{"asks to be agent web-01 with key " + hex.EncodeToString(digest[:]), "POST /v1/agents/web-01/certificate", "enrollment import ISSUED"} {
+		if !strings.Contains(told.String(), said) {
+			t.Errorf("the agent did not say %q:\n%s", said, told.String())
+		}
+	}
+
+	answer := saved(t, signing.issue(t, asked.Bytes(), nil))
+	var imported, importing bytes.Buffer
+	if code := run([]string{"-config", path, "enrollment", "import", answer}, &imported, &importing); code != 0 || importing.Len() != 0 {
+		t.Fatalf("exit code %d, stdout %q, stderr %q", code, imported.String(), importing.String())
+	}
+	if said := imported.String(); !strings.Contains(said, "is enrolled as agent web-01: credential generation 1, certificate ") ||
+		!strings.Contains(said, `issued by "Seagull platform"`) {
+		t.Fatalf("the agent reported the import as %q", said)
+	}
+	var again bytes.Buffer
+	if code := run([]string{"-config", path, "enrollment", "import", answer}, &again, &importing); code != 0 || !strings.Contains(again.String(), "web-01, already: credential generation 1") {
+		t.Fatalf("importing again exited %d and said %q", code, again.String())
+	}
+
+	logs := serveStopped(t, path)
+	started, _ := logged(t, logs, "agent_starting")
+	if started["agent_id"] != "web-01" || started["credential_generation"] != float64(1) {
+		t.Fatalf("the enrolled installation started as %v", started)
+	}
+	for _, written := range []string{asked.String(), told.String(), imported.String(), again.String(), logs} {
+		if exposesKeys(t, written, state) {
+			t.Fatalf("the agent wrote down its key:\n%s", written)
+		}
+	}
+
+	installation, err := identity.Open(state)
+	if err != nil {
+		t.Fatalf("open the installation: %v", err)
+	}
+	defer installation.Close()
+	held, err := openKeys(installation, config.KeysInFiles)
+	if err != nil {
+		t.Fatalf("open the keys: %v", err)
+	}
+	certificates, err := openCertificates(installation)
+	if err != nil {
+		t.Fatalf("open the certificates: %v", err)
+	}
+	settings := loaded(t, path)
+	client, err := platform(settings, credentials{installation: installation, keys: held, certificates: certificates})
+	if err != nil {
+		t.Fatalf("compose the transport: %v", err)
+	}
+	defer client.Close()
+	reply, err := client.Post(t.Context(), transport.Request{URL: gateway.URL + "/v1/events", ContentType: "application/x-protobuf"})
+	if err != nil || reply.Status != http.StatusOK {
+		t.Fatalf("the enrolled agent reached the platform with %v: %v", reply.Status, err)
+	}
+	if agent := gateway.agent.Load(); agent == nil || *agent != "web-01" {
+		t.Fatalf("the platform authenticated the agent as %v", agent)
+	}
+}
+
+func TestAskingAgainForTheSameAgentPrintsTheSameRequest(t *testing.T) {
+	path := configured(t, stateDirectory(t), nil)
+	keysAsked := map[string]bool{}
+	for attempt := range 2 {
+		var asked, told bytes.Buffer
+		if code := run([]string{"-config", path, "enrollment", "request", "web-01"}, &asked, &told); code != 0 {
+			t.Fatalf("exit code %d: %s", code, told.String())
+		}
+		block, _ := pem.Decode(asked.Bytes())
+		if block == nil {
+			t.Fatalf("the agent printed %q", asked.String())
+		}
+		requested, err := x509.ParseCertificateRequest(block.Bytes)
+		if err != nil {
+			t.Fatalf("parse the request: %v", err)
+		}
+		keysAsked[string(requested.RawSubjectPublicKeyInfo)] = true
+		if again := strings.Contains(told.String(), "asks again to be agent web-01"); again != (attempt == 1) {
+			t.Fatalf("request %d said %q", attempt+1, told.String())
+		}
+	}
+	if len(keysAsked) != 1 {
+		t.Fatalf("asking twice asked with %d keys", len(keysAsked))
+	}
+}
+
+func TestAnImportTheAgentRefusesChangesNothing(t *testing.T) {
+	marker := strings.Repeat("written", 36) + "-marker-tail"
+	now := time.Now()
+	cases := []struct {
+		name     string
+		answer   func(t *testing.T, signing *issuing, requested []byte) string
+		cause    string
+		recovery string
+	}{
+		{
+			name: "a certificate an impostor issued",
+			answer: func(t *testing.T, _ *issuing, requested []byte) string {
+				impostor := listening(t, filepath.Join(t.TempDir(), "impostor-ca.pem"))
+				return saved(t, impostor.issue(t, requested, nil))
+			},
+			cause:    enrollment.ErrUntrusted.Error(),
+			recovery: "server.trust_bundle",
+		},
+		{
+			name: "a certificate for another agent",
+			answer: func(t *testing.T, signing *issuing, requested []byte) string {
+				return saved(t, signing.issue(t, requested, func(c *x509.Certificate) { c.Subject = pkix.Name{CommonName: marker} }))
+			},
+			cause:    enrollment.ErrMismatched.Error(),
+			recovery: "enrollment request AGENT_ID",
+		},
+		{
+			name: "a certificate that expired",
+			answer: func(t *testing.T, signing *issuing, requested []byte) string {
+				return saved(t, signing.issue(t, requested, func(c *x509.Certificate) { c.NotBefore, c.NotAfter = now.Add(-2*time.Hour), now.Add(-time.Hour) }))
+			},
+			cause:    enrollment.ErrNotCurrent.Error(),
+			recovery: "clock",
+		},
+		{
+			name: "the certificate alone",
+			answer: func(t *testing.T, signing *issuing, requested []byte) string {
+				var issued agentv1.IssuedCertificate
+				if err := proto.Unmarshal(signing.issue(t, requested, nil), &issued); err != nil {
+					t.Fatalf("decode the answer: %v", err)
+				}
+				return saved(t, issued.GetCertificatePem())
+			},
+			cause:    enrollment.ErrUnreadable.Error(),
+			recovery: "seagull.agent.v1.IssuedCertificate",
+		},
+		{
+			name: "a file that is not there",
+			answer: func(t *testing.T, _ *issuing, _ []byte) string {
+				return filepath.Join(t.TempDir(), marker)
+			},
+			cause:    enrollment.ErrUnreadable.Error(),
+			recovery: "as it answered",
+		},
+		{
+			name: "a directory",
+			answer: func(t *testing.T, _ *issuing, _ []byte) string {
+				return t.TempDir()
+			},
+			cause:    enrollment.ErrUnreadable.Error(),
+			recovery: "as it answered",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			state := stateDirectory(t)
+			path := configured(t, state, nil)
+			signing := listening(t, trustBundle(path))
+			var asked, told bytes.Buffer
+			if code := run([]string{"-config", path, "enrollment", "request", "web-01"}, &asked, &told); code != 0 {
+				t.Fatalf("exit code %d: %s", code, told.String())
+			}
+			before, err := os.ReadFile(filepath.Join(state, "installation.json"))
+			if err != nil {
+				t.Fatalf("read the installation state: %v", err)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"-config", path, "enrollment", "import", c.answer(t, signing, asked.Bytes())}, &stdout, &stderr); code != 1 || stdout.Len() != 0 {
+				t.Fatalf("exit code %d, stdout %q", code, stdout.String())
+			}
+			if said := stderr.String(); !strings.Contains(said, c.cause) || !strings.Contains(said, c.recovery) ||
+				strings.Contains(said, "-marker-tail") {
+				t.Fatalf("the agent refused the import with\n%s\nwant %q and a recovery naming %q, and nothing of what it read", said, c.cause, c.recovery)
+			}
+			if after, err := os.ReadFile(filepath.Join(state, "installation.json")); err != nil || !bytes.Equal(after, before) {
+				t.Fatalf("a refused import changed the installation state: %v", err)
+			}
+			if kept, err := os.ReadDir(filepath.Join(state, certificatesDirectory)); (err != nil && !errors.Is(err, fs.ErrNotExist)) || len(kept) != 0 {
+				t.Fatalf("a refused import kept %v: %v", kept, err)
+			}
+		})
+	}
+}
+
+func TestNothingIsImportedOrAskedForBeyondWhatTheInstallationMayBecome(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	signing := listening(t, trustBundle(path))
+	unasked := saved(t, signing.issue(t, requestFor(t, "web-01"), nil))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-config", path, "enrollment", "import", unasked}, &stdout, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), enrollment.ErrNotAsked.Error()) || !strings.Contains(stderr.String(), "enrollment request AGENT_ID") {
+		t.Fatalf("importing without a request exited %d and said %q", code, stderr.String())
+	}
+
+	enrollWith(t, path, signing)
+	for _, agentID := range []string{"db-07", "web 01"} {
+		stdout.Reset()
+		stderr.Reset()
+		if code := run([]string{"-config", path, "enrollment", "request", agentID}, &stdout, &stderr); code != 1 || stdout.Len() != 0 {
+			t.Fatalf("asking to be %q exited %d and printed %q", agentID, code, stdout.String())
+		}
+		if !strings.Contains(stderr.String(), identity.ErrUnasked.Error()) || !strings.Contains(stderr.String(), "installation replace") {
+			t.Fatalf("asking to be %q was refused with %q", agentID, stderr.String())
+		}
+	}
+	if keys, err := filepath.Glob(filepath.Join(state, keysDirectory, "*.pem")); err != nil || len(keys) != 1 {
+		t.Fatalf("refused requests left %q: %v", keys, err)
+	}
+}
+
+func TestAnEnrolledInstallationMovesToTheCertificateItAsksForNext(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	signing := listening(t, trustBundle(path))
+	first := enrollWith(t, path, signing)
+	second := enrollWith(t, path, signing)
+	if second.key == first.key || second.certificate == first.certificate {
+		t.Fatalf("the next generation holds %s and %s, the first %s and %s", second.key, second.certificate, first.key, first.certificate)
+	}
+	started, _ := logged(t, serveStopped(t, path), "agent_starting")
+	if started["agent_id"] != "web-01" || started["credential_generation"] != float64(2) {
+		t.Fatalf("the installation started as %v", started)
+	}
+	if _, err := os.Lstat(first.key); err != nil {
+		t.Fatalf("the key of the first generation is gone: %v", err)
+	}
+}
+
+func TestEnrollingWaitsForTheAgentToStop(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	signing := listening(t, trustBundle(path))
+	held, err := identity.Open(state)
+	if err != nil {
+		t.Fatalf("hold the installation: %v", err)
+	}
+	defer held.Close()
+	answer := saved(t, signing.issue(t, requestFor(t, "web-01"), nil))
+	for _, command := range [][]string{{"enrollment", "request", "web-01"}, {"enrollment", "import", answer}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(append([]string{"-config", path}, command...), &stdout, &stderr); code != 1 || stdout.Len() != 0 ||
+			!strings.Contains(stderr.String(), "another agent process holds the installation state") ||
+			!strings.Contains(stderr.String(), "stop the agent that holds "+state) {
+			t.Fatalf("%q exited %d while the agent ran and said %q", command, code, stderr.String())
+		}
+	}
+}
+
+func TestAnImportSaysWhichAuthoritiesThePlatformTrustsThatTheAgentDoesNot(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	signing := listening(t, trustBundle(path))
+	next := listening(t, filepath.Join(t.TempDir(), "next-ca.pem"))
+	next.certificate.Subject.CommonName = "Seagull platform next"
+	signing.published = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: next.certificate.Raw})
+
+	var asked, told bytes.Buffer
+	if code := run([]string{"-config", path, "enrollment", "request", "web-01"}, &asked, &told); code != 0 {
+		t.Fatalf("exit code %d: %s", code, told.String())
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-config", path, "enrollment", "import", saved(t, signing.issue(t, asked.Bytes(), nil))}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit code %d: %s", code, stderr.String())
+	}
+	if said := stderr.String(); !strings.Contains(said, "trust \"Seagull platform\", which server.trust_bundle does not hold") ||
+		!strings.Contains(said, trustBundle(path)) || strings.Count(said, "\n") != 1 {
+		t.Fatalf("the agent said %q about the authorities the platform publishes", said)
+	}
+}
+
+func requestFor(t *testing.T, agentID string) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("draw a key the installation does not hold: %v", err)
+	}
+	signed, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: agentID}}, key)
+	if err != nil {
+		t.Fatalf("make a request: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: signed})
+}
+
 func TestAnEnrolledAgentStartsWithTheKeyItsCredentialsName(t *testing.T) {
 	state := stateDirectory(t)
-	enroll(t, state)
+	path := configured(t, state, nil)
+	enroll(t, path)
 
-	logs := serveStopped(t, configured(t, state, nil))
+	logs := serveStopped(t, path)
 	started, _ := logged(t, logs, "agent_starting")
 	if started["agent_id"] != "web-01" || started["credential_generation"] != float64(1) || started["key_provider"] != "filesystem" {
 		t.Fatalf("an enrolled installation started as %v", started)
@@ -184,9 +495,65 @@ func TestAnEnrolledAgentStartsWithTheKeyItsCredentialsName(t *testing.T) {
 	}
 }
 
+func TestAnAgentWhoseCertificateExpiredStillStarts(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	signing := listening(t, trustBundle(path))
+	installation, err := identity.Open(state)
+	if err != nil {
+		t.Fatalf("open the installation: %v", err)
+	}
+	keys, err := openKeys(installation, config.KeysInFiles)
+	if err != nil {
+		t.Fatalf("open the keys: %v", err)
+	}
+	certificates, err := openCertificates(installation)
+	if err != nil {
+		t.Fatalf("open the certificates: %v", err)
+	}
+	key, err := keys.Create()
+	if err != nil {
+		t.Fatalf("create a key: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(7),
+		Subject:      pkix.Name{CommonName: "web-01"},
+		NotBefore:    time.Now().Add(-2 * time.Hour),
+		NotAfter:     time.Now().Add(-time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	signed, err := x509.CreateCertificate(rand.Reader, template, signing.certificate, key.Public(), signing.key)
+	if err != nil {
+		t.Fatalf("issue an expired certificate: %v", err)
+	}
+	fingerprint, err := certificates.Store([][]byte{signed, signing.certificate.Raw})
+	if err != nil {
+		t.Fatalf("keep the certificate: %v", err)
+	}
+	expired, err := x509.ParseCertificate(signed)
+	if err != nil {
+		t.Fatalf("parse the certificate: %v", err)
+	}
+	if err := installation.Activate(identity.Enrollment{AgentID: "web-01", Generation: 1, KeyID: key.ID(), Certificate: identity.Certificate{
+		Subject: "web-01", Serial: "07", FingerprintSHA256: fingerprint, NotBefore: expired.NotBefore, NotAfter: expired.NotAfter,
+	}}); err != nil {
+		t.Fatalf("activate the expired generation: %v", err)
+	}
+	if err := installation.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	started, _ := logged(t, serveStopped(t, path), "agent_starting")
+	if started["agent_id"] != "web-01" || started["credential_generation"] != float64(1) {
+		t.Fatalf("an agent whose certificate expired started as %v", started)
+	}
+}
+
 func TestKeysSurviveAnActivationInterruptedBeforeItsStateWasWritten(t *testing.T) {
 	state := stateDirectory(t)
-	active := enroll(t, state)
+	path := configured(t, state, nil)
+	active := enroll(t, path).key
 	installation, err := identity.Open(state)
 	if err != nil {
 		t.Fatalf("open the installation: %v", err)
@@ -207,7 +574,7 @@ func TestKeysSurviveAnActivationInterruptedBeforeItsStateWasWritten(t *testing.T
 		t.Fatalf("close: %v", err)
 	}
 
-	started, _ := logged(t, serveStopped(t, configured(t, state, nil)), "agent_starting")
+	started, _ := logged(t, serveStopped(t, path), "agent_starting")
 	if started["credential_generation"] != float64(1) {
 		t.Fatalf("after the interruption the agent started as %v", started)
 	}
@@ -441,11 +808,13 @@ func servers(ingest, renewal, bundle string) string {
 type issuing struct {
 	certificate *x509.Certificate
 	key         *ecdsa.PrivateKey
+	published   []byte
 }
 
 type served struct {
 	*httptest.Server
 	served atomic.Int32
+	agent  atomic.Pointer[string]
 }
 
 // An authority for the platform, written where bundle says, and listeners it
@@ -500,7 +869,12 @@ func (i *issuing) listen(t *testing.T) *served {
 		t.Fatalf("issue the certificate of a listener: %v", err)
 	}
 	listener := &served{}
-	listener.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { listener.served.Add(1) }))
+	listener.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		listener.served.Add(1)
+		if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
+			listener.agent.Store(&r.TLS.PeerCertificates[0].Subject.CommonName)
+		}
+	}))
 	listener.Config.ErrorLog = log.New(io.Discard, "", 0)
 	agents := x509.NewCertPool()
 	agents.AddCert(i.certificate)
@@ -689,9 +1063,17 @@ func TestNothingTheAgentReadsReachesWhatItWrites(t *testing.T) {
 		},
 		"a key that is not one": func(t *testing.T, state string) string {
 			path := configured(t, state, nil)
-			active := enroll(t, state)
+			active := enroll(t, path).key
 			if err := os.WriteFile(active, pem.EncodeToMemory(&pem.Block{Type: marker, Bytes: []byte("not a key")}), 0o600); err != nil {
 				t.Fatalf("damage the key: %v", err)
+			}
+			return path
+		},
+		"a certificate that is not one": func(t *testing.T, state string) string {
+			path := configured(t, state, nil)
+			active := enroll(t, path).certificate
+			if err := os.WriteFile(active, pem.EncodeToMemory(&pem.Block{Type: marker, Bytes: []byte("not a certificate")}), 0o600); err != nil {
+				t.Fatalf("damage the certificate: %v", err)
 			}
 			return path
 		},
@@ -776,8 +1158,8 @@ func TestNothingTheSpoolHoldsReachesWhatTheAgentWrites(t *testing.T) {
 
 func TestEverythingTheInstallationHoldsIsPrivateToTheAccountTheAgentRunsAs(t *testing.T) {
 	state := stateDirectory(t)
-	enroll(t, state)
 	path := configured(t, state, nil)
+	enroll(t, path)
 	serveStopped(t, path)
 	kept, release := spoolIn(t, state)
 	for _, stream := range []spool.Stream{spool.Events, spool.Inventory} {
@@ -1007,6 +1389,12 @@ func TestAnythingButACommandIsAUsageError(t *testing.T) {
 		{"-config", path, "installation", "show"},
 		{"-config", path, "platform"},
 		{"-config", path, "platform", "check", "extra"},
+		{"-config", path, "enrollment"},
+		{"-config", path, "enrollment", "request"},
+		{"-config", path, "enrollment", "request", "web-01", "extra"},
+		{"-config", path, "enrollment", "import"},
+		{"-config", path, "enrollment", "renew", "web-01"},
+		{"-version", "enrollment", "request", "web-01"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 2 {
@@ -1038,7 +1426,7 @@ func TestReplacingTheInstallationNamesTheOneItReplaces(t *testing.T) {
 	if previous == "" || replacement == previous || replaces != "replaces "+previous+"\n" {
 		t.Fatalf("printed %q after replacing %q", stdout.String(), previous)
 	}
-	if !strings.Contains(stderr.String(), "enroll the new installation") {
+	if !strings.Contains(stderr.String(), "enroll the new installation with") || !strings.Contains(stderr.String(), "enrollment request AGENT_ID") {
 		t.Errorf("said nothing about enrolling the new installation: %q", stderr.String())
 	}
 	if started, _ := logged(t, serveStopped(t, path), "agent_starting"); started["installation_id"] != replacement {
@@ -1134,7 +1522,7 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 	cases := []struct {
 		name       string
 		components []agentruntime.Component
-		prepare    func(t *testing.T, state string)
+		prepare    func(t *testing.T, path, state string)
 		message    string
 		cause      string
 		recovery   string
@@ -1157,7 +1545,7 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 		},
 		{
 			name: "the installation state is damaged",
-			prepare: func(t *testing.T, state string) {
+			prepare: func(t *testing.T, path, state string) {
 				if err := os.Mkdir(state, 0o700); err != nil {
 					t.Fatalf("create %s: %v", state, err)
 				}
@@ -1171,30 +1559,30 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 		},
 		{
 			name: "the key of the active credential generation is missing",
-			prepare: func(t *testing.T, state string) {
-				if err := os.Remove(enroll(t, state)); err != nil {
+			prepare: func(t *testing.T, path, state string) {
+				if err := os.Remove(enroll(t, path).key); err != nil {
 					t.Fatalf("lose the key: %v", err)
 				}
 			},
 			message:  "agent_not_started",
 			cause:    "the key does not exist",
-			recovery: "installation replace",
+			recovery: "enrollment request AGENT_ID",
 		},
 		{
 			name: "the key of the active credential generation is damaged",
-			prepare: func(t *testing.T, state string) {
-				if err := os.WriteFile(enroll(t, state), []byte("damaged"), 0o600); err != nil {
+			prepare: func(t *testing.T, path, state string) {
+				if err := os.WriteFile(enroll(t, path).key, []byte("damaged"), 0o600); err != nil {
 					t.Fatalf("damage the key: %v", err)
 				}
 			},
 			message:  "agent_not_started",
 			cause:    "the key is damaged",
-			recovery: "installation replace",
+			recovery: "enrollment request AGENT_ID",
 		},
 		{
 			name: "another account can read the key",
-			prepare: func(t *testing.T, state string) {
-				if err := os.Chmod(enroll(t, state), 0o644); err != nil {
+			prepare: func(t *testing.T, path, state string) {
+				if err := os.Chmod(enroll(t, path).key, 0o644); err != nil {
 					t.Fatalf("expose the key: %v", err)
 				}
 			},
@@ -1203,9 +1591,64 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 			recovery: "revoke the certificate issued for it",
 		},
 		{
+			name: "the certificate of the active credential generation is missing",
+			prepare: func(t *testing.T, path, state string) {
+				if err := os.Remove(enroll(t, path).certificate); err != nil {
+					t.Fatalf("lose the certificate: %v", err)
+				}
+			},
+			message:  "agent_not_started",
+			cause:    "the certificate does not exist",
+			recovery: "enrollment import ISSUED",
+		},
+		{
+			name: "the certificate of the active credential generation is damaged",
+			prepare: func(t *testing.T, path, state string) {
+				if err := os.WriteFile(enroll(t, path).certificate, []byte("damaged"), 0o600); err != nil {
+					t.Fatalf("damage the certificate: %v", err)
+				}
+			},
+			message:  "agent_not_started",
+			cause:    "the certificate is damaged",
+			recovery: "enrollment request AGENT_ID",
+		},
+		{
+			name: "the certificate of the active credential generation was issued for another key",
+			prepare: func(t *testing.T, path, state string) {
+				active := enroll(t, path)
+				other := filepath.Join(t.TempDir(), "other")
+				if err := os.Mkdir(other, 0o700); err != nil {
+					t.Fatalf("create %s: %v", other, err)
+				}
+				replaced := configured(t, other, nil)
+				stranger := enrollWith(t, replaced, listening(t, trustBundle(replaced)))
+				content, err := os.ReadFile(stranger.certificate)
+				if err == nil {
+					err = os.WriteFile(active.certificate, content, 0o600)
+				}
+				if err != nil {
+					t.Fatalf("swap the certificate: %v", err)
+				}
+			},
+			message:  "agent_not_started",
+			cause:    "the certificate is damaged",
+			recovery: "enrollment request AGENT_ID",
+		},
+		{
+			name: "another account can change the certificate",
+			prepare: func(t *testing.T, path, state string) {
+				if err := os.Chmod(enroll(t, path).certificate, 0o660); err != nil {
+					t.Fatalf("expose the certificate: %v", err)
+				}
+			},
+			message:  "agent_not_started",
+			cause:    "the certificate is not private to the account the agent runs as",
+			recovery: "make %s and everything in it belong to the account the agent runs as",
+		},
+		{
 			name: "another account can list the keys",
-			prepare: func(t *testing.T, state string) {
-				enroll(t, state)
+			prepare: func(t *testing.T, path, state string) {
+				enroll(t, path)
 				if err := os.Chmod(filepath.Join(state, "keys"), 0o750); err != nil {
 					t.Fatalf("expose the keys: %v", err)
 				}
@@ -1216,7 +1659,7 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 		},
 		{
 			name: "another account can read the spool",
-			prepare: func(t *testing.T, state string) {
+			prepare: func(t *testing.T, path, state string) {
 				_, release := spoolIn(t, state)
 				release()
 				if err := os.Chmod(filepath.Join(state, spoolDirectory, "inventory", "ledger"), 0o644); err != nil {
@@ -1229,7 +1672,7 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 		},
 		{
 			name: "the spool holds what the agent did not write",
-			prepare: func(t *testing.T, state string) {
+			prepare: func(t *testing.T, path, state string) {
 				_, release := spoolIn(t, state)
 				release()
 				if err := os.Mkdir(filepath.Join(state, spoolDirectory, "processes"), 0o700); err != nil {
@@ -1242,7 +1685,7 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 		},
 		{
 			name: "the spool was written by a newer agent",
-			prepare: func(t *testing.T, state string) {
+			prepare: func(t *testing.T, path, state string) {
 				_, release := spoolIn(t, state)
 				release()
 				if err := os.WriteFile(filepath.Join(state, spoolDirectory, "events", "ledger"), []byte("SGLG\x03\x00"+strings.Repeat("\x00", 40)), 0o600); err != nil {
@@ -1255,7 +1698,7 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 		},
 		{
 			name: "another agent holds the installation",
-			prepare: func(t *testing.T, state string) {
+			prepare: func(t *testing.T, path, state string) {
 				held, err := identity.Open(state)
 				if err != nil {
 					t.Fatalf("hold the installation: %v", err)
@@ -1272,7 +1715,7 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 			state := stateDirectory(t)
 			path := configured(t, state, nil)
 			if c.prepare != nil {
-				c.prepare(t, state)
+				c.prepare(t, path, state)
 			}
 			var logs bytes.Buffer
 			if code := serve(t.Context(), &logs, path, c.components...); code != 1 {
@@ -1295,36 +1738,106 @@ func TestTheAgentExitsWithAnErrorWhenItCannotRun(t *testing.T) {
 	}
 }
 
-func enroll(t *testing.T, state string) string {
+type enrolled struct {
+	key         string
+	certificate string
+}
+
+func enroll(t *testing.T, path string) enrolled {
 	t.Helper()
+	return enrollWith(t, path, listening(t, trustBundle(path)))
+}
+
+func enrollWith(t *testing.T, path string, signing *issuing) enrolled {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-config", path, "enrollment", "request", "web-01"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("ask for a certificate: exit code %d: %s", code, stderr.String())
+	}
+	answer := saved(t, signing.issue(t, stdout.Bytes(), nil))
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"-config", path, "enrollment", "import", answer}, &stdout, &stderr); code != 0 {
+		t.Fatalf("import the certificate: exit code %d: %s", code, stderr.String())
+	}
+	state := loaded(t, path).Identity.StateDirectory
 	installation, err := identity.Open(state)
 	if err != nil {
 		t.Fatalf("open the installation: %v", err)
 	}
 	defer installation.Close()
-	keys, err := openKeys(installation, config.KeysInFiles)
-	if err != nil {
-		t.Fatalf("open the keys: %v", err)
+	active, ok := installation.Enrollment()
+	if !ok {
+		t.Fatal("the import enrolled nothing")
 	}
-	key, err := keys.Create()
-	if err != nil {
-		t.Fatalf("create a key: %v", err)
+	return enrolled{
+		key:         filepath.Join(state, keysDirectory, active.KeyID+".pem"),
+		certificate: filepath.Join(state, certificatesDirectory, active.Certificate.FingerprintSHA256+".pem"),
 	}
-	if err := installation.Activate(identity.Enrollment{
-		AgentID:    "web-01",
-		Generation: 1,
-		KeyID:      key.ID(),
-		Certificate: identity.Certificate{
-			Subject:           "web-01",
-			Serial:            "01",
-			FingerprintSHA256: strings.Repeat("01", 32),
-			NotBefore:         time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
-			NotAfter:          time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC),
+}
+
+func (i *issuing) issue(t *testing.T, requested []byte, change func(*x509.Certificate)) []byte {
+	t.Helper()
+	block, _ := pem.Decode(requested)
+	if block == nil || block.Type != "CERTIFICATE REQUEST" {
+		t.Fatalf("the agent asked with %q", requested)
+	}
+	asked, err := x509.ParseCertificateRequest(block.Bytes)
+	if err != nil || asked.CheckSignature() != nil {
+		t.Fatalf("the agent asked with a request that does not verify: %v", err)
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 127))
+	if err != nil {
+		t.Fatalf("draw a serial: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	template := &x509.Certificate{
+		SerialNumber:          serial.Add(serial, big.NewInt(1)),
+		Subject:               pkix.Name{CommonName: asked.Subject.CommonName},
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              i.certificate.NotAfter,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+	}
+	if change != nil {
+		change(template)
+	}
+	signed, err := x509.CreateCertificate(rand.Reader, template, i.certificate, asked.PublicKey, i.key)
+	if err != nil {
+		t.Fatalf("issue the certificate: %v", err)
+	}
+	certificate, err := x509.ParseCertificate(signed)
+	if err != nil {
+		t.Fatalf("parse the certificate: %v", err)
+	}
+	digest := sha256.Sum256(signed)
+	authority := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: i.certificate.Raw})
+	encoded, err := proto.Marshal(&agentv1.IssuedCertificate{
+		CertificatePem: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signed}),
+		ChainPem:       authority,
+		TrustBundlePem: slices.Concat(authority, i.published),
+		Identity: &agentv1.Identity{
+			Subject:           certificate.Subject.CommonName,
+			Serial:            hex.EncodeToString(certificate.SerialNumber.Bytes()),
+			FingerprintSha256: hex.EncodeToString(digest[:]),
+			IssuedAt:          timestamppb.New(certificate.NotBefore),
+			ExpiresAt:         timestamppb.New(certificate.NotAfter),
 		},
-	}); err != nil {
-		t.Fatalf("activate the first credential generation: %v", err)
+	})
+	if err != nil {
+		t.Fatalf("encode the answer: %v", err)
 	}
-	return filepath.Join(state, keysDirectory, key.ID()+".pem")
+	return encoded
+}
+
+func saved(t *testing.T, issued []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "issued.pb")
+	if err := os.WriteFile(path, issued, 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	return path
 }
 
 // The spool of the installation in state, opened as the agent opens it and
