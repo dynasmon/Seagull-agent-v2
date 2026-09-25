@@ -1,0 +1,41 @@
+{
+  "authority": "issuance-authority.pem",
+  "exchanges": [
+    {
+      "name": "issuance-accepted",
+      "route": "POST /v1/agents/{id}/certificate",
+      "agent_id": "web-01",
+      "status": 201
+    },
+    {
+      "name": "issuance-other-agent",
+      "route": "POST /v1/agents/{id}/certificate",
+      "agent_id": "web-02",
+      "status": 422
+    },
+    {
+      "name": "issuance-unregistered",
+      "route": "POST /v1/agents/{id}/certificate",
+      "agent_id": "web-03",
+      "status": 404
+    },
+    {
+      "name": "issuance-revoked",
+      "route": "POST /v1/agents/{id}/certificate",
+      "agent_id": "web-04",
+      "status": 422
+    },
+    {
+      "name": "renewal-accepted",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201
+    }
+  ],
+  "platform": {
+    "commit": "6fae3457bb2b721fc891e1c80bf12a5f3fc408c2",
+    "contracts": "v0.14.0",
+    "repository": "github.com/dynasmon/Seagull-backend-v2"
+  },
+  "recorded_at": "2026-09-25T19:26:22Z"
+}
