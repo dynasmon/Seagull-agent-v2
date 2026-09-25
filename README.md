@@ -176,8 +176,9 @@ What a setting does today follows what the agent has. `identity`, `logging`,
 `transport.max_batch_bytes` and `transport.max_upload_bytes_per_second` are in
 force: they decide where the installation is opened, what the log says, how
 much the spool keeps and for how long, how large a record it takes, what the
-agent and its expensive work may spend, and which platform `platform check`
-authenticates and how long it waits for it. The governor keeps the budgets for
+agent and its expensive work may spend, which platform `platform check`
+authenticates and how long it waits for it, and which authorities a
+certificate the agent imports has to chain to. The governor keeps the budgets for
 scans and uploads before anything spends them, since no collector scans and
 nothing delivers yet. The rest of `transport` is validated here and takes effect
 as delivery arrives, so a deployment is configured once rather than as each
@@ -286,14 +287,16 @@ hostname, an address, a MAC or a machine identifier, which stay observations
 about the machine.
 
 The installation is not the agent the platform knows. The platform issues a
-certificate for an `agent_id` an operator registered, and once enrollment
-activates a credential generation, `installation.json` records it: that agent,
-the generation number, the `key_id` of its key and what the certificate says.
-It holds no key, token or other secret, and a field it does not declare, such
-as a key, makes the file damaged, so copying it or the agent's public settings
-authenticates nothing. Each generation follows the active one by exactly one
-and is issued to the same agent; enrolling as another agent takes a new
-installation.
+certificate for an `agent_id` an operator registered, and once
+[enrollment](#enrollment) activates a credential generation,
+`installation.json` records it: that agent, the generation number, the
+`key_id` of its key and what the certificate says. Until the platform issued
+the certificate the installation asked for, it records that request too: the
+agent it asked to be, the key it asked with and when. It holds no key, token or
+other secret, and a field it does not declare, such as a key, makes the file
+damaged, so copying it or the agent's public settings authenticates nothing.
+Each generation follows the active one by exactly one and is issued to the same
+agent; enrolling as another agent takes a new installation.
 
 The state is the agent's alone:
 
@@ -305,9 +308,10 @@ The state is the agent's alone:
 - a write lands in a temporary file that is synced and renamed over
   `installation.json` before the directory is synced, and a start discards what
   an interrupted write left behind;
-- whatever else the installation keeps, such as its keys and its spool, lives
-  in a private directory of its own inside the state directory, which the
-  installation holds under the same lock and closes when it is closed.
+- whatever else the installation keeps, such as its keys, its certificates and
+  its spool, lives in a private directory of its own inside the state
+  directory, which the installation holds under the same lock and closes when
+  it is closed.
 
 When the state cannot be used, the agent does not start: it logs
 `agent_not_started` with the reason and a `recovery`, and never creates a new
@@ -370,14 +374,21 @@ The only provider keeps keys in files, under `keys/` in the state directory:
   re-encoded, swapped for another or replaced by a symbolic link is damaged,
   and it is left as it was.
 
-At start, the agent opens `keys/` and, once the installation is enrolled, the
-key of its active credential generation. When `keys/` or a key in it is
-reachable by another account, or that key is missing or damaged, the agent logs
+At start, the agent opens `keys/` and `certificates/` and, once the
+installation is enrolled, the key and the certificate of its active credential
+generation, and checks that the certificate was issued for that key. When
+`keys/` or a key in it is reachable by another account, or that key or
+certificate is missing, damaged or not issued for that key, the agent logs
 `agent_not_started` with a `recovery` and does not start, as for damaged
-installation state. A key another account could read has to be treated as
-exposed: revoke the certificate issued for it and replace the installation.
+installation state: the installation is restored from a backup, or an operator
+has the platform issue it a new certificate, as [enrollment](#enrollment)
+describes. A key another account could read has to be treated as exposed:
+revoke the certificate issued for it and replace the installation.
 `agent_starting` names the provider in `key_provider` and says in
 `key_exportable` whether a key can be read out of it; no log line carries a key.
+A certificate that expired, or that the host's clock says is not valid yet, does
+not stop the agent: the transport refuses to present it, and an agent that
+cannot deliver still starts and keeps what it holds.
 
 The files keep a key from other accounts, and from nothing else:
 
@@ -404,6 +415,136 @@ and tested for:
 Providers never fall back to one another: when a protected provider is added,
 a host where it is unavailable will not have its keys quietly kept in files
 instead.
+
+## Enrollment
+
+An installation becomes an agent the platform knows when an operator has the
+platform issue it a certificate. At the recorded backend commit that is how
+every first certificate is issued: an operator allowed to write agents asks the
+control plane to sign a certificate request for an agent they registered, and
+the platform signs it and binds the certificate to that agent in one act.
+`internal/enrollment` is the agent's half of it, and it reaches no host: the
+request and the certificate travel through the operator, and the operator's
+credentials never reach the endpoint.
+
+```bash
+seagull-agent -config /etc/seagull-agent/agent.json enrollment request web-01 > web-01.csr
+# the operator has the platform issue it, from anywhere but this host
+seagull-agent -config /etc/seagull-agent/agent.json enrollment import web-01.issued
+```
+
+`enrollment request AGENT_ID` asks to be the agent the operator registered:
+
+- the installation draws a key of its own with its key provider and records the
+  request, the agent and the `key_id`, before it prints the request. That is a
+  PKCS #10 certificate request, printed as PEM on stdout, whose common name is
+  the agent, which carries the public half of the key and which the key signed
+  to prove the installation holds it. It asks for nothing else, and carries no
+  private key: no code outside the key provider draws, writes or reads one, and
+  `tests/architecture` holds that as a test;
+- asking again for the same agent prints the same request, with the same key,
+  so a request lost on its way costs nothing. Asking for another agent draws
+  another key, since a key is only ever asked to be one agent, and so does
+  asking again once the key of the request is gone or damaged, since a key
+  nothing was issued to is no identity yet;
+- the identifier is the platform's: letters, digits, `.`, `_` and `-`, starting
+  with a letter or a digit, at most 64 of them, the shape the platform reads an
+  agent out of a certificate with. An installation enrolled as one agent asks
+  only to stay that agent, and becoming another takes a replacement
+  installation.
+
+The operator then has the platform issue the certificate, as themselves and
+from anywhere but the host: `POST /v1/agents/<agent_id>/certificate` on the
+control plane's operator listener, with the request as the `csr_pem` of a
+`seagull.agent.v1.CertificateRequest`. The platform signs only a request whose
+common name is the agent the operator names, only for an agent it registered and
+has not revoked or decommissioned, and answers with a
+`seagull.agent.v1.IssuedCertificate`: the certificate, the chain of the
+authority that signed it, the authorities it tells its agents to trust, and what
+it recorded of the certificate.
+
+`enrollment import ISSUED` reads that answer, as the platform gave it, and
+activates it only when it is the certificate the pending request asked for:
+
+- its certificate names the agent the request asked to be and carries the key
+  the request was made with, authenticates a client, lets its key sign, belongs
+  to no authority and is valid now;
+- it chains, through the chain the answer carries, to an authority in
+  `server.trust_bundle`, the authorities the agent authenticates the platform
+  with. A certificate an impostor signed, or another platform issued, is refused
+  however it reached the host;
+- what the platform recorded of it, its subject, serial, fingerprint and
+  validity, is the certificate the answer carries;
+- the authorities the answer tells the agent to trust are read and never
+  trusted. Trust changes only through `server.trust_bundle`, the path the
+  operator already controls, and the import names each authority the platform
+  publishes that the bundle does not hold, so that the operator adds it before
+  the platform serves or issues certificates from it.
+
+Anything else is refused with what is wrong and a `recovery`, and changes
+nothing: the request stays pending, and the installation keeps the generation
+it had. Activation survives any interruption:
+
+- the certificate and its chain are kept under `certificates/` in the state
+  directory, in a file named after the SHA-256 fingerprint of the certificate,
+  0600 in a 0700 directory, written to a temporary file that is synced and
+  renamed before the directory is synced;
+- only then does `installation.json` record the next credential generation, and
+  the same write ends the request;
+- an import interrupted before that write leaves the request pending, and
+  running it again completes it. Importing the certificate of the active
+  generation again changes nothing but restoring its file, so an import is
+  always safe to repeat.
+
+An enrolled installation asks for its next certificate the same way, with a
+new key, and the import activates it as the next generation of the same agent.
+That is how an operator recovers an installation whose key or certificate was
+lost or damaged, without replacing it or setting its spool aside; a key another
+account could read is exposed instead, and is revoked with its agent. Both
+commands hold the installation, so they run while the agent is stopped.
+
+The evidence:
+
+- `internal/enrollment` is tested against a platform that signs as the recorded
+  platform's authority signs. Nothing is activated for another key, for another
+  agent, from an authority the agent does not trust, for a server, for a key
+  that may not sign, as an authority, outside its validity, when what the
+  platform recorded is another certificate, from an answer that is not one, or
+  without a request; an import interrupted before its activation completes, a
+  repeated one changes nothing, and an authority only the answer names is never
+  trusted. The answer's parser is fuzzed;
+- the exchanges were recorded from the control plane of the recorded backend
+  commit, driven by that commit's own end-to-end harness and by the agent's
+  binary: the platform issued a certificate from the agent's request; it refused
+  the same request for another agent, a request for an agent it never
+  registered, and one for an agent it revoked; the agent imported what it
+  issued; and the credential it activated authenticated to the platform's
+  renewal listener, whose answer the agent imported as its next generation.
+  `tests/compatibility` verifies every certificate the platform issued against
+  the request it answered and the authority the agent trusted, and checks that
+  the request the agent makes today is the one the platform signed;
+- the command-line tests enroll an installation end to end and reach an mTLS
+  listener through `internal/transport` with the credential it activated, which
+  the listener authenticates as the agent it was issued to.
+
+What it does not claim:
+
+- enrollment without an operator. The recorded platform issues no bootstrap
+  credential an agent could present, and the agent adds none: a token that
+  enrolled an endpoint would have to be single-use, short-lived, scoped and
+  consumed atomically by the platform, and until the platform and the contracts
+  define one, only an operator has a certificate issued;
+- that the platform still admits the agent. Importing checks what the platform
+  issued, and an agent the platform later revokes still holds a certificate
+  that verifies: it learns of it from the platform's answers, as
+  [Reaching the platform](#reaching-the-platform) describes;
+- that the generation before stops authenticating. The platform honours a
+  certificate it replaced until that certificate expires, and its key stays in
+  `keys/`, so an installation whose key was exposed is revoked with its agent,
+  never merely issued a new certificate;
+- renewal before a certificate expires, which the agent will ask for over its
+  own credential rather than through an operator: until it does, an operator
+  has the next certificate issued as the first was.
 
 ## The spool
 
@@ -805,9 +946,11 @@ What the agent presents:
   the handshake where it is kept and the transport never holds it whole. A new
   credential generation is presented from the next request on, over new
   connections, and idle connections made with the one before are closed;
-- the agent does not keep the certificate the platform issues yet: enrollment
-  arrives with AG-006, and until then no installation has a credential to
-  present, so the agent sends nothing.
+- the credential is the key and the certificate of the installation's active
+  credential generation, opened where [enrollment](#enrollment) keeps them and
+  checked to belong together before the transport presents them. Delivery is
+  what sends, and it arrives with its own work: until then the agent
+  authenticates with that credential in its tests alone.
 
 What the agent is told, apart:
 
@@ -893,7 +1036,8 @@ What it does not claim:
 
 The agent holds one secret, the private key of its installation, and it reads
 text it did not write: its configuration, its installation state, its trust
-bundle, its key files and what it finds in its spool. `internal/secrets` is the
+bundle, its key files, the certificates the platform issued it and what it finds
+in its spool. `internal/secrets` is the
 one place that decides what any of that may become in a log line, a refusal or a
 message on the terminal.
 
@@ -971,6 +1115,13 @@ conventions:
   takes its identity from an address, an interface or a server's answer;
 - `internal/pki` imports no HTTP, gRPC, RPC or TLS package: a key signs where it
   is held, and transport owns requests, connections and TLS;
+- no production code outside `internal/pki` draws a private key, writes one out
+  or reads one in, so every other part of the agent uses a key through
+  `crypto.Signer` alone and a certificate request carries its public half;
+- `internal/enrollment` imports neither the configuration, nor the transport,
+  nor an HTTP, gRPC, RPC or TLS package, directly or through another package:
+  the request and the certificate travel through the operator, and it is handed
+  the authorities it verifies against;
 - `internal/config` imports neither the installation, nor the keys, nor an HTTP,
   gRPC, RPC or TLS package, directly or through another package: the
   configuration is read before any of them exists, and each component opens what
@@ -1056,7 +1207,9 @@ What one side does not know follows from the same rule:
 `tests/compatibility/testdata` holds exchanges recorded from the ingest gateway
 of a backend commit, driven in process by that commit's end-to-end harness: the
 bytes of every batch sent and of every answer, including batches sent under a
-certificate the platform refuses the agent of. The suite fails when `go.mod`
+certificate the platform refuses the agent of. Beside them are the exchanges of
+[enrollment](#enrollment), recorded from the control plane of the same commit
+with the agent's own binary asking for and importing the certificates. The suite fails when `go.mod`
 pins contracts no recorded platform was built with, when a recorded platform
 never durably accepted a version the agent speaks, or when a recorded refusal
 reads differently. Compatibility is claimed only with recorded platforms, and
