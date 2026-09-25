@@ -107,6 +107,17 @@ var dependencyRules = []dependencyRule{
 		reason:     "enrollment activates what an operator had the platform issue: the request and the certificate travel through the operator, so it reaches no host, and it is handed the authorities it verifies against rather than reading them itself",
 	},
 	{
+		packages:   "internal/renewal",
+		forbidden:  []string{modulePath + "/internal/config", modulePath + "/internal/modules"},
+		transitive: true,
+		reason:     "renewal keeps the credential of the installation current with what it is handed: the listener, the authorities trusted now and the lifetime of a key come from the composition root, and no collector takes part in it",
+	},
+	{
+		packages:  "internal/renewal",
+		forbidden: []string{"crypto/tls"},
+		reason:    "renewal reaches the platform through the transport alone, which authenticates it and presents the agent's credential; renewal only checks certificates the platform issued or published",
+	},
+	{
 		packages:   "internal/governor",
 		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
 		transitive: true,
@@ -394,6 +405,32 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				ImportPath: modulePath + "/internal/enrollment",
 				Imports:    []string{"crypto/x509", contractsPath + "/gen/go/seagull/agent/v1", modulePath + "/internal/identity", modulePath + "/internal/pki"},
 				Deps:       []string{"crypto/x509", "net", contractsPath + "/gen/go/seagull/agent/v1", modulePath + "/internal/identity", modulePath + "/internal/pki"},
+			},
+		},
+		{
+			name: "renewal reading the listener it asks from the configuration",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/renewal",
+				Imports:    []string{modulePath + "/internal/config", modulePath + "/internal/transport"},
+				Deps:       []string{"crypto/tls", modulePath + "/internal/config", modulePath + "/internal/transport"},
+			},
+			want: []string{modulePath + "/internal/config"},
+		},
+		{
+			name: "renewal making its own connections",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/renewal",
+				Imports:    []string{"crypto/tls", "crypto/x509"},
+				Deps:       []string{"crypto/tls", "crypto/x509"},
+			},
+			want: []string{"crypto/tls"},
+		},
+		{
+			name: "renewal asking through the transport",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/renewal",
+				Imports:    []string{"crypto/x509", "net/http", contractsPath + "/gen/go/seagull/agent/v1", modulePath + "/internal/enrollment", modulePath + "/internal/transport"},
+				Deps:       []string{"crypto/tls", "crypto/x509", "net/http", contractsPath + "/gen/go/seagull/agent/v1", modulePath + "/internal/enrollment", modulePath + "/internal/transport"},
 			},
 		},
 		{
