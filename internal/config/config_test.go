@@ -31,7 +31,7 @@ func TestTheSettingsTheFileLeavesOutAreTheOnesTheAgentDocuments(t *testing.T) {
 	}
 	want := config.Config{
 		Format:   config.Format,
-		Identity: config.Identity{StateDirectory: state(path), KeyProvider: "filesystem"},
+		Identity: config.Identity{StateDirectory: state(path), KeyProvider: "filesystem", KeyLifetime: config.Duration(720 * time.Hour)},
 		Server: config.Server{
 			IngestURL:   "https://gateway.example:8443",
 			RenewalURL:  "https://control.example:8446",
@@ -169,6 +169,8 @@ func TestASettingOutsideWhatTheAgentSpendsIsRefused(t *testing.T) {
 		"a level it does not log at":        {"logging": `{"level": "trace"}`},
 		"a log it does not write":           {"logging": `{"format": "logfmt"}`},
 		"a provider it does not have":       {"identity": `{"state_directory": "/var/lib/seagull-agent", "key_provider": "tpm"}`},
+		"a key kept for minutes":            {"identity": `{"state_directory": "/var/lib/seagull-agent", "key_lifetime": "30m"}`},
+		"a key kept beyond a year":          {"identity": `{"state_directory": "/var/lib/seagull-agent", "key_lifetime": "9000h"}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := config.Load(configured(t, sections)); !errors.Is(err, config.ErrInvalid) {
@@ -418,7 +420,9 @@ func TestNoSettingCarriesASecretOrTurnsVerificationOff(t *testing.T) {
 	names(t, reflect.TypeFor[config.Config](), "", func(name string) {
 		leaf := name[strings.LastIndex(name, ".")+1:]
 		for _, word := range strings.Split(leaf, "_") {
-			if slices.Contains(credentials, word) && !strings.HasSuffix(leaf, "_file") && !strings.HasSuffix(leaf, "_directory") && !strings.HasSuffix(leaf, "_provider") {
+			if slices.Contains(credentials, word) && !slices.ContainsFunc([]string{"_file", "_directory", "_provider", "_lifetime"}, func(named string) bool {
+				return strings.HasSuffix(leaf, named)
+			}) {
 				t.Errorf("%s holds credential material, and a setting names where one is kept", name)
 			}
 			if slices.Contains(refused, word) {
