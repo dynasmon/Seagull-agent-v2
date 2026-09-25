@@ -33,6 +33,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -49,10 +50,12 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
+	"github.com/dynasmon/Seagull-agent-v2/internal/renewal"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	"github.com/dynasmon/Seagull-agent-v2/internal/transport"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
+	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
 )
 
 const childArguments = "SEAGULL_AGENT_TEST_ARGUMENTS"
@@ -246,7 +249,11 @@ func TestAnInstallationIsEnrolledWithTheCertificateThePlatformIssuedForItsReques
 		t.Fatalf("open the certificates: %v", err)
 	}
 	settings := loaded(t, path)
-	client, err := platform(settings, credentials{installation: installation, keys: held, certificates: certificates})
+	authorities, err := settings.Server.Authorities()
+	if err != nil {
+		t.Fatalf("read the authorities: %v", err)
+	}
+	client, err := platform(settings, authorities, &credentials{installation: installation, keys: held, certificates: certificates})
 	if err != nil {
 		t.Fatalf("compose the transport: %v", err)
 	}
@@ -461,7 +468,7 @@ func TestAnImportSaysWhichAuthoritiesThePlatformTrustsThatTheAgentDoesNot(t *tes
 	if code := run([]string{"-config", path, "enrollment", "import", saved(t, signing.issue(t, asked.Bytes(), nil))}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr.String())
 	}
-	if said := stderr.String(); !strings.Contains(said, "trust \"Seagull platform\", which server.trust_bundle does not hold") ||
+	if said := stderr.String(); !strings.Contains(said, "trust \"Seagull platform\", which the agent does not: add it to") ||
 		!strings.Contains(said, trustBundle(path)) || strings.Count(said, "\n") != 1 {
 		t.Fatalf("the agent said %q about the authorities the platform publishes", said)
 	}
@@ -478,6 +485,131 @@ func requestFor(t *testing.T, agentID string) []byte {
 		t.Fatalf("make a request: %v", err)
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: signed})
+}
+
+func TestAnEnrolledAgentRenewsItsCredentialAsItRuns(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	signing := listening(t, trustBundle(path))
+	renewing := signing.renewing(t, "", 0)
+	rewrite(t, path, state, map[string]string{"server": servers("https://gateway.example:8443", renewing.URL, trustBundle(path))})
+	var asked, told bytes.Buffer
+	if code := run([]string{"-config", path, "enrollment", "request", "web-01"}, &asked, &told); code != 0 {
+		t.Fatalf("ask for a certificate: exit code %d: %s", code, told.String())
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	short := saved(t, signing.issue(t, asked.Bytes(), func(c *x509.Certificate) { c.NotBefore, c.NotAfter = now, now.Add(3*time.Second) }))
+	if code := run([]string{"-config", path, "enrollment", "import", short}, &asked, &told); code != 0 {
+		t.Fatalf("import a certificate valid for seconds: exit code %d: %s", code, told.String())
+	}
+
+	entries, stop := running(t, path)
+	scheduled := await(t, entries, "credential_renewal_scheduled")
+	renewed := await(t, entries, "credential_renewed")
+	if code, _ := stop(); code != 0 {
+		t.Fatalf("the agent exited with %d", code)
+	}
+	if scheduled["agent_id"] != "web-01" || renewed["credential_generation"] != float64(2) || renewed["key"] != "kept" || renewing.served.Load() != 1 {
+		t.Fatalf("the agent scheduled %v and renewed %v after %d requests", scheduled, renewed, renewing.served.Load())
+	}
+	started, _ := logged(t, serveStopped(t, path), "agent_starting")
+	if started["credential_generation"] != float64(2) {
+		t.Fatalf("after renewing, the agent started as %v", started)
+	}
+}
+
+func TestAnAgentThatIsNotEnrolledHasNothingToRenew(t *testing.T) {
+	entries, stop := running(t, configured(t, stateDirectory(t), nil))
+	components := []any{await(t, entries, "component_started")["component"]}
+	code, rest := stop()
+	for _, entry := range rest {
+		if entry["msg"] == "component_started" {
+			components = append(components, entry["component"])
+		}
+	}
+	if code != 0 {
+		t.Fatalf("the agent exited with %d", code)
+	}
+	if !slices.Equal(components, []any{"configuration"}) {
+		t.Fatalf("an agent that is not enrolled ran %v", components)
+	}
+}
+
+func TestTheAgentRenewsFromTheCommandLineAndTrustsWhatThePlatformPublished(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	signing := listening(t, trustBundle(path))
+	next := listening(t, filepath.Join(t.TempDir(), "next-ca.pem"))
+	signing.published = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: next.certificate.Raw})
+	ingest, renewing := next.listen(t), signing.renewing(t, "", 0)
+	rewrite(t, path, state, map[string]string{"server": servers(ingest.URL, renewing.URL, trustBundle(path))})
+	enrollWith(t, path, signing)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-config", path, "enrollment", "renew"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("exit code %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+	said := stdout.String()
+	if !strings.Contains(said, "renewed agent web-01 to credential generation 2, with the key it held") ||
+		!strings.Contains(said, "against the 2 authorities the platform published from now on") {
+		t.Fatalf("the agent reported the renewal as %q", said)
+	}
+	started, _ := logged(t, serveStopped(t, path), "agent_starting")
+	if started["credential_generation"] != float64(2) || started["trust"] != "published" {
+		t.Fatalf("after renewing, the agent started as %v", started)
+	}
+
+	stdout.Reset()
+	if code := run([]string{"-config", path, "platform", "check"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 ||
+		!strings.Contains(stdout.String(), "checked against the 2 authorities it published to the installation") {
+		t.Fatalf("checking the platform against the authorities it published exited %d with %q and %q", code, stdout.String(), stderr.String())
+	}
+
+	listening(t, trustBundle(path))
+	logs := serveStopped(t, path)
+	started, _ = logged(t, logs, "agent_starting")
+	if _, reset := logged(t, logs, "authorities_reset"); !reset || started["trust"] != "server.trust_bundle" {
+		t.Fatalf("an operator who changed server.trust_bundle left the agent trusting %v", started["trust"])
+	}
+}
+
+func TestARenewalThePlatformRefusesSaysWhatToDo(t *testing.T) {
+	for name, c := range map[string]struct {
+		code     string
+		status   int
+		recovery string
+	}{
+		"a revoked agent":         {code: "illegal_move", status: http.StatusUnprocessableEntity, recovery: "no longer renews this agent"},
+		"an agent renewing often": {code: "rate_limited", status: http.StatusTooManyRequests, recovery: "bounds how often an agent renews"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			state := stateDirectory(t)
+			path := configured(t, state, nil)
+			signing := listening(t, trustBundle(path))
+			renewing := signing.renewing(t, c.code, c.status)
+			rewrite(t, path, state, map[string]string{"server": servers("https://gateway.example:8443", renewing.URL, trustBundle(path))})
+			enrollWith(t, path, signing)
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"-config", path, "enrollment", "renew"}, &stdout, &stderr); code != 1 || stdout.Len() != 0 {
+				t.Fatalf("exit code %d, stdout %q", code, stdout.String())
+			}
+			if said := stderr.String(); !strings.Contains(said, c.code) || !strings.Contains(said, c.recovery) {
+				t.Fatalf("the refusal was reported as %q", said)
+			}
+			started, _ := logged(t, serveStopped(t, path), "agent_starting")
+			if started["credential_generation"] != float64(1) {
+				t.Fatalf("a refused renewal left the agent at %v", started)
+			}
+		})
+	}
+}
+
+func TestRenewingAnInstallationThatIsNotEnrolledIsRefused(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-config", configured(t, stateDirectory(t), nil), "enrollment", "renew"}, &stdout, &stderr); code != 1 ||
+		!strings.Contains(stderr.String(), renewal.ErrNotEnrolled.Error()) || !strings.Contains(stderr.String(), "enroll the installation first") {
+		t.Fatalf("renewing an installation that is not enrolled exited %d and said %q", code, stderr.String())
+	}
 }
 
 func TestAnEnrolledAgentStartsWithTheKeyItsCredentialsName(t *testing.T) {
@@ -851,6 +983,17 @@ func listening(t *testing.T, bundle string) *issuing {
 
 func (i *issuing) listen(t *testing.T) *served {
 	t.Helper()
+	listener := &served{}
+	return i.serving(t, listener, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		listener.served.Add(1)
+		if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
+			listener.agent.Store(&r.TLS.PeerCertificates[0].Subject.CommonName)
+		}
+	}))
+}
+
+func (i *issuing) serving(t *testing.T, listener *served, handler http.Handler) *served {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("draw the key of a listener: %v", err)
@@ -868,13 +1011,7 @@ func (i *issuing) listen(t *testing.T) *served {
 	if err != nil {
 		t.Fatalf("issue the certificate of a listener: %v", err)
 	}
-	listener := &served{}
-	listener.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		listener.served.Add(1)
-		if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
-			listener.agent.Store(&r.TLS.PeerCertificates[0].Subject.CommonName)
-		}
-	}))
+	listener.Server = httptest.NewUnstartedServer(handler)
 	listener.Config.ErrorLog = log.New(io.Discard, "", 0)
 	agents := x509.NewCertPool()
 	agents.AddCert(i.certificate)
@@ -1778,17 +1915,28 @@ func enrollWith(t *testing.T, path string, signing *issuing) enrolled {
 
 func (i *issuing) issue(t *testing.T, requested []byte, change func(*x509.Certificate)) []byte {
 	t.Helper()
+	encoded, err := i.issued(requested, "", change)
+	if err != nil {
+		t.Fatalf("issue a certificate: %v", err)
+	}
+	return encoded
+}
+
+func (i *issuing) issued(requested []byte, agentID string, change func(*x509.Certificate)) ([]byte, error) {
 	block, _ := pem.Decode(requested)
 	if block == nil || block.Type != "CERTIFICATE REQUEST" {
-		t.Fatalf("the agent asked with %q", requested)
+		return nil, fmt.Errorf("the agent asked with %q", requested)
 	}
 	asked, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil || asked.CheckSignature() != nil {
-		t.Fatalf("the agent asked with a request that does not verify: %v", err)
+		return nil, fmt.Errorf("the agent asked with a request that does not verify: %v", err)
+	}
+	if agentID != "" && asked.Subject.CommonName != agentID {
+		return nil, fmt.Errorf("the request names %s and the connection %s", asked.Subject.CommonName, agentID)
 	}
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 127))
 	if err != nil {
-		t.Fatalf("draw a serial: %v", err)
+		return nil, err
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	template := &x509.Certificate{
@@ -1805,15 +1953,15 @@ func (i *issuing) issue(t *testing.T, requested []byte, change func(*x509.Certif
 	}
 	signed, err := x509.CreateCertificate(rand.Reader, template, i.certificate, asked.PublicKey, i.key)
 	if err != nil {
-		t.Fatalf("issue the certificate: %v", err)
+		return nil, err
 	}
 	certificate, err := x509.ParseCertificate(signed)
 	if err != nil {
-		t.Fatalf("parse the certificate: %v", err)
+		return nil, err
 	}
 	digest := sha256.Sum256(signed)
 	authority := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: i.certificate.Raw})
-	encoded, err := proto.Marshal(&agentv1.IssuedCertificate{
+	return proto.Marshal(&agentv1.IssuedCertificate{
 		CertificatePem: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signed}),
 		ChainPem:       authority,
 		TrustBundlePem: slices.Concat(authority, i.published),
@@ -1825,10 +1973,45 @@ func (i *issuing) issue(t *testing.T, requested []byte, change func(*x509.Certif
 			ExpiresAt:         timestamppb.New(certificate.NotAfter),
 		},
 	})
-	if err != nil {
-		t.Fatalf("encode the answer: %v", err)
-	}
-	return encoded
+}
+
+func (i *issuing) renewing(t *testing.T, refused string, status int) *served {
+	t.Helper()
+	listener := &served{}
+	return i.serving(t, listener, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		listener.served.Add(1)
+		answer := func(status int, body []byte) {
+			w.Header().Set("Content-Type", "application/x-protobuf")
+			w.WriteHeader(status)
+			w.Write(body)
+		}
+		refusal := func(status int, code string) {
+			encoded, _ := proto.Marshal(&controlv1.Refusal{Code: code, Detail: "refused by the test platform"})
+			answer(status, encoded)
+		}
+		if r.URL.Path != "/v1/agents/certificate" || len(r.TLS.VerifiedChains) == 0 {
+			refusal(http.StatusNotFound, "not_found")
+			return
+		}
+		if refused != "" {
+			refusal(status, refused)
+			return
+		}
+		content, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 32<<10))
+		var asked agentv1.RenewalRequest
+		if err == nil {
+			err = proto.Unmarshal(content, &asked)
+		}
+		var issued []byte
+		if err == nil {
+			issued, err = i.issued(asked.GetCsrPem(), r.TLS.VerifiedChains[0][0].Subject.CommonName, nil)
+		}
+		if err != nil {
+			refusal(http.StatusUnprocessableEntity, "malformed_certificate_request")
+			return
+		}
+		answer(http.StatusCreated, issued)
+	}))
 }
 
 func saved(t *testing.T, issued []byte) string {
@@ -1931,6 +2114,32 @@ func await(t *testing.T, entries <-chan map[string]any, message string) map[stri
 			t.Fatalf("the agent logged no %s within 10s", message)
 		}
 	}
+}
+
+func running(t *testing.T, path string) (<-chan map[string]any, func() (int, []map[string]any)) {
+	t.Helper()
+	reader, writer := io.Pipe()
+	ctx, cancel := context.WithCancel(t.Context())
+	exited := make(chan int, 1)
+	go func() {
+		exited <- serve(ctx, writer, path)
+		writer.Close()
+	}()
+	entries := follow(t, reader)
+	var once sync.Once
+	code, rest := 0, []map[string]any(nil)
+	stop := func() (int, []map[string]any) {
+		once.Do(func() {
+			cancel()
+			for entry := range entries {
+				rest = append(rest, entry)
+			}
+			code = <-exited
+		})
+		return code, rest
+	}
+	t.Cleanup(func() { stop() })
+	return entries, stop
 }
 
 func stateDirectory(t *testing.T) string {
