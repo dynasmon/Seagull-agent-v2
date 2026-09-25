@@ -1,0 +1,20 @@
+{
+  "acknowledged": {
+    "max": "8.77ms",
+    "p50": "6.63ms",
+    "p99": "8.17ms"
+  },
+  "measured": "from the control plane publishing a revocation of an agent the roster admitted, as its transition handler does after writing the registry, to the roster the gateway follows refusing that agent",
+  "measured_at": "2026-09-25T21:37:05Z",
+  "platform": {
+    "broker": "redpandadata/redpanda:v24.2.20, one node, --smp=1 --overprovisioned, on the loopback of one host",
+    "commit": "6fae3457bb2b721fc891e1c80bf12a5f3fc408c2"
+  },
+  "propagation": {
+    "max": "10.16ms",
+    "p50": "6.8ms",
+    "p95": "8.3ms",
+    "p99": "8.63ms"
+  },
+  "revocations": 300
+}
