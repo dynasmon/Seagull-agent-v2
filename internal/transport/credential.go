@@ -27,7 +27,7 @@ type Credentials interface {
 
 func (c *Client) present() error {
 	if c.options.Credentials == nil {
-		c.transport.CloseIdleConnections()
+		c.current.Load().transport.CloseIdleConnections()
 		return fmt.Errorf("%w: the installation is not enrolled", ErrUnauthenticated)
 	}
 	held, err := c.options.Credentials.Credential()
@@ -36,11 +36,11 @@ func (c *Client) present() error {
 		certificate, err = usable(held, time.Now())
 	}
 	if err != nil {
-		c.transport.CloseIdleConnections()
+		c.current.Load().transport.CloseIdleConnections()
 		return fmt.Errorf("%w: %w", ErrUnauthenticated, err)
 	}
 	if previous := c.presented.Swap(&certificate); previous != nil && !bytes.Equal(previous.Certificate[0], certificate.Certificate[0]) {
-		c.transport.CloseIdleConnections()
+		c.current.Load().transport.CloseIdleConnections()
 	}
 	return nil
 }

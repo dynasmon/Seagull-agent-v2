@@ -46,6 +46,7 @@ type Reply struct {
 	Status      int
 	ContentType string
 	Body        []byte
+	Peer        []*x509.Certificate
 }
 
 type Peer struct {
@@ -59,21 +60,20 @@ type Peer struct {
 
 type Client struct {
 	options   Options
+	current   atomic.Pointer[connections]
+	presented atomic.Pointer[tls.Certificate]
+}
+
+type connections struct {
 	roots     *x509.CertPool
 	transport *http.Transport
-	presented atomic.Pointer[tls.Certificate]
 }
 
 func New(options Options) (*Client, error) {
 	var problems []error
-	if len(options.Authorities) == 0 {
-		problems = append(problems, errors.New("no authority to authenticate the platform with"))
-	}
-	for _, authority := range options.Authorities {
-		if authority == nil || !authority.BasicConstraintsValid || !authority.IsCA {
-			problems = append(problems, errors.New("a trust anchor that is not a certificate authority"))
-			break
-		}
+	roots, err := anchors(options.Authorities)
+	if err != nil {
+		problems = append(problems, err)
 	}
 	switch {
 	case options.ConnectTimeout <= 0 || options.RequestTimeout <= 0:
@@ -90,30 +90,57 @@ func New(options Options) (*Client, error) {
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("compose the transport: %w", errors.Join(problems...))
 	}
-	client := &Client{options: options, roots: x509.NewCertPool()}
-	for _, authority := range options.Authorities {
-		client.roots.AddCert(authority)
+	client := &Client{options: options}
+	client.current.Store(client.connect(roots))
+	return client, nil
+}
+
+// Trust makes authorities the ones the platform is authenticated against, from
+// the next connection on: a connection already made finishes what it carries,
+// and none made before is used again.
+func (c *Client) Trust(authorities []*x509.Certificate) error {
+	roots, err := anchors(authorities)
+	if err != nil {
+		return fmt.Errorf("trust the authorities: %w", err)
 	}
+	c.current.Swap(c.connect(roots)).transport.CloseIdleConnections()
+	return nil
+}
+
+func (c *Client) connect(roots *x509.CertPool) *connections {
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
-	client.transport = &http.Transport{
+	return &connections{roots: roots, transport: &http.Transport{
 		Proxy:       nil,
-		DialContext: (&net.Dialer{Timeout: options.ConnectTimeout, KeepAlive: keepAlive}).DialContext,
+		DialContext: (&net.Dialer{Timeout: c.options.ConnectTimeout, KeepAlive: keepAlive}).DialContext,
 		TLSClientConfig: &tls.Config{
 			MinVersion:           tls.VersionTLS13,
-			RootCAs:              client.roots,
-			GetClientCertificate: client.certificate,
+			RootCAs:              roots,
+			GetClientCertificate: c.certificate,
 		},
-		TLSHandshakeTimeout:    options.ConnectTimeout,
+		TLSHandshakeTimeout:    c.options.ConnectTimeout,
 		DisableCompression:     true,
-		MaxIdleConns:           2 * options.MaxConnections,
-		MaxIdleConnsPerHost:    options.MaxConnections,
-		MaxConnsPerHost:        options.MaxConnections,
+		MaxIdleConns:           2 * c.options.MaxConnections,
+		MaxIdleConnsPerHost:    c.options.MaxConnections,
+		MaxConnsPerHost:        c.options.MaxConnections,
 		IdleConnTimeout:        idle,
 		MaxResponseHeaderBytes: maxHeaderBytes,
 		Protocols:              protocols,
+	}}
+}
+
+func anchors(authorities []*x509.Certificate) (*x509.CertPool, error) {
+	if len(authorities) == 0 {
+		return nil, errors.New("no authority to authenticate the platform with")
 	}
-	return client, nil
+	roots := x509.NewCertPool()
+	for _, authority := range authorities {
+		if authority == nil || !authority.BasicConstraintsValid || !authority.IsCA {
+			return nil, errors.New("a trust anchor that is not a certificate authority")
+		}
+		roots.AddCert(authority)
+	}
+	return roots, nil
 }
 
 // Post sends a request as the enrolled agent, and returns whatever the
@@ -136,7 +163,7 @@ func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
 	}
 	sent.ContentLength = request.Length
 	sent.Header.Set("Content-Type", request.ContentType)
-	response, err := c.transport.RoundTrip(sent)
+	response, err := c.current.Load().transport.RoundTrip(sent)
 	if err != nil {
 		return Reply{}, failure(ctx, target, err)
 	}
@@ -148,7 +175,11 @@ func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
 	if int64(len(content)) > c.options.MaxResponseBytes {
 		return Reply{}, fmt.Errorf("%w: %s answered with more than %d bytes", ErrReplyTooLarge, target.Redacted(), c.options.MaxResponseBytes)
 	}
-	return Reply{Status: response.StatusCode, ContentType: response.Header.Get("Content-Type"), Body: content}, nil
+	var peer []*x509.Certificate
+	if response.TLS != nil {
+		peer = slices.Clone(response.TLS.PeerCertificates)
+	}
+	return Reply{Status: response.StatusCode, ContentType: response.Header.Get("Content-Type"), Body: content, Peer: peer}, nil
 }
 
 // Check authenticates the listener at address without presenting anything,
@@ -164,7 +195,7 @@ func (c *Client) Check(ctx context.Context, address string) (Peer, error) {
 		NetDialer: &net.Dialer{Timeout: c.options.ConnectTimeout},
 		Config: &tls.Config{
 			MinVersion: tls.VersionTLS13,
-			RootCAs:    c.roots,
+			RootCAs:    c.current.Load().roots,
 			ServerName: target.Hostname(),
 			GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 				asked.Store(true)
@@ -195,7 +226,7 @@ func (c *Client) Check(ctx context.Context, address string) (Peer, error) {
 	}, nil
 }
 
-func (c *Client) Close() { c.transport.CloseIdleConnections() }
+func (c *Client) Close() { c.current.Load().transport.CloseIdleConnections() }
 
 func body(held io.Reader) io.ReadCloser {
 	if held == nil {

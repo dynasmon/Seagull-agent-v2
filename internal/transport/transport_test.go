@@ -370,6 +370,69 @@ func TestThePlatformMayReplaceItsCertificateAndItsAuthority(t *testing.T) {
 	}
 }
 
+func TestThePlatformIsAuthenticatedAgainstTheAuthoritiesTheAgentTrustsNow(t *testing.T) {
+	current, next, agents := authorityNamed(t, "Seagull platform 2026"), authorityNamed(t, "Seagull platform 2027"), authorityNamed(t, "Seagull agents")
+	key := agentKey(t)
+	credential := &held{credential: transport.Credential{Chain: agents.agent(t, "web-01", key.Public()), Signer: key}}
+	retiring := serveWith(t, current, agents, current.server(t, nil, "127.0.0.1"), 0, admit)
+	renewed := serveWith(t, next, agents, next.server(t, nil, "127.0.0.1"), 0, admit)
+	client := compose(t, []*x509.Certificate{current.certificate}, credential)
+	reaches := func(listener *platform) error {
+		_, err := client.Post(t.Context(), batch(listener.URL+"/v1/events", "sshd"))
+		if err == nil {
+			_, err = client.Check(t.Context(), listener.URL)
+		}
+		return err
+	}
+	for _, step := range []struct {
+		name             string
+		trusted          []*x509.Certificate
+		retiring, update bool
+	}{
+		{name: "before the rotation", retiring: true},
+		{name: "while both authorities are trusted", trusted: []*x509.Certificate{current.certificate, next.certificate}, retiring: true, update: true},
+		{name: "once the previous authority is removed", trusted: []*x509.Certificate{next.certificate}, update: true},
+	} {
+		if step.trusted != nil {
+			if err := client.Trust(step.trusted); err != nil {
+				t.Fatalf("%s: trust the authorities: %v", step.name, err)
+			}
+		}
+		if err := reaches(retiring); (err == nil) != step.retiring || (err != nil && !errors.Is(err, transport.ErrUntrusted)) {
+			t.Fatalf("%s: a listener of the retiring authority was reached with %v", step.name, err)
+		}
+		if err := reaches(renewed); (err == nil) != step.update || (err != nil && !errors.Is(err, transport.ErrUntrusted)) {
+			t.Fatalf("%s: a listener of the next authority was reached with %v", step.name, err)
+		}
+	}
+	connected := retiring.connected.Load()
+	for _, refused := range [][]*x509.Certificate{nil, {agents.certificate, {}}} {
+		if err := client.Trust(refused); err == nil {
+			t.Fatalf("trusted %d certificates that are not all authorities", len(refused))
+		}
+	}
+	if err := reaches(renewed); err != nil {
+		t.Fatalf("refusing to trust what is no authority changed what the agent trusts: %v", err)
+	}
+	if err := reaches(retiring); !errors.Is(err, transport.ErrUntrusted) || retiring.connected.Load() == connected {
+		t.Fatalf("the removed authority was trusted again, or the agent reused a connection it made before: %v", err)
+	}
+}
+
+func TestAReplySaysWhatTheListenerPresented(t *testing.T) {
+	agents := authorityNamed(t, "Seagull agents")
+	listener := serve(t, authorityNamed(t, "Seagull platform"), agents, admit)
+	key := agentKey(t)
+	client := compose(t, listener.trusted, &held{credential: transport.Credential{Chain: agents.agent(t, "web-01", key.Public()), Signer: key}})
+	reply, err := client.Post(t.Context(), batch(listener.URL+"/v1/events", "sshd"))
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if len(reply.Peer) != 1 || reply.Peer[0].Subject.CommonName != "ingest-gateway" || reply.Peer[0].CheckSignatureFrom(listener.trusted[0]) != nil {
+		t.Fatalf("the reply names %d certificates of the listener", len(reply.Peer))
+	}
+}
+
 func TestTheAgentFollowsNoRedirect(t *testing.T) {
 	agents := authorityNamed(t, "Seagull agents")
 	platform := serve(t, authorityNamed(t, "Seagull platform"), agents, func(w http.ResponseWriter, r *http.Request) {
