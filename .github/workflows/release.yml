@@ -1,0 +1,98 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.26.8"
+
+jobs:
+  package:
+    name: verify, package and gate the tagged commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: source verification
+        run: make verify
+      - name: package the tagged commit
+        run: |
+          make package
+          built="$(dist/linux-amd64/seagull-agent -version | head -n 1 | cut -d ' ' -f 2)"
+          if [ "$built" != "$GITHUB_REF_NAME" ]; then
+            echo "the agent was built as $built, and the tag is $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          sha256sum dist/deb/*.deb
+      - name: install the package, run it as a service and remove it
+        run: make native-gate
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: debian-package
+          path: dist/deb/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: attest the package and draft its release
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: debian-package
+          path: dist/deb
+      - id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: dist/deb/*.deb
+      - name: verify the package as an operator does
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum dist/deb/*.deb
+          gh attestation verify dist/deb/*.deb \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners
+      - name: draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          package="$(ls dist/deb/*.deb)"
+          name="$(basename "$package")"
+          cp "$BUNDLE" "$package.sigstore.json"
+          cat > notes.md <<EOF
+          Seagull Agent $GITHUB_REF_NAME, packaged for Ubuntu 24.04 on amd64.
+
+          Verify the package before installing it:
+
+              gh attestation verify $name --repo $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref $GITHUB_REF --deny-self-hosted-runners
+
+          The README says how to install, configure and enroll it.
+          EOF
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "$GITHUB_REF_NAME" --notes-file notes.md "$package" "$package.sigstore.json"
