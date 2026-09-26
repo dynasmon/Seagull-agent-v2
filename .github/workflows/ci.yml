@@ -46,6 +46,28 @@ jobs:
           make build
           dist/seagull-agent -version
 
+  package:
+    name: debian package on ubuntu 24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: package the commit twice into the same bytes
+        run: |
+          make package
+          make package DIST=dist/again
+          cmp dist/deb/*.deb dist/again/deb/*.deb
+          sha256sum dist/deb/*.deb
+      - name: install the package, run it as a service and remove it
+        run: make native-gate
+
   vulnerabilities:
     name: vulnerability analysis
     runs-on: ubuntu-24.04
