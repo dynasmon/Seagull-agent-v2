@@ -65,7 +65,8 @@ func sourcesAndFixtures(t *testing.T, root string) []string {
 		}
 		name := relative(root, file)
 		base := path.Base(name)
-		if path.Ext(base) == ".go" || base == "go.mod" || base == "go.sum" || slices.Contains(strings.Split(path.Dir(name), "/"), "testdata") {
+		within := strings.Split(path.Dir(name), "/")
+		if path.Ext(base) == ".go" || base == "go.mod" || base == "go.sum" || slices.Contains(within, "testdata") || within[0] == "packaging" {
 			names = append(names, name)
 		}
 		return nil

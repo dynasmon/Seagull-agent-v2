@@ -25,6 +25,7 @@ from the module proxy, so a checkout of this repository is all a build needs.
 make build      # dist/seagull-agent
 make verify     # formatting, vet, module graph, tests, race detector and build
 make vulncheck  # known vulnerabilities reachable from the agent
+make package    # dist/deb/seagull-agent_<version>_amd64.deb, of the commit checked out
 ```
 
 `seagull-agent -version` prints the build identity, which is the version Go
@@ -33,13 +34,180 @@ the wire versions the build speaks. `go version -m` lists every module and build
 setting that went into a binary. Both are metadata about a build, not proof of
 which build is running.
 
+## Installing
+
+The agent is packaged for Ubuntu 24.04 on amd64, as a Debian package, and that
+is the one platform it is installed on. `make package` builds the package of the
+commit checked out, and CI installs the package of every commit it builds on an
+Ubuntu 24.04 host and runs it there as a service, as the evidence below
+describes.
+
+A package is a commit, built the same way each time:
+
+- its version is the one Go stamps on the agent, which `seagull-agent -version`
+  prints: a tag `v0.1.0` is packaged as `0.1.0-1`, and a commit after it, the
+  pseudo-version `v0.1.1-0.20260926004346-7d7db5969ad5`, as
+  `0.1.1~0.20260926004346.7d7db5969ad5-1`, so dpkg orders packages as Go orders
+  the builds in them;
+- the builder refuses an agent built from changes no commit holds, with cgo,
+  without `-trimpath`, for another system, or for more than the instruction set
+  every host of its architecture runs (`GOAMD64=v1`). The agent is linked
+  statically, so the package depends on no library, only on systemd, and on
+  procps for the `kill` that a reload signals the agent with;
+- every file is root's, has the mode the builder gives it whatever the umask,
+  and is dated at the commit, so the same commit is packaged into the same
+  bytes. CI packages every commit twice and compares them.
+
+A release is a tag `vX.Y.Z`. Its workflow verifies the commit, packages it, runs
+the package through the native gate below, and only then attests where it was
+built: a SLSA provenance statement naming the package's SHA-256 digest, this
+repository, the workflow, the tag and the commit, signed through Sigstore with
+the identity GitHub gives the workflow, in a job apart from the one that built
+the package. The package and that statement, as a `.sigstore.json` bundle, are
+attached to a draft release that a maintainer publishes. Verify a package before
+installing it, with a GitHub CLI that has `gh attestation` (Ubuntu 24.04's own,
+2.45, predates it):
+
+```bash
+gh attestation verify seagull-agent_0.1.0-1_amd64.deb \
+  --repo dynasmon/Seagull-agent-v2 \
+  --signer-workflow dynasmon/Seagull-agent-v2/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.1.0 --deny-self-hosted-runners
+```
+
+It fails for a package whose bytes changed, one another repository or workflow
+built, and one built from another tag, and `--bundle` reads the statement from
+the file attached to the release instead of asking GitHub for it. No signing
+key exists to be kept or lost: the workflow signs with a certificate that
+expires minutes later.
+
+Installing it:
+
+```bash
+sudo apt install ./seagull-agent_0.1.0-1_amd64.deb
+```
+
+- creates `seagull-agent`, a system account and group of its own, with no shell,
+  through `systemd-sysusers`;
+- creates `/var/lib/seagull-agent`, where the installation is kept, as the
+  account's and 0700, and `/etc/seagull-agent`, where its settings go, as root's
+  and 0755, through `systemd-tmpfiles`;
+- installs the agent at `/usr/bin/seagull-agent`, the `seagull-agent` service,
+  and the settings an installation starts from at
+  `/usr/share/seagull-agent/agent.json`;
+- starts nothing and enables nothing. The agent runs once it has settings, and
+  it is enrolled while it is stopped. The package holds no key, no certificate
+  and no authority: an installation draws its own key the first time it asks
+  for a certificate.
+
+Then an operator gives it its settings, enrolls it and starts it:
+
+```bash
+sudo install -m 0644 platform-ca.pem /etc/seagull-agent/platform-ca.pem
+sudo install -m 0644 /usr/share/seagull-agent/agent.json /etc/seagull-agent/agent.json
+sudoedit /etc/seagull-agent/agent.json     # server.ingest_url and server.renewal_url
+sudo -u seagull-agent seagull-agent -config /etc/seagull-agent/agent.json platform check
+sudo -u seagull-agent seagull-agent -config /etc/seagull-agent/agent.json enrollment request web-01 > web-01.csr
+# the platform issues the certificate, as Enrollment describes
+sudo install -m 0644 web-01.issued /var/tmp/web-01.issued
+sudo -u seagull-agent seagull-agent -config /etc/seagull-agent/agent.json enrollment import /var/tmp/web-01.issued
+sudo systemctl enable --now seagull-agent
+```
+
+- the authority in `platform-ca.pem` decides which platform the agent trusts, so
+  it comes from the platform's operators through a channel that is already
+  trusted, and its fingerprint, `openssl x509 -in platform-ca.pem -noout
+  -fingerprint -sha256`, is compared with theirs. `platform check` authenticates
+  the platform against that authority, and cannot tell a genuine one from one an
+  impostor handed over with a listener of its own;
+- every command runs as the account the service runs as, because the
+  installation is private to it and the agent refuses state another account
+  owns, root's included. The platform's answer is public, and that account only
+  has to be able to read it.
+
+The service runs the agent as the account, with nothing more, and bounds it:
+
+| What | What the service sets |
+| --- | --- |
+| Account | `User=seagull-agent` and `Group=seagull-agent`, and no other group |
+| Privileges | no capability, bounding or ambient, and `NoNewPrivileges=yes`, so nothing the agent starts gains one |
+| Memory | `MemoryMax=512M`, above the default `resources.memory_limit` of 256 MiB, and `MemorySwapMax=0` |
+| Processor | `CPUQuota=50%` |
+| Tasks and descriptors | `TasksMax=256` and `LimitNOFILE=4096` |
+| Core dumps | `LimitCORE=0`, which the agent also sets itself |
+| The installation | `StateDirectory=seagull-agent`, 0700, and `UMask=0077` |
+| Stopping | SIGTERM, then `TimeoutStopSec=30s`, above the default `resources.shutdown_timeout` of 10s |
+| Failing | `Restart=on-failure`, 5 seconds later, growing to 5 minutes over six restarts |
+| Reloading | `systemctl reload seagull-agent` sends SIGHUP, and the agent reads its configuration again |
+
+- the agent says what it was given as it starts: `agent_privileges` names the
+  account, no capability and `no_new_privs`, and `agent_resources` the
+  ceilings, with nothing unenforced. A drop-in, `systemctl edit seagull-agent`,
+  changes a ceiling for the next start, and the agent reports the new one, as a
+  warning when `resources.memory_limit` is not below `MemoryMax`;
+- `MemorySwapMax=0` keeps the agent's memory, and its key with it, off the swap
+  device, on a kernel that accounts for swap;
+- the agent logs to the journal: `journalctl -u seagull-agent`.
+
+Upgrading, removing and purging:
+
+- an upgrade replaces the agent and the service, and restarts the service when
+  it is enabled or running. The installation, its keys, its spool and its
+  settings stay as they were, so the agent runs on as the same installation, at
+  the same credential generation, with the same backlog;
+- `apt remove seagull-agent` stops the service and removes the agent and the
+  service. It keeps the installation, the settings, the account and whether the
+  service was enabled, so installing the package again runs the same
+  installation;
+- `apt purge seagull-agent` also deletes `/var/lib/seagull-agent`,
+  `/etc/seagull-agent` and what enabling and overriding the service wrote under
+  `/etc/systemd/system`, so the next installation is a new one. The keys go with
+  it and the certificate issued for them does not, so revoke the agent on the
+  platform first. The account stays: whatever it owns elsewhere would otherwise
+  belong to the next account given its uid.
+
+The evidence:
+
+- `packaging` tests that the package installs the agent, its service, the
+  account, the directories and the settings and nothing else, root's and at the
+  modes given, with the checksums `dpkg --verify` reads; that dpkg orders the
+  versions as Go does; that the same commit gives the same bytes; and that the
+  service, the account, the directories and the settings agree with one another
+  and with the agent's defaults;
+- `tests/native` is the native gate. On a host systemd runs, as root, it
+  installs the package and takes it through its life against an emulated
+  platform: install, check the settings and the platform as the account,
+  enroll, start, renew a certificate valid for 30 seconds under the service's
+  permissions, reload, stop, admit records to the spool as the account, start,
+  kill the agent, upgrade to the next version, override a ceiling, remove,
+  reinstall, purge and install again. At each step it checks what the agent
+  reported, the account and the modes and owners of what it keeps, and after
+  the upgrade and the removal that the installation and its backlog are the
+  same bytes. CI runs it on Ubuntu 24.04 with `make native-gate`, which installs
+  the package on the host it runs on, so it belongs on a disposable one.
+
+What it does not claim:
+
+- another distribution, an RPM, arm64, Windows or macOS. `make package
+  ARCH=arm64` builds an arm64 package, and none of them is supported until its
+  own native gate passes;
+- confinement beyond the account: the service leaves the filesystem, the
+  kernel's interfaces and the system calls as that account finds them;
+- that a package is reproduced anywhere else: the same commit gives the same
+  bytes with the same toolchain, dpkg and tar, which is what CI compares;
+- that a package installed without its attestation verified came from this
+  repository. apt knows nothing of the attestation, and there is no APT
+  repository to sign;
+- updates: the agent installs none itself, and a release is installed as above.
+
 ## Running
 
 `seagull-agent -config FILE run` starts the agent on the configuration held in
 `FILE` and keeps it running until it receives SIGINT or SIGTERM. It logs to
 stderr, and exits with 0 after a requested stop, 1 when it could not start, an
 essential component failed or the stop overran its deadline, and 2 on a usage
-error.
+error. The package runs it as the `seagull-agent` service, as
+[Installing](#installing) describes.
 
 `cmd/seagull-agent` is the composition root: it builds each component and hands
 the enabled ones to `internal/runtime`, which owns their lifecycle.
@@ -91,7 +259,8 @@ That is a whole configuration: those settings are the deployment, so the agent
 has no default to offer for them, and every other setting has one it documents
 below. `seagull-agent -config FILE config print` prints what the agent would run
 on, defaults and all, and `config check` reads the file and reports what it
-refuses without starting the agent.
+refuses without starting the agent. The package installs those settings, with
+example addresses, as `/usr/share/seagull-agent/agent.json`.
 
 The agent reads the file whole, or refuses it whole:
 
@@ -271,7 +440,9 @@ The agent does not drop privileges itself. Go runs it on several threads and
 Linux keeps a capability set for each of them, so a program that drops what it
 holds part way through its life promises it for the thread that made the call
 and no other. Bounding the process belongs to the service manager, before the
-agent starts, and the unit that does it arrives with the packaging.
+agent starts, and the service the package installs does it: it runs the agent
+as an account of its own, with no capability and with `no_new_privs` set, as
+[Installing](#installing) lists.
 
 It refuses to start as more than one account. A real and an effective identity
 that differ mean it was started through a setuid or setgid program, and every
@@ -348,9 +519,9 @@ so revoke it when the replaced installation was enrolled, and delete
 that admitted them, so its spool is set aside with it rather than handed to its
 replacement, and nothing it admitted is delivered as another installation.
 
-Packaging follows the same line: an uninstall leaves the state where it is, so
-a reinstall is the same installation, and only a purge removes the directory,
-after which the next start is a new installation.
+The package follows the same line: removing it leaves the state where it is, so
+installing it again is the same installation, and only purging it deletes the
+directory, after which the next start is a new installation.
 
 ## Keys
 
@@ -516,7 +687,9 @@ new key, and the import activates it as the next generation of the same agent.
 That is how an operator recovers an installation whose key or certificate was
 lost or damaged, without replacing it or setting its spool aside; a key another
 account could read is exposed instead, and is revoked with its agent. Both
-commands hold the installation, so they run while the agent is stopped.
+commands hold the installation, so they run while the agent is stopped, and as
+the account the agent runs as: `sudo -u seagull-agent` for the service the
+package installs.
 
 The evidence:
 
@@ -951,7 +1124,8 @@ kernel would end the agent before its garbage collector works to that target.
 The agent reads ceilings on Linux, from a cgroup v2 hierarchy at
 `/sys/fs/cgroup`; elsewhere, or on a host that keeps only v1 controllers, the
 line is a warning that says the agent cannot tell, and never that nothing is
-enforced.
+enforced. The service the package installs sets every ceiling, so the agent it
+runs reports nothing unenforced.
 
 The governor owns no work and starts none. A collector or delivery asks it
 before something expensive, and waits on it in a goroutine of its own:
@@ -1253,8 +1427,10 @@ What none of that claims:
 - the agent does not erase a key from memory. Go copies values as it collects
   them, so only the buffers it reads and writes a key through are cleared, and
   a key in use is in memory;
-- memory is not locked, so a host that swaps may write a key to its swap
-  device. Encrypting that device belongs to the deployment;
+- memory is not locked. The service the package installs keeps the agent's
+  memory off the swap device, on a kernel that accounts for swap; an agent run
+  any other way on a host that swaps may have its key written to that device,
+  and encrypting it belongs to the deployment;
 - redaction is a rule about what the agent copies, not a filter over what
   somebody else wrote. The agent bounds and escapes what it repeats and refuses
   the one setting where a credential could arrive; it does not search text for
@@ -1274,8 +1450,8 @@ conventions:
   repository except the contracts;
 - the contracts are required at a published release, and no module is replaced;
 - no submodule or committed workspace brings a sibling checkout into the build;
-- ignore rules never hide a source file or a test fixture, and the local skills
-  never reach Git;
+- ignore rules never hide a source file, a packaging asset or a test fixture,
+  and the local skills never reach Git;
 - only the composition root imports the runtime, and the runtime depends on no
   other package of the agent and on none of the contracts;
 - collectors, under `internal/modules`, reach no HTTP, gRPC, RPC or TLS package,

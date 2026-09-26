@@ -1,0 +1,31 @@
+[Unit]
+Description=Seagull endpoint agent
+Documentation=https://github.com/dynasmon/Seagull-agent-v2#installing
+After=network.target
+
+[Service]
+Type=exec
+User=seagull-agent
+Group=seagull-agent
+ExecStart=/usr/bin/seagull-agent -config /etc/seagull-agent/agent.json run
+ExecReload=kill -HUP $MAINPID
+StateDirectory=seagull-agent
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitCORE=0
+LimitNOFILE=4096
+MemoryMax=512M
+MemorySwapMax=0
+CPUQuota=50%
+TasksMax=256
+Restart=on-failure
+RestartSec=5s
+RestartSteps=6
+RestartMaxDelaySec=5min
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target
