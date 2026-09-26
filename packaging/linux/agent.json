@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "identity": {"state_directory": "/var/lib/seagull-agent"},
+  "server": {
+    "ingest_url": "https://gateway.example:8443",
+    "renewal_url": "https://control.example:8446",
+    "trust_bundle": "/etc/seagull-agent/platform-ca.pem"
+  }
+}
