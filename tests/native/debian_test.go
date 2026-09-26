@@ -120,6 +120,10 @@ func open(t *testing.T) *gate {
 			t.Fatalf("%s exists on this host: the gate purges it, so remove it first", left)
 		}
 	}
+	built, err := filepath.Abs(built)
+	if err != nil {
+		t.Fatalf("find the package: %v", err)
+	}
 	scratch, err := os.MkdirTemp("", "seagull-native-")
 	if err == nil {
 		err = os.Chmod(scratch, 0o755)
@@ -138,7 +142,7 @@ func open(t *testing.T) *gate {
 }
 
 func (g *gate) install(t *testing.T) {
-	run(t, "dpkg", "--install", g.built)
+	apt(t, "install", g.built)
 	held, err := user.Lookup(account)
 	if err != nil {
 		t.Fatalf("the package created no account: %v", err)
@@ -314,7 +318,7 @@ func (g *gate) crash(t *testing.T) {
 
 func (g *gate) upgrade(t *testing.T) {
 	g.held = snapshot(t)
-	run(t, "dpkg", "--install", g.next)
+	apt(t, "install", g.next)
 	g.invocation = started(t, g.invocation)
 	g.same(t, 2)
 	if installed := run(t, "dpkg-query", "--show", "--showformat=${Version}", packageName); installed != g.nextVersion {
@@ -339,7 +343,7 @@ func (g *gate) override(t *testing.T) {
 }
 
 func (g *gate) remove(t *testing.T) {
-	run(t, "dpkg", "--remove", packageName)
+	apt(t, "remove", packageName)
 	if active := answer("systemctl", "is-active", unit); active != "inactive" {
 		t.Errorf("after the removal the service is %s", active)
 	}
@@ -363,7 +367,7 @@ func (g *gate) remove(t *testing.T) {
 }
 
 func (g *gate) reinstall(t *testing.T) {
-	run(t, "dpkg", "--install", g.next)
+	apt(t, "install", g.next)
 	g.invocation = started(t, g.invocation)
 	g.same(t, 2)
 	if enabled := answer("systemctl", "is-enabled", unit); enabled != "enabled" {
@@ -372,7 +376,7 @@ func (g *gate) reinstall(t *testing.T) {
 }
 
 func (g *gate) purge(t *testing.T) {
-	run(t, "dpkg", "--purge", packageName)
+	apt(t, "purge", packageName)
 	for _, purged := range []string{state, settingsDir, wants, overrides, agentPath, unitPath} {
 		if _, err := os.Lstat(purged); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("the purge left %s: %v", purged, err)
@@ -387,7 +391,7 @@ func (g *gate) purge(t *testing.T) {
 }
 
 func (g *gate) fresh(t *testing.T) {
-	run(t, "dpkg", "--install", g.built)
+	apt(t, "install", g.built)
 	if enabled, active := answer("systemctl", "is-enabled", unit), answer("systemctl", "is-active", unit); enabled != "disabled" || active != "inactive" {
 		t.Errorf("after a purge, installing leaves the service %s and %s", enabled, active)
 	}
@@ -509,6 +513,11 @@ func repack(t *testing.T, built, version, scratch string) (string, string) {
 	upgrade := filepath.Join(scratch, "seagull-agent_next.deb")
 	run(t, "dpkg-deb", "--root-owner-group", "--build", root, upgrade)
 	return upgrade, next
+}
+
+func apt(t *testing.T, action, target string) string {
+	t.Helper()
+	return run(t, "apt-get", action, "--yes", "--option", "DPkg::Lock::Timeout=300", target)
 }
 
 func run(t *testing.T, name string, args ...string) string {
