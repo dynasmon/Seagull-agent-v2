@@ -1,0 +1,19 @@
+#!/bin/sh
+set -e
+
+# Removing keeps the installation, its settings and the account, so the package
+# installed again is the same installation. Purging deletes the installation,
+# its keys and its spool with the settings; the account stays, since a file the
+# agent left elsewhere would otherwise belong to whoever is given its uid next.
+if [ "$1" = purge ]; then
+	rm -rf /var/lib/seagull-agent /etc/seagull-agent /etc/systemd/system/seagull-agent.service.d
+	rm -f /etc/systemd/system/multi-user.target.wants/seagull-agent.service
+fi
+
+if [ -d /run/systemd/system ]; then
+	case "$1" in
+	remove | purge)
+		systemctl --system daemon-reload >/dev/null || true
+		;;
+	esac
+fi
