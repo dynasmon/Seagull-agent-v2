@@ -73,8 +73,9 @@ type Config struct {
 // agent: the platform issues a certificate for an agent an operator registered,
 // and enrollment writes that name into the installation.
 type Identity struct {
-	StateDirectory string `json:"state_directory"`
-	KeyProvider    string `json:"key_provider"`
+	StateDirectory string   `json:"state_directory"`
+	KeyProvider    string   `json:"key_provider"`
+	KeyLifetime    Duration `json:"key_lifetime"`
 }
 
 type Server struct {
@@ -126,7 +127,7 @@ func (l Logging) Severity() slog.Level { return levels[l.Level] }
 func defaults() Config {
 	return Config{
 		Format:   Format,
-		Identity: Identity{KeyProvider: KeysInFiles},
+		Identity: Identity{KeyProvider: KeysInFiles, KeyLifetime: Duration(720 * time.Hour)},
 		Transport: Transport{
 			ConnectTimeout:              Duration(10 * time.Second),
 			RequestTimeout:              Duration(30 * time.Second),
@@ -343,6 +344,7 @@ func (i *Identity) validate() []error {
 		absolute("identity.state_directory", i.StateDirectory,
 			"the directory the agent keeps its installation in", "/var/lib/seagull-agent"),
 		chosen("identity.key_provider", i.KeyProvider, providers, "keeps keys with"),
+		duration("identity.key_lifetime", i.KeyLifetime, Duration(time.Hour), Duration(8760*time.Hour)),
 	)
 }
 

@@ -57,6 +57,14 @@ func Verify(issued []byte, expected Expected, authorities []*x509.Certificate, n
 	return answered.verify(expected, authorities, now)
 }
 
+func Published(issued []byte) ([]*x509.Certificate, error) {
+	answered, err := read(issued)
+	if err != nil {
+		return nil, err
+	}
+	return answered.published, nil
+}
+
 func read(issued []byte) (answer, error) {
 	if len(issued) > MaxIssuedBytes {
 		return answer{}, fmt.Errorf("%w: it is larger than %d bytes", ErrUnreadable, MaxIssuedBytes)

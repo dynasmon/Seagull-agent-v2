@@ -57,8 +57,11 @@ the enabled ones to `internal/runtime`, which owns their lifecycle.
   panicked may have left shared state inconsistent; durable state has to
   survive that just as it survives any other crash.
 
-One component is composed: the configuration the agent holds, which reads the
-file again whenever the agent is asked to. The spool is not a component, since
+Two components are composed: the configuration the agent holds, which reads the
+file again whenever the agent is asked to, and, once the installation is
+enrolled, the [renewal](#renewal) that keeps its credential current, which is
+optional, so an agent whose renewal failed keeps collecting what it will deliver
+once it holds a certificate again. The spool is not a component, since
 it starts no work of its own: the agent opens it with the installation, reads
 back what it holds before it starts, and closes it as it stops. Neither is the
 governor, which bounds the expensive work of whoever asks it and starts none of
@@ -112,6 +115,7 @@ The agent reads the file whole, or refuses it whole:
 | --- | --- | --- |
 | `identity.state_directory` | — | an absolute path to the directory that holds the installation |
 | `identity.key_provider` | `filesystem` | `filesystem` |
+| `identity.key_lifetime` | `720h` | `1h` to `8760h`: how long a renewal keeps a key before it draws a new one |
 | `server.ingest_url` | — | an `https` URL, with no credentials and nothing to resolve |
 | `server.renewal_url` | — | an `https` URL, for the platform's renewal listener |
 | `server.trust_bundle` | — | an absolute path to the PEM certificates of the authorities that issue the platform's |
@@ -151,10 +155,12 @@ the agent does:
   may be read by anyone: the settings are public;
 - `server.trust_bundle` is read under the same rule, and has to hold
   certificates the agent can parse, each of them a certificate authority.
-  Whoever changes it decides which platform the agent trusts, and the agent
-  verifies against that bundle alone. A certificate of the platform's own is
-  refused there, since trusting it would pin the platform to it and the next
-  certificate the platform installed would not be trusted;
+  Whoever changes it decides which platform the agent trusts, until the
+  platform publishes the authorities it is to be trusted by over the agent's
+  own credential, as a [renewal](#renewal) describes: the bundle is where trust
+  starts, and a change to it is the operator's newer word. A certificate of the
+  platform's own is refused there, since trusting it would pin the platform to
+  it and the next certificate the platform installed would not be trusted;
 - no setting carries a secret. A setting names where credential material is
   kept, and the agent's own keys live in the installation, so the file can be
   read, copied into a ticket or written by configuration management without
@@ -168,8 +174,11 @@ validates the whole candidate before anything changes:
 - a file it accepts replaces that configuration whole, logged as
   `configuration_reloaded`, so nothing ever runs on half of each;
 - what the agent settled as it started is refused as a change:
-  `identity.state_directory`, `identity.key_provider`, `logging.format` and
-  `resources.shutdown_timeout` take stopping the agent and starting it again.
+  `identity.state_directory`, `identity.key_provider`, `server.renewal_url`,
+  `server.trust_bundle`, `logging.format` and `resources.shutdown_timeout` take
+  stopping the agent and starting it again. The agent reads the authorities
+  `server.trust_bundle` holds as it starts, so a bundle rewritten in place takes
+  a restart too.
 
 What a setting does today follows what the agent has. `identity`, `logging`,
 `spool`, `resources`, `server`, `transport.connect_timeout`,
@@ -177,8 +186,9 @@ What a setting does today follows what the agent has. `identity`, `logging`,
 force: they decide where the installation is opened, what the log says, how
 much the spool keeps and for how long, how large a record it takes, what the
 agent and its expensive work may spend, which platform `platform check`
-authenticates and how long it waits for it, and which authorities a
-certificate the agent imports has to chain to. The governor keeps the budgets for
+authenticates and how long it waits for it, which authorities a certificate the
+agent imports has to chain to, and where, how long and how often the agent
+renews its credential. The governor keeps the budgets for
 scans and uploads before anything spends them, since no collector scans and
 nothing delivers yet. The rest of `transport` is validated here and takes effect
 as delivery arrives, so a deployment is configured once rather than as each
@@ -290,9 +300,12 @@ The installation is not the agent the platform knows. The platform issues a
 certificate for an `agent_id` an operator registered, and once
 [enrollment](#enrollment) activates a credential generation,
 `installation.json` records it: that agent, the generation number, the
-`key_id` of its key and what the certificate says. Until the platform issued
-the certificate the installation asked for, it records that request too: the
-agent it asked to be, the key it asked with and when. It holds no key, token or
+`key_id` of its key, when that key was drawn, and what the certificate says.
+Until the platform issued the certificate the installation asked for, it
+records that request too: the agent it asked to be, the key it asked with and
+when. Once a renewal adopted the authorities the platform published, it records
+their digest, when they were adopted and the digest of the `server.trust_bundle`
+they took over from. It holds no key, token or
 other secret, and a field it does not declare, such as a key, makes the file
 damaged, so copying it or the agent's public settings authenticates nothing.
 Each generation follows the active one by exactly one and is issued to the same
@@ -308,10 +321,12 @@ The state is the agent's alone:
 - a write lands in a temporary file that is synced and renamed over
   `installation.json` before the directory is synced, and a start discards what
   an interrupted write left behind;
-- whatever else the installation keeps, such as its keys, its certificates and
-  its spool, lives in a private directory of its own inside the state
-  directory, which the installation holds under the same lock and closes when
-  it is closed.
+- whatever else the installation keeps, such as its keys, its certificates,
+  the authorities it adopted and its spool, lives in a private directory of its
+  own inside the state directory, which the installation holds under the same
+  lock and closes when it is closed. The installation's state may be read while
+  it changes, since every change replaces it whole: a renewal activates a
+  generation while the transport reads the one it presents.
 
 When the state cannot be used, the agent does not start: it logs
 `agent_not_started` with the reason and a `recovery`, and never creates a new
@@ -542,9 +557,161 @@ What it does not claim:
   certificate it replaced until that certificate expires, and its key stays in
   `keys/`, so an installation whose key was exposed is revoked with its agent,
   never merely issued a new certificate;
-- renewal before a certificate expires, which the agent will ask for over its
-  own credential rather than through an operator: until it does, an operator
-  has the next certificate issued as the first was.
+- that an operator is needed again while the credential is current: the agent
+  renews it itself, as [Renewal](#renewal) describes, and an operator is back
+  only for a credential that expired, was lost or damaged, or that the platform
+  no longer renews.
+
+## Renewal
+
+An enrolled agent keeps its credential current without an operator. Once the
+installation is enrolled, the running agent composes `internal/renewal`, which
+asks the platform's renewal listener for the next certificate before the active
+one expires, over the credential it is replacing: `POST /v1/agents/certificate`
+under `server.renewal_url`, a `seagull.agent.v1.RenewalRequest` carrying a
+certificate request made as [enrollment](#enrollment) makes one. At the recorded
+backend commit, that listener takes the agent off the certificate it verified,
+signs only a request naming that agent, and renews only an agent its registry
+still admits.
+
+When:
+
+- at a point between seven and nine twelfths of the active certificate's
+  lifetime, drawn from the installation and the certificate, so a fleet issued
+  its certificates at once does not renew them at once, and a restart does not
+  move the moment; `credential_renewal_scheduled` says when, and an agent that
+  starts past that point renews at once;
+- a failure the network or a busy platform explains, a lost connection, a 5xx
+  or a 429, is retried after a minute, doubling up to an hour, each wait a fifth
+  longer or shorter at random; a failure somebody has to act on, a refusal, a
+  certificate the listener refused, a listener the agent cannot authenticate or
+  an answer that does not verify, is retried every hour. Each is logged as
+  `credential_not_renewed`, a warning or an error, with the attempt, the next
+  one and a `recovery`, and the agent never enrolls itself again whatever the
+  platform answers;
+- the agent waits an hour at most before it looks at the clock again, so a
+  clock that moved, or a host that slept, moves the renewal with it.
+
+With which key:
+
+- a renewal replaces the certificate and keeps the key while the key is younger
+  than `identity.key_lifetime`, 720 hours by default, and draws a new key once it
+  is not: replacing a certificate and rotating a key are two operations, and
+  the key lifetime decides between them. A generation records when its key was
+  drawn; one enrolled before it did is rotated at its next renewal;
+- the request is recorded, with its key, before it is sent, so a renewal whose
+  answer was lost is asked again with the same key and never draws another;
+- the answer is verified as an imported one is, against the authorities that
+  very answer publishes, which is sound because it arrived over a connection
+  the agent authenticated with the authorities it trusts, from the platform its
+  credential authenticated to. The certificate is kept and the next generation
+  activated as an import activates it, so an interrupted renewal leaves the
+  generation before active and whole, and the transport presents the new one
+  from its next request;
+- the generation a renewal replaced keeps its key and its certificate. The
+  recorded platform honours a certificate it replaced until it expires, and the
+  agent assumes neither was revoked.
+
+Whom it trusts. Every answer carries the authorities the platform tells its
+agents to trust, and that is how the platform rotates its authority without
+anybody visiting a host: it publishes the next authority beside the current
+one, signs with the next once its agents renewed, and retires the current one.
+The agent follows:
+
+- it adopts the set an answer publishes when that set differs from the one it
+  trusts and still authenticates the listener that answered, and from then on
+  authenticates the platform against it, `platform check` and
+  `enrollment import` included. While both authorities are published it trusts
+  both, and once the current one is retired a listener still presenting one of
+  its certificates is no longer authenticated;
+- a set that would not authenticate the listener it came from is not adopted:
+  adopting it would leave the agent unable to reach the platform to be told
+  better. The agent keeps what it trusts and logs `authorities_not_adopted`,
+  and adopts the set at a later renewal once the listener serves a certificate
+  the set authenticates;
+- the set is kept under `trust/` in the state directory, named after its digest
+  like a certificate, and adopted in `installation.json` beside the digest of
+  the `server.trust_bundle` it took over from. When an operator changes that
+  bundle, the change is the newer word: the agent trusts the bundle, logs
+  `authorities_reset`, and adopts what the platform publishes at its next
+  renewal. A set the agent cannot read back falls back to the bundle the same
+  way, logged as `authorities_not_read`.
+
+When the credential cannot be renewed:
+
+- a certificate that expired, or that the host's clock says is not valid yet,
+  is no credential to renew with. The agent logs `credential_expired` or
+  `credential_not_valid_yet` once, asks nothing, and waits: an operator has the
+  platform issue a new certificate through `enrollment request` and
+  `enrollment import`, or corrects the clock. The platform backdates what it
+  issues by a minute, so a clock more than a minute behind the platform's
+  refuses a renewal's answer as not valid yet;
+- a platform that no longer renews the agent, because an operator disabled,
+  revoked or decommissioned it, answers `illegal_move`. The agent keeps its
+  credential and asks again every hour, since disabling is reversible; a
+  revoked or decommissioned agent is replaced, never revived.
+
+`seagull-agent -config FILE enrollment renew` renews at once, as the running
+agent would, while the agent is stopped: it says which generation and key it
+renewed to, and which authorities it trusts from then on.
+
+Revocation and the roster. Renewal and ingestion learn that the platform stopped
+admitting an agent apart. The renewal listener reads the registry as it
+answers, so a revoked agent's next renewal is refused, as the recordings show.
+The ingest gateway admits by a roster it follows on a compacted topic, so it
+refuses the agent once the revocation reaches that roster: measured with the
+recorded commit's own publisher, reader and roster against a single local
+broker of the version its deployment runs, over 300 revocations, that took 6.8
+ms at the median and 10.2 ms at most, a floor a deployment adds its network and
+replication to. A revocation the control plane recorded while the broker could
+not be reached is published again at its next sweep, every 30 seconds by
+default. A roster that lags admits the revoked agent until the revocation
+reaches it, which is the window measured above, and what it admits meanwhile is
+the platform's to disposition. The agent keeps no admission state of its own:
+each answer is the platform's word for that request, a refusal is never read as
+lasting beyond it, and an answer that admits the agent again is taken as it
+comes.
+
+Recovering from a compromise is the operator's, and never the agent's: revoke
+the agent, which is final on the platform and ends its renewals and its
+ingestion; register a new agent; replace the installation with
+`installation replace`, which sets the exposed key and certificate aside; and
+enroll the new installation as the new agent. The revoked certificate still
+verifies until it expires, and the roster refuses it.
+
+The evidence:
+
+- `internal/renewal` is tested against a renewal listener set up as the
+  platform's: a renewal keeps a young key and rotates one as old as its
+  lifetime, resumes an interrupted one with the same key, changes nothing when
+  refused, activates no answer that is not the certificate asked for, adopts the
+  authorities published during a rotation and refuses a set that would not
+  authenticate its listener, leaves the replaced generation authenticating,
+  renews on its own without an operator, retries within its bounds, and stops
+  asking once the certificate expired;
+- the command-line tests run the agent until it renews a certificate valid for
+  seconds, renew from the command line, check the platform against the
+  authorities it published, and reset to a `server.trust_bundle` an operator
+  changed;
+- the exchanges were recorded from the renewal handler of the recorded backend
+  commit, served as its control plane serves it, with the agent's binary
+  renewing its credential: keeping its key, rotating it, while the platform
+  published its next authority, signed with it, retired the current one before
+  and after moving its listener, and finally revoked the agent. The recording
+  also shows the platform renewing a generation two renewals had replaced.
+  `tests/compatibility` verifies every answer as the agent does, and checks
+  which key each renewal asked with and which authorities each answer
+  published.
+
+What it does not claim:
+
+- that a renewal is a delivery: it sends no record, and does not wait for the
+  governor's upload permits;
+- a revocation deadline for a deployment: the measurement bounds what the
+  platform's code adds on one host, not its network, its broker's replication
+  or a backbone that was down;
+- that a key renewal draws is better protected than the first: keys stay in
+  files, as [Keys](#keys) describes.
 
 ## The spool
 
@@ -916,8 +1083,10 @@ The platform is authenticated, never assumed:
   the platform's agent listeners, ingest and renewal, speak 1.3 alone, so no
   supported deployment needs 1.2, and a listener that offers nothing newer is
   refused;
-- the listener's certificate has to chain to an authority in
-  `server.trust_bundle`, be allowed to authenticate a server, be valid now, and
+- the listener's certificate has to chain to an authority the agent trusts,
+  `server.trust_bundle` or the authorities the platform published over the
+  agent's credential and a [renewal](#renewal) adopted, be allowed to
+  authenticate a server, be valid now, and
   name the host the address names, as a DNS name or an IP address. Nothing
   turns a check off: `tests/architecture` refuses any production code that
   names `InsecureSkipVerify`;
@@ -948,9 +1117,12 @@ What the agent presents:
   connections, and idle connections made with the one before are closed;
 - the credential is the key and the certificate of the installation's active
   credential generation, opened where [enrollment](#enrollment) keeps them and
-  checked to belong together before the transport presents them. Delivery is
-  what sends, and it arrives with its own work: until then the agent
-  authenticates with that credential in its tests alone.
+  checked to belong together before the transport presents them. The running
+  agent presents it to renew it; delivery, which sends records, arrives with its
+  own work;
+- the authorities the transport authenticates the platform against change while
+  it runs when a renewal adopts new ones: from the next connection on, while a
+  connection already made finishes what it carries.
 
 What the agent is told, apart:
 
@@ -1118,6 +1290,10 @@ conventions:
 - no production code outside `internal/pki` draws a private key, writes one out
   or reads one in, so every other part of the agent uses a key through
   `crypto.Signer` alone and a certificate request carries its public half;
+- `internal/renewal` reads no configuration and reaches no collector, directly
+  or through another package, and imports no TLS package itself: it is handed
+  the listener, the authorities and the key lifetime it works with, and reaches
+  the platform through the transport alone;
 - `internal/enrollment` imports neither the configuration, nor the transport,
   nor an HTTP, gRPC, RPC or TLS package, directly or through another package:
   the request and the certificate travel through the operator, and it is handed
@@ -1208,8 +1384,10 @@ What one side does not know follows from the same rule:
 of a backend commit, driven in process by that commit's end-to-end harness: the
 bytes of every batch sent and of every answer, including batches sent under a
 certificate the platform refuses the agent of. Beside them are the exchanges of
-[enrollment](#enrollment), recorded from the control plane of the same commit
-with the agent's own binary asking for and importing the certificates. The suite fails when `go.mod`
+[enrollment](#enrollment) and [renewal](#renewal), recorded from the control
+plane of the same commit with the agent's own binary asking for, importing and
+renewing the certificates, and the measurement of how long that commit takes to
+carry a revocation to the roster its gateway follows. The suite fails when `go.mod`
 pins contracts no recorded platform was built with, when a recorded platform
 never durably accepted a version the agent speaks, or when a recorded refusal
 reads differently. Compatibility is claimed only with recorded platforms, and

@@ -46,6 +46,8 @@ func (c Config) settled(next Config) error {
 	for _, fixed := range []struct{ name, before, after string }{
 		{name: "identity.state_directory", before: c.Identity.StateDirectory, after: next.Identity.StateDirectory},
 		{name: "identity.key_provider", before: c.Identity.KeyProvider, after: next.Identity.KeyProvider},
+		{name: "server.renewal_url", before: c.Server.RenewalURL, after: next.Server.RenewalURL},
+		{name: "server.trust_bundle", before: c.Server.TrustBundle, after: next.Server.TrustBundle},
 		{name: "logging.format", before: c.Logging.Format, after: next.Logging.Format},
 		{name: "resources.shutdown_timeout", before: c.Resources.ShutdownTimeout.String(), after: next.Resources.ShutdownTimeout.String()},
 	} {

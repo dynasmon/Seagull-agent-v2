@@ -36,6 +36,8 @@ func TestAReloadThatChangesWhatTheAgentSettledAsItStartedIsRefused(t *testing.T)
 			settings.Identity.StateDirectory = "/var/lib/seagull-agent-elsewhere"
 		},
 		"what holds its keys": func(settings *config.Config) { settings.Identity.KeyProvider = "tpm" },
+		"where it renews":     func(settings *config.Config) { settings.Server.RenewalURL = "https://control.example:9446" },
+		"whom it trusts":      func(settings *config.Config) { settings.Server.TrustBundle = "/etc/seagull-agent/other-ca.pem" },
 		"the log it writes":   func(settings *config.Config) { settings.Logging.Format = "text" },
 		"how long it stops":   func(settings *config.Config) { settings.Resources.ShutdownTimeout = config.Duration(0) },
 	} {

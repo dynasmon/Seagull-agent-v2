@@ -1,0 +1,78 @@
+{
+  "authorities": {
+    "current": "renewal-authority-current.pem",
+    "next": "renewal-authority-next.pem"
+  },
+  "checked": "renewal https://127.0.0.1:41717 is authenticated: tls 1.3, a certificate for \"localhost\", \"127.0.0.1\" issued by \"Seagull Next Agent Test CA\" and valid until 2026-09-25T22:34:37Z; it asks for the certificate of an enrolled agent\nseagull-agent: ingest: the platform could not be authenticated: https://127.0.0.1:43727: x509: certificate signed by unknown authority\nseagull-agent: check that an authority the platform published to the installation issued the listener's certificate, and that the address names a host that certificate was issued for\nseagull-agent: the platform was checked against the 1 authority it published to the installation at 2026-09-25T21:34:37Z, which the agent trusts in place of server.trust_bundle",
+  "exchanges": [
+    {
+      "name": "renewal-kept",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "4635c9bc06bf6d884d2ababc8f6889269800d0f045fdfa695b687e52a6401b72",
+      "agent_said": "installation e96f930e-ab3d-4ed0-af03-0878539195b7 renewed agent web-01 to credential generation 2, with the key it held: certificate 24f9dd0d449495fc6e34b6ea643472e7 issued by \"Seagull Agent Test CA\" and valid until 2026-09-25T22:34:37Z"
+    },
+    {
+      "name": "renewal-rotated",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "4635c9bc06bf6d884d2ababc8f6889269800d0f045fdfa695b687e52a6401b72",
+      "agent_said": "installation e96f930e-ab3d-4ed0-af03-0878539195b7 renewed agent web-01 to credential generation 3, with a new key, 54d6a6b2656adc5edfc520b12e417cc856154738274d08232b91a185478cb729: certificate 210b65a9260f8b0b50261dd24b97cc79 issued by \"Seagull Agent Test CA\" and valid until 2026-09-25T22:34:37Z"
+    },
+    {
+      "name": "renewal-superseded",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "4635c9bc06bf6d884d2ababc8f6889269800d0f045fdfa695b687e52a6401b72"
+    },
+    {
+      "name": "renewal-overlap",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "54d6a6b2656adc5edfc520b12e417cc856154738274d08232b91a185478cb729",
+      "agent_said": "installation e96f930e-ab3d-4ed0-af03-0878539195b7 renewed agent web-01 to credential generation 4, with the key it held: certificate 4fd595f81d0943065a091a97193f683e issued by \"Seagull Agent Test CA\" and valid until 2026-09-25T22:34:37Z\nit authenticates the platform against the 2 authorities the platform published from now on"
+    },
+    {
+      "name": "renewal-next-authority",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "54d6a6b2656adc5edfc520b12e417cc856154738274d08232b91a185478cb729",
+      "agent_said": "installation e96f930e-ab3d-4ed0-af03-0878539195b7 renewed agent web-01 to credential generation 5, with the key it held: certificate 12cbacc8ace01de8c4f726f9737da550 issued by \"Seagull Next Agent Test CA\" and valid until 2026-09-25T22:34:37Z"
+    },
+    {
+      "name": "renewal-not-adopted",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "54d6a6b2656adc5edfc520b12e417cc856154738274d08232b91a185478cb729",
+      "agent_said": "installation e96f930e-ab3d-4ed0-af03-0878539195b7 renewed agent web-01 to credential generation 6, with the key it held: certificate 3b1f21e4a00b24bb3798bbbea1b66a65 issued by \"Seagull Next Agent Test CA\" and valid until 2026-09-25T22:34:37Z\nseagull-agent: the authorities the platform published do not authenticate its renewal listener: x509: certificate signed by unknown authority\nseagull-agent: issue the platform's renewal listener a certificate from an authority the platform publishes: the agent adopts them as it next renews, and authenticates the platform against the ones it trusts until then"
+    },
+    {
+      "name": "renewal-removal",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "54d6a6b2656adc5edfc520b12e417cc856154738274d08232b91a185478cb729",
+      "agent_said": "installation e96f930e-ab3d-4ed0-af03-0878539195b7 renewed agent web-01 to credential generation 7, with the key it held: certificate 1caefd97db7718f4b7107991ead251b8 issued by \"Seagull Next Agent Test CA\" and valid until 2026-09-25T22:34:37Z\nit authenticates the platform against the 1 authority the platform published from now on"
+    },
+    {
+      "name": "renewal-revoked",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 422,
+      "presented_key_id": "54d6a6b2656adc5edfc520b12e417cc856154738274d08232b91a185478cb729",
+      "agent_said": "seagull-agent: the platform answered the renewal with 422 illegal_move: the certificate identity cannot be bound to this agent: an agent that is revoked takes no furthe...\nseagull-agent: the platform no longer renews this agent: an operator enables it again, or, when it was revoked or decommissioned, replaces the installation with \"seagull-agent -config /tmp/TestRecordAgentRenewalEvidence1743435389/003/etc/agent.json installation replace\" and enrolls it as a new agent; the agent never enrolls itself again"
+    }
+  ],
+  "platform": {
+    "commit": "6fae3457bb2b721fc891e1c80bf12a5f3fc408c2",
+    "contracts": "v0.14.0",
+    "repository": "github.com/dynasmon/Seagull-backend-v2"
+  },
+  "recorded_at": "2026-09-25T21:34:37Z"
+}
