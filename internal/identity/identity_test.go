@@ -44,6 +44,9 @@ const enrolledState = `{
 }
 `
 
+var requestingState = strings.Replace(enrolledState, "\n  }\n}\n",
+	"\n  },\n  \"request\": {\"agent_id\": \"web-01\", \"key_id\": \""+secondKey+"\", \"requested_at\": \"2026-09-25T12:00:00Z\"}\n}\n", 1)
+
 // A child holds the installation it opens until its standard input closes, so
 // every other child that opens the same directory meanwhile is refused.
 func TestMain(m *testing.M) {
@@ -123,7 +126,7 @@ func TestEveryInstallationDrawsAnIdentifierOfItsOwn(t *testing.T) {
 
 func TestAStateWrittenInThisFormatReadsAsWritten(t *testing.T) {
 	directory := stateDirectory(t)
-	writeState(t, directory, enrolledState)
+	writeState(t, directory, requestingState)
 
 	installation := open(t, directory)
 	enrolled, ok := installation.Enrollment()
@@ -132,6 +135,9 @@ func TestAStateWrittenInThisFormatReadsAsWritten(t *testing.T) {
 	want.Certificate.FingerprintSHA256 = "b4c1d2e3f40516273849a5b6c7d8e9f00112233445566778899aabbccddeeff0"
 	if installation.ID() != "5f0b6a1e-3c2d-4b8f-9a7e-1d2c3b4a5f6e" || installation.Created() || !ok || !equal(enrolled, want) {
 		t.Fatalf("read %s enrolled as %+v (%t), want %+v", installation.ID(), enrolled, ok, want)
+	}
+	if pending, ok := installation.Pending(); !ok || pending != request("web-01", secondKey) {
+		t.Fatalf("read the pending request as %+v (%t)", pending, ok)
 	}
 }
 
@@ -419,6 +425,119 @@ func TestActivationRefusesToRelabelTheInstallationOrSkipAGeneration(t *testing.T
 	}
 	if kept, ok := open(t, directory).Enrollment(); !ok || !equal(kept, active) {
 		t.Fatalf("a refused activation left %+v (%t) active, want %+v", kept, ok, active)
+	}
+}
+
+func TestAPendingRequestIsKeptUntilTheCertificateItAskedForIsActivated(t *testing.T) {
+	directory := stateDirectory(t)
+	installation := open(t, directory)
+	if pending, ok := installation.Pending(); ok {
+		t.Fatalf("a new installation asks for %+v", pending)
+	}
+	for _, asked := range []identity.Request{request("web-01", firstKey), request("web-01", secondKey)} {
+		if err := installation.Ask(asked); err != nil {
+			t.Fatalf("ask for %+v: %v", asked, err)
+		}
+		if err := installation.Close(); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+		installation = open(t, directory)
+		if pending, ok := installation.Pending(); !ok || pending != asked {
+			t.Fatalf("after a restart the installation asks for %+v (%t), want %+v", pending, ok, asked)
+		}
+	}
+
+	if err := installation.Activate(enrollment("web-01", 1, firstKey)); err != nil {
+		t.Fatalf("activate a generation of another key: %v", err)
+	}
+	if pending, ok := installation.Pending(); !ok || pending.KeyID != secondKey {
+		t.Fatalf("activating another key ended the request, which is now %+v (%t)", pending, ok)
+	}
+	if err := installation.Activate(enrollment("web-01", 2, secondKey)); err != nil {
+		t.Fatalf("activate the generation that was asked for: %v", err)
+	}
+	if err := installation.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	installation = open(t, directory)
+	if pending, ok := installation.Pending(); ok {
+		t.Fatalf("the installation still asks for %+v once it was issued", pending)
+	}
+	if active, ok := installation.Enrollment(); !ok || !equal(active, enrollment("web-01", 2, secondKey)) {
+		t.Fatalf("the active generation is %+v (%t)", active, ok)
+	}
+}
+
+func TestAnInstallationAsksOnlyToBeAnAgentItMayBecome(t *testing.T) {
+	directory := stateDirectory(t)
+	installation := open(t, directory)
+	undated := request("web-01", firstKey)
+	undated.RequestedAt = time.Time{}
+	for name, asked := range map[string]identity.Request{
+		"an agent the platform cannot name": request("-web-01", firstKey),
+		"no agent at all":                   request("", firstKey),
+		"a key that is not a digest":        request("web-01", "0123"),
+		"a request made at no moment":       undated,
+	} {
+		if err := installation.Ask(asked); !errors.Is(err, identity.ErrUnasked) {
+			t.Errorf("%s: asking returned %v", name, err)
+		}
+	}
+	if err := installation.MayAsk("db 07"); !errors.Is(err, identity.ErrUnasked) {
+		t.Errorf("an installation may ask to be an agent the platform cannot name: %v", err)
+	}
+
+	if err := installation.Ask(request("db-07", firstKey)); err != nil {
+		t.Fatalf("ask to be db-07: %v", err)
+	}
+	if err := installation.Activate(enrollment("web-01", 1, firstKey)); !errors.Is(err, identity.ErrRefused) {
+		t.Fatalf("the key asked to be db-07 was activated as web-01: %v", err)
+	}
+	if err := installation.Activate(enrollment("web-01", 1, secondKey)); !errors.Is(err, identity.ErrRefused) {
+		t.Fatalf("web-01 was activated while the installation asks to be db-07: %v", err)
+	}
+	if err := installation.Ask(request("web-01", secondKey)); err != nil {
+		t.Fatalf("ask to be web-01 instead: %v", err)
+	}
+	if err := installation.Activate(enrollment("web-01", 1, secondKey)); err != nil {
+		t.Fatalf("activate what was asked for: %v", err)
+	}
+	for _, agentID := range []string{"db-07", "web-02"} {
+		if err := installation.MayAsk(agentID); !errors.Is(err, identity.ErrUnasked) {
+			t.Errorf("an installation enrolled as web-01 may ask to be %s: %v", agentID, err)
+		}
+		if err := installation.Ask(request(agentID, firstKey)); !errors.Is(err, identity.ErrUnasked) {
+			t.Errorf("an installation enrolled as web-01 asked to be %s: %v", agentID, err)
+		}
+	}
+	if err := installation.Ask(request("web-01", firstKey)); err != nil {
+		t.Fatalf("an enrolled installation could not ask for a new certificate of its own: %v", err)
+	}
+	if err := installation.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	reopened := open(t, directory)
+	if pending, ok := reopened.Pending(); !ok || pending != request("web-01", firstKey) {
+		t.Fatalf("after a restart the installation asks for %+v (%t)", pending, ok)
+	}
+}
+
+func TestAReplacementAsksForNothing(t *testing.T) {
+	directory := stateDirectory(t)
+	previous := open(t, directory)
+	if err := previous.Ask(request("web-01", firstKey)); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if err := previous.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	replacement, err := identity.Replace(directory)
+	if err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	defer replacement.Close()
+	if pending, ok := replacement.Pending(); ok {
+		t.Fatalf("the replacement asks for what the installation it replaced asked for: %+v", pending)
 	}
 }
 
@@ -848,6 +967,10 @@ func enrollment(agentID string, generation uint64, key string) identity.Enrollme
 	}
 }
 
+func request(agentID, key string) identity.Request {
+	return identity.Request{AgentID: agentID, KeyID: key, RequestedAt: time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)}
+}
+
 func equal(a, b identity.Enrollment) bool {
 	return a.AgentID == b.AgentID && a.Generation == b.Generation && a.KeyID == b.KeyID &&
 		a.Certificate.Subject == b.Certificate.Subject && a.Certificate.Serial == b.Certificate.Serial &&
@@ -868,6 +991,9 @@ func TestNothingTheStateHoldsDecidesHowLongARefusalIs(t *testing.T) {
 		"a key identifier that is not a digest": strings.Replace(enrolledState, firstKey, marker, 1),
 		"a certificate for another agent":       strings.Replace(enrolledState, `"subject": "web-01"`, `"subject": "`+marker+`"`, 1),
 		"a serial that is not one":              strings.Replace(enrolledState, `"0a1b2c3d"`, `"`+marker+`"`, 1),
+		"a request for an agent it cannot name": strings.Replace(requestingState, `"agent_id": "web-01"`, `"agent_id": "`+marker+`"`, 1),
+		"a request with a key that is not one":  strings.Replace(requestingState, secondKey, marker, 1),
+		"a request to become another agent":     strings.Replace(requestingState, `"agent_id": "web-01", "key_id"`, `"agent_id": "db-07", "key_id"`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			directory := stateDirectory(t)

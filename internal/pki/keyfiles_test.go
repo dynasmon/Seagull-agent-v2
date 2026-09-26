@@ -28,11 +28,14 @@ const childKeys = "SEAGULL_PKI_TEST_KEYS"
 
 var keyFile = regexp.MustCompile(`^([0-9a-f]{64})\.pem$`)
 
-// A child creates keys in the directory it is given until it is killed, and
-// reports each key only once Create has returned it.
+// A child creates keys, or stores chains, in the directory it is given until it
+// is killed, and reports each only once Create or Store has returned it.
 func TestMain(m *testing.M) {
 	if directory, ok := os.LookupEnv(childKeys); ok {
 		os.Exit(createUntilKilled(directory))
+	}
+	if directory, ok := os.LookupEnv(childCertificates); ok {
+		os.Exit(storeUntilKilled(directory))
 	}
 	os.Exit(m.Run())
 }

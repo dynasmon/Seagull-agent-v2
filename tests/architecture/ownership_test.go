@@ -101,6 +101,12 @@ var dependencyRules = []dependencyRule{
 		reason:     "the transport authenticates connections and moves bytes: what they carry, whose records they are and where the credential it presents is kept belong to others, and what it repeats of what it read is bounded by the secrets package alone",
 	},
 	{
+		packages:   "internal/enrollment",
+		forbidden:  append([]string{modulePath + "/internal/config", modulePath + "/internal/transport"}, networkPackages...),
+		transitive: true,
+		reason:     "enrollment activates what an operator had the platform issue: the request and the certificate travel through the operator, so it reaches no host, and it is handed the authorities it verifies against rather than reading them itself",
+	},
+	{
 		packages:   "internal/governor",
 		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
 		transitive: true,
@@ -362,6 +368,32 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				ImportPath: modulePath + "/internal/transport",
 				Imports:    []string{"crypto/tls", "crypto/x509", "net/http", modulePath + "/internal/secrets"},
 				Deps:       []string{"crypto/tls", "crypto/x509", "net", "net/http", modulePath + "/internal/secrets"},
+			},
+		},
+		{
+			name: "enrollment asking the platform for a certificate itself",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/enrollment",
+				Imports:    []string{"net/http", modulePath + "/internal/pki"},
+				Deps:       []string{"crypto/tls", "net/http", modulePath + "/internal/pki"},
+			},
+			want: []string{"crypto/tls", "net/http"},
+		},
+		{
+			name: "enrollment reading the authorities it trusts",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/enrollment",
+				Imports:    []string{modulePath + "/internal/config"},
+				Deps:       []string{modulePath + "/internal/config", modulePath + "/internal/platform/files"},
+			},
+			want: []string{modulePath + "/internal/config"},
+		},
+		{
+			name: "enrollment verifying what the platform issued",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/enrollment",
+				Imports:    []string{"crypto/x509", contractsPath + "/gen/go/seagull/agent/v1", modulePath + "/internal/identity", modulePath + "/internal/pki"},
+				Deps:       []string{"crypto/x509", "net", contractsPath + "/gen/go/seagull/agent/v1", modulePath + "/internal/identity", modulePath + "/internal/pki"},
 			},
 		},
 		{

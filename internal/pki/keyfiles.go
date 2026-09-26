@@ -40,36 +40,10 @@ type KeyFiles struct {
 }
 
 func OpenKeyFiles(directory *os.Root) (*KeyFiles, error) {
-	described, err := directory.Stat(".")
-	if err != nil {
-		return nil, fmt.Errorf("inspect %s: %w", directory.Name(), err)
-	}
-	if err := private(directory.Name(), described); err != nil {
+	if err := settle(directory, ErrKeyInsecure); err != nil {
 		return nil, err
 	}
-	keys := &KeyFiles{directory: directory}
-	names, err := keys.names()
-	if err != nil {
-		return nil, err
-	}
-	for _, name := range names {
-		if interruptedPattern.MatchString(name) {
-			if err := directory.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return nil, fmt.Errorf("discard the interrupted write %s: %w", keys.path(name), err)
-			}
-			continue
-		}
-		described, err := directory.Lstat(name)
-		if err != nil {
-			return nil, fmt.Errorf("inspect %s: %w", keys.path(name), err)
-		}
-		if described.Mode().IsRegular() {
-			if err := private(keys.path(name), described); err != nil {
-				return nil, err
-			}
-		}
-	}
-	return keys, nil
+	return &KeyFiles{directory: directory}, nil
 }
 
 func (k *KeyFiles) Create() (Key, error) {
@@ -103,7 +77,7 @@ func (k *KeyFiles) Create() (Key, error) {
 		err = k.directory.Link(temporary, name)
 	}
 	if err = errors.Join(err, k.directory.Remove(temporary)); err == nil {
-		err = k.sync()
+		err = syncDirectory(k.directory)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("write %s: %w", k.path(name), err)
@@ -126,7 +100,7 @@ func (k *KeyFiles) Open(id string) (Key, error) {
 	case !described.Mode().IsRegular():
 		return nil, fmt.Errorf("%w: %s is not a regular file", ErrKeyDamaged, path)
 	}
-	if err := private(path, described); err != nil {
+	if err := private(path, described, ErrKeyInsecure); err != nil {
 		return nil, err
 	}
 	file, err := k.directory.Open(name)
@@ -185,38 +159,71 @@ func decode(content []byte, id string) (*ecdsa.PrivateKey, error) {
 	return decoded, nil
 }
 
-func (k *KeyFiles) names() ([]string, error) {
-	directory, err := k.directory.Open(".")
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", k.directory.Name(), err)
-	}
-	defer directory.Close()
-	names, err := directory.Readdirnames(-1)
-	if err != nil {
-		return nil, fmt.Errorf("list %s: %w", k.directory.Name(), err)
-	}
-	return names, nil
-}
+func (k *KeyFiles) path(name string) string { return filepath.Join(k.directory.Name(), name) }
 
-func (k *KeyFiles) sync() error {
-	directory, err := k.directory.Open(".")
+func settle(directory *os.Root, insecure error) error {
+	described, err := directory.Stat(".")
 	if err != nil {
-		return fmt.Errorf("open %s: %w", k.directory.Name(), err)
+		return fmt.Errorf("inspect %s: %w", directory.Name(), err)
 	}
-	if err := errors.Join(directory.Sync(), directory.Close()); err != nil {
-		return fmt.Errorf("sync %s: %w", k.directory.Name(), err)
+	if err := private(directory.Name(), described, insecure); err != nil {
+		return err
+	}
+	held, err := names(directory)
+	if err != nil {
+		return err
+	}
+	for _, name := range held {
+		path := filepath.Join(directory.Name(), name)
+		if interruptedPattern.MatchString(name) {
+			if err := directory.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("discard the interrupted write %s: %w", path, err)
+			}
+			continue
+		}
+		described, err := directory.Lstat(name)
+		if err != nil {
+			return fmt.Errorf("inspect %s: %w", path, err)
+		}
+		if described.Mode().IsRegular() {
+			if err := private(path, described, insecure); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
 
-func (k *KeyFiles) path(name string) string { return filepath.Join(k.directory.Name(), name) }
+func names(root *os.Root) ([]string, error) {
+	directory, err := root.Open(".")
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", root.Name(), err)
+	}
+	defer directory.Close()
+	listed, err := directory.Readdirnames(-1)
+	if err != nil {
+		return nil, fmt.Errorf("list %s: %w", root.Name(), err)
+	}
+	return listed, nil
+}
 
-func private(path string, described fs.FileInfo) error {
+func syncDirectory(root *os.Root) error {
+	directory, err := root.Open(".")
+	if err != nil {
+		return fmt.Errorf("open %s: %w", root.Name(), err)
+	}
+	if err := errors.Join(directory.Sync(), directory.Close()); err != nil {
+		return fmt.Errorf("sync %s: %w", root.Name(), err)
+	}
+	return nil
+}
+
+func private(path string, described fs.FileInfo, insecure error) error {
 	if err := files.Private(described); err != nil {
 		if errors.Is(err, errors.ErrUnsupported) {
-			return fmt.Errorf("keep keys in %s: %w", path, err)
+			return fmt.Errorf("keep %s: %w", path, err)
 		}
-		return fmt.Errorf("%w: %s %v", ErrKeyInsecure, path, err)
+		return fmt.Errorf("%w: %s %v", insecure, path, err)
 	}
 	return nil
 }

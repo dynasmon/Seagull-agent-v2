@@ -33,6 +33,7 @@ var (
 	ErrNewer          = errors.New("the installation state was written by a newer agent")
 	ErrNoInstallation = errors.New("there is no installation to replace")
 	ErrRefused        = errors.New("the installation refuses the credential generation")
+	ErrUnasked        = errors.New("the installation refuses to ask for that certificate")
 )
 
 var (
@@ -53,12 +54,19 @@ type Certificate struct {
 
 // The credential generation the installation authenticates with: the agent the
 // platform issued it for, the key that proves it and what the certificate says.
-// It holds no key and no secret, so a copy of it authenticates nothing.
+// A Request is the certificate it asked for and was not issued yet. Neither
+// holds a key or a secret, so a copy of them authenticates nothing.
 type Enrollment struct {
 	AgentID     string      `json:"agent_id"`
 	Generation  uint64      `json:"generation"`
 	KeyID       string      `json:"key_id"`
 	Certificate Certificate `json:"certificate"`
+}
+
+type Request struct {
+	AgentID     string    `json:"agent_id"`
+	KeyID       string    `json:"key_id"`
+	RequestedAt time.Time `json:"requested_at"`
 }
 
 type state struct {
@@ -67,6 +75,7 @@ type state struct {
 	CreatedAt      time.Time   `json:"created_at"`
 	Replaces       string      `json:"replaces,omitempty"`
 	Enrollment     *Enrollment `json:"enrollment,omitempty"`
+	Request        *Request    `json:"request,omitempty"`
 }
 
 type Installation struct {
@@ -136,11 +145,18 @@ func (i *Installation) Enrollment() (Enrollment, bool) {
 	return *i.state.Enrollment, true
 }
 
+func (i *Installation) Pending() (Request, bool) {
+	if i.state.Request == nil {
+		return Request{}, false
+	}
+	return *i.state.Request, true
+}
+
 func (i *Installation) Activate(next Enrollment) error {
 	if err := next.validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrRefused, err)
 	}
-	switch current := i.state.Enrollment; {
+	switch current, pending := i.state.Enrollment, i.state.Request; {
 	case current == nil && next.Generation != 1:
 		return fmt.Errorf("%w: the first credential generation is 1, not %d", ErrRefused, next.Generation)
 	case current != nil && next.AgentID != current.AgentID:
@@ -149,9 +165,42 @@ func (i *Installation) Activate(next Enrollment) error {
 	case current != nil && next.Generation != current.Generation+1:
 		return fmt.Errorf("%w: generation %d is active, so the next one is %d, not %d",
 			ErrRefused, current.Generation, current.Generation+1, next.Generation)
+	case pending != nil && pending.KeyID == next.KeyID && pending.AgentID != next.AgentID:
+		return fmt.Errorf("%w: key %s was asked to be agent %s, not %s",
+			ErrRefused, next.KeyID, secrets.Shown(pending.AgentID), secrets.Shown(next.AgentID))
 	}
 	updated := i.state
 	updated.Enrollment = &next
+	if updated.Request != nil && updated.Request.KeyID == next.KeyID {
+		updated.Request = nil
+	}
+	return i.commit(updated, ErrRefused)
+}
+
+func (i *Installation) MayAsk(agentID string) error {
+	if !agentIDPattern.MatchString(agentID) {
+		return fmt.Errorf("%w: %s is not an agent the platform issues certificates for", ErrUnasked, secrets.Shown(agentID))
+	}
+	if current := i.state.Enrollment; current != nil && current.AgentID != agentID {
+		return fmt.Errorf("%w: the installation is enrolled as %s, and enrolling it as %s takes a replacement installation",
+			ErrUnasked, secrets.Shown(current.AgentID), secrets.Shown(agentID))
+	}
+	return nil
+}
+
+func (i *Installation) Ask(next Request) error {
+	if err := i.MayAsk(next.AgentID); err != nil {
+		return err
+	}
+	updated := i.state
+	updated.Request = &next
+	return i.commit(updated, ErrUnasked)
+}
+
+func (i *Installation) commit(updated state, refused error) error {
+	if err := updated.validate(); err != nil {
+		return fmt.Errorf("%w: %v", refused, err)
+	}
 	if err := i.write(updated); err != nil {
 		return err
 	}
@@ -461,8 +510,31 @@ func (s state) validate() error {
 		return fmt.Errorf("replaces %s is not a random UUID", secrets.Shown(s.Replaces))
 	case s.Replaces == s.InstallationID:
 		return errors.New("the installation replaces itself")
-	case s.Enrollment != nil:
-		return s.Enrollment.validate()
+	}
+	if s.Enrollment != nil {
+		if err := s.Enrollment.validate(); err != nil {
+			return err
+		}
+	}
+	if s.Request != nil {
+		if err := s.Request.validate(); err != nil {
+			return err
+		}
+		if s.Enrollment != nil && s.Request.AgentID != s.Enrollment.AgentID {
+			return fmt.Errorf("the installation is enrolled as %s and asks to be %s", secrets.Shown(s.Enrollment.AgentID), secrets.Shown(s.Request.AgentID))
+		}
+	}
+	return nil
+}
+
+func (r Request) validate() error {
+	switch {
+	case !agentIDPattern.MatchString(r.AgentID):
+		return fmt.Errorf("the request asks for agent_id %s, which is not an identifier the platform issues certificates for", secrets.Shown(r.AgentID))
+	case !digestPattern.MatchString(r.KeyID):
+		return fmt.Errorf("the request names key_id %s, which is not a SHA-256 digest in lower-case hexadecimal", secrets.Shown(r.KeyID))
+	case r.RequestedAt.IsZero():
+		return errors.New("the request says nothing of when it was made")
 	}
 	return nil
 }
