@@ -433,6 +433,35 @@ func TestAReplySaysWhatTheListenerPresented(t *testing.T) {
 	}
 }
 
+func TestAReplySaysWhenThePlatformAnsweredByItsOwnClock(t *testing.T) {
+	answered := time.Date(2026, time.September, 27, 14, 3, 9, 0, time.UTC)
+	for name, c := range map[string]struct {
+		date []string
+		want time.Time
+	}{
+		"a date the platform wrote": {date: []string{answered.Format(http.TimeFormat)}, want: answered},
+		"no date at all":            {date: nil},
+		"a date nobody can read":    {date: []string{"yesterday"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agents := authorityNamed(t, "Seagull agents")
+			listener := serve(t, authorityNamed(t, "Seagull platform"), agents, func(w http.ResponseWriter, r *http.Request) {
+				w.Header()["Date"] = c.date
+				admit(w, r)
+			})
+			key := agentKey(t)
+			client := compose(t, listener.trusted, &held{credential: transport.Credential{Chain: agents.agent(t, "web-01", key.Public()), Signer: key}})
+			reply, err := client.Post(t.Context(), batch(listener.URL+"/v1/events", "sshd"))
+			if err != nil {
+				t.Fatalf("send: %v", err)
+			}
+			if !reply.Date.Equal(c.want) {
+				t.Fatalf("the reply says the platform answered at %s, and it wrote %q", reply.Date, c.date)
+			}
+		})
+	}
+}
+
 func TestTheAgentFollowsNoRedirect(t *testing.T) {
 	agents := authorityNamed(t, "Seagull agents")
 	platform := serve(t, authorityNamed(t, "Seagull platform"), agents, func(w http.ResponseWriter, r *http.Request) {
