@@ -108,6 +108,7 @@ type queue struct {
 	paused   time.Time
 	refused  uint64
 	withheld uint64
+	signal   chan struct{}
 }
 
 func (q *queue) recover() error {
@@ -418,6 +419,7 @@ func (q *queue) admit(records []Record) (Receipt, error) {
 	q.segments[len(q.segments)-1].size += frames
 	q.next += uint64(len(records))
 	q.bytes += frames
+	q.announce()
 	q.mu.Unlock()
 	return Receipt{Stream: q.stream, First: first, Last: first + uint64(len(records)) - 1}, nil
 }
@@ -705,6 +707,31 @@ func (q *queue) expireDue() (uint64, error) {
 	return q.expire()
 }
 
+func (q *queue) admitted() <-chan struct{} {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed {
+		return announced()
+	}
+	if q.signal == nil {
+		q.signal = make(chan struct{})
+	}
+	return q.signal
+}
+
+func (q *queue) announce() {
+	if q.signal != nil {
+		close(q.signal)
+		q.signal = nil
+	}
+}
+
+func announced() <-chan struct{} {
+	signal := make(chan struct{})
+	close(signal)
+	return signal
+}
+
 func (q *queue) admitting() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -902,6 +929,7 @@ func (q *queue) close() error {
 		return nil
 	}
 	q.closed = true
+	q.announce()
 	var closed error
 	if q.active != nil {
 		closed, q.active = q.active.Close(), nil
