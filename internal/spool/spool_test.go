@@ -206,6 +206,52 @@ func TestRecordsAdmittedWhileOthersAreDeliveredAreAllDeliveredOnce(t *testing.T)
 	}
 }
 
+func TestWhoeverWaitsForRecordsIsToldOnceTheStreamAdmitsMore(t *testing.T) {
+	held, _ := open(t, spoolDirectory(t), budget)
+	events, inventory := held.Admitted(spool.Events), held.Admitted(spool.Inventory)
+	if signalled(events) || signalled(inventory) {
+		t.Fatal("a spool that admitted nothing says it did")
+	}
+	if _, err := held.Admit(spool.Events, spool.Record{ID: "empty"}); err == nil {
+		t.Fatal("the spool admitted a record that holds nothing")
+	}
+	if signalled(events) {
+		t.Fatal("a refused admission says the stream admitted a record")
+	}
+	woken := make(chan struct{})
+	go func() {
+		<-events
+		close(woken)
+	}()
+	admit(t, held, spool.Inventory, numbered("inventory", 0, 1)...)
+	if signalled(events) || !signalled(inventory) {
+		t.Fatalf("admitting inventory told events %t and inventory %t", signalled(events), signalled(inventory))
+	}
+	admit(t, held, spool.Events, numbered("event", 0, 2)...)
+	<-woken
+	after := held.Admitted(spool.Events)
+	if signalled(after) {
+		t.Fatal("a stream says it admitted what it admitted before it was asked")
+	}
+	acknowledge(t, held, spool.Events, 1, 2)
+	if signalled(after) {
+		t.Fatal("an acknowledgement says the stream admitted a record")
+	}
+	closeSpool(t, held)
+	if !signalled(after) || !signalled(held.Admitted(spool.Events)) {
+		t.Fatal("a closed spool leaves whoever waits for it waiting")
+	}
+}
+
+func signalled(signal <-chan struct{}) bool {
+	select {
+	case <-signal:
+		return true
+	default:
+		return false
+	}
+}
+
 func TestAReadIsBoundedAndAlwaysReturnsTheFirstRecord(t *testing.T) {
 	held, _ := open(t, spoolDirectory(t), budget)
 	admit(t, held, spool.Events, sized("event", 0, 4096), sized("event", 1, 4096), sized("event", 2, 4096))
