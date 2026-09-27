@@ -179,12 +179,15 @@ The evidence:
   platform: install, check the settings and the platform as the account,
   enroll, start, renew a certificate valid for 30 seconds under the service's
   permissions, reload, stop, admit records to the spool as the account, start,
-  kill the agent, upgrade to the next version, override a ceiling, remove,
-  reinstall, purge and install again. At each step it checks what the agent
-  reported, the account and the modes and owners of what it keeps, and after
-  the upgrade and the removal that the installation and its backlog are the
-  same bytes. CI runs it on Ubuntu 24.04 with `make native-gate`, which installs
-  the package on the host it runs on, so it belongs on a disposable one.
+    kill the agent, upgrade to the next version, override a ceiling, remove,
+  reinstall, deliver the backlog once the emulated platform takes it, purge and
+  install again. Until then the platform answers every batch as the recorded
+  gateway does when its backbone does not take one. At each step it checks what
+  the agent reported, the account and the modes and owners of what it keeps,
+  and after the upgrade and the removal that the installation and its backlog
+  are the same bytes. CI runs it on Ubuntu 24.04 with `make native-gate`,
+  which installs the package on the host it runs on, so it belongs on a
+  disposable one.
 
 What it does not claim:
 
@@ -225,16 +228,19 @@ the enabled ones to `internal/runtime`, which owns their lifecycle.
   panicked may have left shared state inconsistent; durable state has to
   survive that just as it survives any other crash.
 
-Two components are composed: the configuration the agent holds, which reads the
-file again whenever the agent is asked to, and, once the installation is
-enrolled, the [renewal](#renewal) that keeps its credential current, which is
-optional, so an agent whose renewal failed keeps collecting what it will deliver
-once it holds a certificate again. The spool is not a component, since
-it starts no work of its own: the agent opens it with the installation, reads
-back what it holds before it starts, and closes it as it stops. Neither is the
-governor, which bounds the expensive work of whoever asks it and starts none of
-its own. Collection, local admission and delivery will each arrive as a
-component of its own.
+Three components are composed: the configuration the agent holds, which reads
+the file again whenever the agent is asked to, and, once the installation is
+enrolled, the [renewal](#renewal) that keeps its credential current and the
+[delivery](#delivery) that sends the platform what the spool holds. The renewal
+is optional, so an agent whose renewal failed keeps collecting what it will
+deliver once it holds a certificate again. The delivery is essential: it never
+stops over what the platform answers, and one that stopped for any other reason
+stops the agent, which its service starts again. The spool is not a component,
+since it starts no work of its own: the agent opens it with the installation,
+reads back what it holds before it starts, and closes it as it stops. Neither is
+the governor, which bounds the expensive work of whoever asks it and starts none
+of its own. Collection and local admission will each arrive as a component of
+their own.
 
 ## Configuration
 
@@ -343,27 +349,26 @@ validates the whole candidate before anything changes:
 - a file it accepts replaces that configuration whole, logged as
   `configuration_reloaded`, so nothing ever runs on half of each;
 - what the agent settled as it started is refused as a change:
-  `identity.state_directory`, `identity.key_provider`, `server.renewal_url`,
-  `server.trust_bundle`, `logging.format` and `resources.shutdown_timeout` take
-  stopping the agent and starting it again. The agent reads the authorities
-  `server.trust_bundle` holds as it starts, so a bundle rewritten in place takes
-  a restart too.
+  `identity.state_directory`, `identity.key_provider`, `server.ingest_url`,
+  `server.renewal_url`, `server.trust_bundle`, `transport.connect_timeout`,
+  `transport.request_timeout`, `transport.max_response_bytes`,
+  `logging.format` and `resources.shutdown_timeout` take stopping the agent and
+  starting it again. The transport keeps the waits and the bound on a reply it
+  was built with, and the agent reads the authorities `server.trust_bundle`
+  holds as it starts, so a bundle rewritten in place takes a restart too.
 
 What a setting does today follows what the agent has. `identity`, `logging`,
-`spool`, `resources`, `server`, `transport.connect_timeout`,
-`transport.max_batch_bytes` and `transport.max_upload_bytes_per_second` are in
-force: they decide where the installation is opened, what the log says, how
-much the spool keeps and for how long, how large a record it takes, what the
-agent and its expensive work may spend, which platform `platform check`
-authenticates and how long it waits for it, which authorities a certificate the
-agent imports has to chain to, and where, how long and how often the agent
-renews its credential. The governor keeps the budgets for
-scans and uploads before anything spends them, since no collector scans and
-nothing delivers yet. The rest of `transport` is validated here and takes effect
-as delivery arrives, so a deployment is configured once rather than as each
-component lands. `modules` and `updates.enabled` are the settings this
-build refuses outright: an agent that accepted them would be promising
-collection it cannot do and updates it cannot install.
+`spool`, `resources`, `server` and `transport` are in force: they decide where
+the installation is opened, what the log says, how much the spool keeps and for
+how long, how large a record it takes, what the agent and its expensive work may
+spend, which platform `platform check` authenticates and how long it waits for
+it, which authorities a certificate the agent imports has to chain to, where,
+how long and how often the agent renews its credential, and where and in what
+batches it delivers what it collects. The governor keeps the budget for scans
+before anything spends it, since no collector scans yet. `modules` and
+`updates.enabled` are the settings this build refuses outright: an agent that
+accepted them would be promising collection it cannot do and updates it cannot
+install.
 
 ## Collection
 
@@ -1019,9 +1024,9 @@ lose.
 | How long a record is kept | `spool.max_age`, and never longer than the platform admits it | the spool |
 | Records in memory | none are queued: a record is on disk or it was refused | admission |
 | One record | a batch that carries it alone: `transport.max_batch_bytes` less 1 KiB | the spool |
-| One batch | `transport.max_batch_bytes`, `transport.max_events_per_batch` and `transport.max_inventory_records_per_batch` | delivery, when it arrives |
-| Uploads at once | `resources.max_concurrent_uploads` | the governor, for delivery when it arrives |
-| Upload bandwidth | `transport.max_upload_bytes_per_second` | the governor, for delivery when it arrives |
+| One batch | `transport.max_batch_bytes`, `transport.max_events_per_batch` and `transport.max_inventory_records_per_batch` | delivery |
+| Uploads at once | `resources.max_concurrent_uploads` | the governor, for delivery |
+| Upload bandwidth | `transport.max_upload_bytes_per_second` | the governor, for delivery |
 | Scans | `resources.max_concurrent_scans`, `resources.max_scan_bytes_per_second` and the room left in the stream a scan admits to | the governor, for collectors when they arrive |
 | Reading a source as it is written | the room admission leaves | collectors, when they arrive |
 
@@ -1062,7 +1067,7 @@ the clock is set back.
 A record the platform refuses for good is quarantined: it settles as
 quarantined, is reported once as `spool_records_quarantined` with the reason the
 platform gave, cut to what one message carries, and is never sent again.
-Deciding which refusals are for good belongs to delivery.
+[Delivery](#delivery) decides which refusals are for good.
 
 Nothing is evicted. The spool never drops a record to make room for another: a
 record leaves it undelivered only when it is counted as lost, expired or
@@ -1291,9 +1296,8 @@ What the agent presents:
   connections, and idle connections made with the one before are closed;
 - the credential is the key and the certificate of the installation's active
   credential generation, opened where [enrollment](#enrollment) keeps them and
-  checked to belong together before the transport presents them. The running
-  agent presents it to renew it; delivery, which sends records, arrives with its
-  own work;
+    checked to belong together before the transport presents them. The running
+  agent presents it to renew it and to deliver records;
 - the authorities the transport authenticates the platform against change while
   it runs when a renewal adopts new ones: from the next connection on, while a
   connection already made finishes what it carries.
@@ -1320,8 +1324,8 @@ of a record: a certificate naming no agent the platform reads
 (`agent_not_registered`), and one it no longer admits because it was revoked,
 decommissioned or disabled (`agent_not_admitted`). An exclusion refuses no record, whatever record it
 points at: every record stays as valid as it was, none is quarantined for it,
-and none is sent as that agent until an operator acts. Delivery, when it
-arrives, keeps to that.
+and none is sent as that agent until an operator acts. [Delivery](#delivery)
+keeps to that.
 
 What a request may take:
 
@@ -1377,6 +1381,173 @@ What it does not claim:
   issued for the name is the platform, and which authorities those are is the
   operator's decision;
 - a deployment that reaches the platform only through a proxy is not supported.
+
+## Delivery
+
+`internal/delivery` sends the platform what the spool holds, and decides from
+each answer what becomes of the records a batch carried. It is composed once the
+installation is enrolled: an installation that is not keeps what it admits in
+the spool until it is. It reads records from the spool, frames them into
+batches, sends them through the transport within the governor's budget, and
+settles them in the spool. It never decodes a record to send it, and never
+changes one.
+
+A record is what admission hands the spool. On the events route it is the wire
+encoding of one `seagull.event.v1.Event`, whose `event_id` is the identifier it
+was admitted under; on the inventory route, one `seagull.inventory.v1.Record`,
+whose `record_id` is. A batch is the batch message of its route,
+`seagull.ingest.v1.EventBatch` or `seagull.inventory.v1.RecordBatch`, with an
+identifier drawn at random, the protocol version, and each record framed as one
+element of it, byte for byte as it was admitted: `internal/protocol` builds it
+from the field numbers the contracts declare. A record the agent cannot read as
+one of its route, or that carries another identifier than the one it was
+admitted under, is quarantined without being sent, since no batch that carried
+it could be read, and `record_not_delivered` says so.
+
+Each route delivers on its own, one batch at a time and in the order its records
+were admitted, so a route the platform does not take holds nothing back on the
+other. Events are critical and inventory is bulk, as the governor serves them. A
+batch holds at most `transport.max_batch_bytes`, its envelope included, at most
+`transport.max_events_per_batch` events or
+`transport.max_inventory_records_per_batch` inventory records, and inventory
+records holding 20,000 items at most between them, the recorded platform's
+ceiling, and it always holds one record, even one a lower setting made larger
+than the rest. A batch keeps to the settings in force when it is made, so a
+reload shapes the next one.
+
+What each answer means is read by `internal/protocol`, and what delivery does
+follows from it:
+
+| The platform answered | Outcome | What delivery does |
+| --- | --- | --- |
+| 200 with an acknowledgement that is `accepted`, `durable` and counts every record the batch carried | durable | writes the acknowledgement down in the spool, and only then drops the records |
+| 200 with an acknowledgement short of that; 408, 429 or 5xx, such as `rate_limited`, `gateway_at_capacity` or `backbone_unavailable`; 400 `unreadable_body`; or no answer | unconfirmed | sends the same batch again soon |
+| 422 `invalid_event` or `invalid_record` refusing one record for what it holds | refused | quarantines the record, sends the records before it again at once, and the ones after it in smaller batches |
+| 413, or 422 `batch_too_large` | too large | sends the first half again at once and the rest in batches half as large, and quarantines a record the platform refuses alone |
+| 400 `malformed_payload` | undecodable | halves the batch the same way, until the record the platform cannot decode is alone, and quarantines it |
+| 403 refusing the agent itself | agent refused | keeps every record, and sends the same batch again later |
+| 426, or a record carrying a version or a value the platform does not speak | incompatible | the same |
+| a record refused over a moment the platform's clock has not reached | disputed | the same |
+| anything else: another status or code, a success that acknowledges nothing, a reply larger than `transport.max_response_bytes`, a listener the agent cannot authenticate or present its credential to | unexpected | the same |
+
+Only a durable acknowledgement drops a record, and an HTTP success alone never
+does. The acknowledgement carries no batch identifier and no record, so what it
+answers is the request it is the reply to: a route sends one request at a time
+and reads its reply before it sends anything else, and an acknowledgement
+settles the records of that batch and no others. It has to say the batch was
+accepted and made durable, and count exactly the records the batch carried,
+inventory records rather than the items they hold. A reply that arrives after
+the agent stopped waiting for it is never read: the transport closed its
+connection, and the batch is sent again. The records are dropped only once the
+acknowledgement is written down in the spool's ledger, and a ledger the spool
+cannot write keeps the route waiting, as `delivery_not_settled`, until it can:
+nothing is read past records that were delivered but not written down.
+
+A batch sent again is the same batch, with its identifier and its bytes, for as
+long as the agent holds it. A batch built again, a half of one the platform
+found too large, the records before one it refused, or whatever the spool still
+holds when the agent starts, gets an identifier of its own, and carries its
+records under their identifiers and as the bytes they were admitted as.
+
+The platform checks every record of a batch before it publishes any, but it can
+publish part of a batch before its backbone fails, and an answer can be lost
+after the platform published all of it. Either way the agent does not know, and
+sends the batch again: the platform then holds records it already had, under the
+same identifiers and with the same bytes. At the recorded commit the gateway
+takes such a batch again whole, and its store keeps an event once by its
+identifier and its time, which a batch sent again carries unchanged: that is
+what makes sending it again safe.
+
+A refusal of one record says the records before it passed what the platform
+checks, since it checks them in order and stops at the first it refuses; those
+after it were never looked at. So the records before it go again at once as a
+batch of their own, and those after it in batches half as large as the one that
+carried the refused record, growing again with each batch the platform takes. A
+refusal that is not the record's fault is never a reason to quarantine it:
+
+- a refusal of the agent itself is an exclusion, as
+  [Reaching the platform](#reaching-the-platform) describes, and every record
+  waits for an operator to act;
+- a refused version, or a refused value the agent's contracts declare, is an
+  incompatibility, as [Compatibility](#compatibility-with-the-platform)
+  describes: the platform does not speak it yet;
+- a record refused over one of its times is disputed when the platform's clock,
+  which the `Date` of the answer tells, had not reached that moment although
+  the agent's clock had when it admitted the record: the two clocks disagree.
+  A moment the platform's clock had passed is older than the platform takes,
+  and only grows older, and a moment later than the agent admitted the record
+  at, by more than the five minutes the platform tolerates, is the record's
+  own mistake: both are refused for good.
+
+What is sent again waits: a second after the first unconfirmed answer, doubling
+up to five minutes, and a minute after the first of any other, doubling up to an
+hour, each spread by a fifth so a fleet does not return at once. A durable
+answer ends the wait. `delivery_failed` reports every attempt that failed, as a
+warning when the platform did not confirm and as an error with a `recovery`
+otherwise, with the batch, its records, the outcome and the next attempt;
+`delivery_resumed` says how long the route failed once it delivers again;
+`record_refused` names each record quarantined and the platform's reason, and
+`batch_split` each batch sent again in halves. A stop cancels the request on its
+way and settles nothing; the records are sent again after the agent starts.
+
+The evidence:
+
+- `internal/protocol` is tested against acknowledgements and refusals of every
+  kind, checks that its batches are the bytes the contracts' own encoder writes,
+  and fuzzes how it identifies a record against what the contracts decode;
+- `internal/delivery` is tested against an emulated platform that speaks TLS 1.3
+  alone, asks for the agent's certificate, decodes each batch with the published
+  contracts, publishes records and keeps each once by its identifier: batches
+  within their limits, a batch sent again unchanged through a partial
+  publication, an unconfirmed acknowledgement, a miscount, a page that is no
+  acknowledgement and a lost connection, refused records, batches too large or
+  undecodable, refusals of the agent, of its protocol, of a schema and of a
+  clock, records the agent cannot read, a route refused while the other
+  delivers, a late answer, a stop, and records admitted while the route waits;
+- a process delivering a spool is killed, with SIGKILL, before a batch is sent,
+  while it is on its way, after the platform published it and before it
+  answered, after the answer and before the acknowledgement is written down,
+  and after it is written down and before the segment is removed; the spool is
+  then delivered again. Every record reaches the platform's store once, as the
+  bytes it was admitted as, and the only records the platform receives twice
+  are those it held without the agent having written that down. Another test
+  kills a process delivering over and over at random moments, while the
+  platform fails some batches after publishing part of them, loses its answers
+  to others and miscounts others, and checks after every kill that each record
+  the spool no longer holds is in the platform's store;
+- the answers were recorded from the ingest gateway of the recorded backend
+  commit, driven by that commit's own end-to-end harness, and
+  `tests/compatibility` checks that the agent reads every one of them, the
+  earlier recordings included, as it means: a batch sent again under another
+  identifier, taken again whole, and batches refused for their size, their
+  encoding, their identifier, their media type, the times of a record, a
+  backbone that did not take them, an agent sending too fast and a gateway
+  holding all it may. It also checks that every batch the gateway read is the
+  bytes the agent builds from its records;
+- the batch sent again was admitted a second time by that commit's own admitter
+  publishing to a real broker: both batches were acknowledged as durable, and
+  the broker held every record twice, the same but for what the gateway stamps
+  on it.
+
+What delivery does not claim:
+
+- that the platform keeps a record sent again once: at the recorded commit its
+  store keeps an event once by its identifier and time, which the backend's own
+  integration suite checks, and the agent's evidence stops at the broker;
+- that a route moves past a record the platform does not speak yet, or whose
+  time it disputes: the records after it wait until the platform takes it or it
+  expires;
+- that a batch holding several records the platform refuses is settled in one
+  request: the platform names one refused record at a time;
+- `Retry-After`: the agent waits as described above, whatever the platform
+  suggests;
+- more than two uploads at once: each route sends one batch at a time, so
+  `resources.max_concurrent_uploads` above two changes nothing yet. With two at
+  once, an inventory batch shares the upload budget with events, which go first,
+  and can take up to five times as long as alone; one that outlasts
+  `transport.request_timeout` is sent again;
+- that a quarantined record can be sent again: it is counted and reported, not
+  set aside for an operator.
 
 ## What the agent writes down
 
@@ -1437,9 +1608,10 @@ What none of that claims:
   what looks like a secret. When collection arrives, each collector drops what
   its source holds before it is admitted, where the source is understood;
 - the spool keeps records as admission hands them and never looks inside one,
-  so what a record holds is decided before it is admitted: admission, which
+    so what a record holds is decided before it is admitted: admission, which
   arrives with the first collector, reads the same rule. What the agent writes
-  about a record is where it is in the spool, never what it holds.
+  about a record is where it is in the spool and the identifier it was admitted
+  under, never what it holds.
 
 ## Boundaries
 
@@ -1470,6 +1642,10 @@ conventions:
   or through another package, and imports no TLS package itself: it is handed
   the listener, the authorities and the key lifetime it works with, and reaches
   the platform through the transport alone;
+- `internal/delivery` reads no configuration, reaches no collector and holds no
+  key, directly or through another package, and imports no TLS package itself:
+  it is handed the listener, the batch limits, the spool and the transport it
+  delivers with, and presenting the credential is the transport's;
 - `internal/enrollment` imports neither the configuration, nor the transport,
   nor an HTTP, gRPC, RPC or TLS package, directly or through another package:
   the request and the certificate travel through the operator, and it is handed
@@ -1559,7 +1735,9 @@ What one side does not know follows from the same rule:
 `tests/compatibility/testdata` holds exchanges recorded from the ingest gateway
 of a backend commit, driven in process by that commit's end-to-end harness: the
 bytes of every batch sent and of every answer, including batches sent under a
-certificate the platform refuses the agent of. Beside them are the exchanges of
+certificate the platform refuses the agent of, and the answers the same gateway
+gives an agent delivering, as [Delivery](#delivery) describes, with a batch sent
+again that was also measured on a real broker. Beside them are the exchanges of
 [enrollment](#enrollment) and [renewal](#renewal), recorded from the control
 plane of the same commit with the agent's own binary asking for, importing and
 renewing the certificates, and the measurement of how long that commit takes to
