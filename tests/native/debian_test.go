@@ -25,8 +25,13 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
+	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
+	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
 
 var packaged = flag.String("package", "", "the Debian package the gate installs on this host, as root")
@@ -476,19 +481,47 @@ func admit(directory string) int {
 		return 1
 	}
 	defer held.Close()
-	counts := map[spool.Stream]int{spool.Events: admittedEvents, spool.Inventory: admittedItems}
-	for _, stream := range []spool.Stream{spool.Events, spool.Inventory} {
-		var records []spool.Record
-		for i := range counts[stream] {
-			records = append(records, spool.Record{ID: fmt.Sprintf("native-%s-%d", stream, i), Payload: []byte("admitted while the agent was stopped")})
-		}
-		if _, err := held.Admit(stream, records...); err != nil {
+	now := timestamppb.Now()
+	var records []spool.Record
+	for _, id := range admittedIDs("events", admittedEvents) {
+		payload, err := proto.Marshal(&eventv1.Event{
+			EventId: id, SchemaVersion: 1, EventClass: eventv1.EventClass_EVENT_CLASS_AUTHENTICATION,
+			Time: &eventv1.Timestamps{EventTime: now, ObservedTime: now},
+		})
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
+		records = append(records, spool.Record{ID: id, Payload: payload})
 	}
+	if _, err := held.Admit(spool.Events, records...); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	records = nil
+	for _, id := range admittedIDs("inventory", admittedItems) {
+		payload, err := proto.Marshal(&inventoryv1.Record{RecordId: id, SchemaVersion: 1, Kind: inventoryv1.Kind_KIND_PACKAGE, Mode: inventoryv1.Mode_MODE_SNAPSHOT, CollectedAt: now})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		records = append(records, spool.Record{ID: id, Payload: payload})
+	}
+	if _, err := held.Admit(spool.Inventory, records...); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	counts := map[spool.Stream]int{spool.Events: admittedEvents, spool.Inventory: admittedItems}
 	fmt.Printf("%d %d\n", counts[spool.Events], counts[spool.Inventory])
 	return 0
+}
+
+func admittedIDs(stream string, count int) []string {
+	var ids []string
+	for i := range count {
+		ids = append(ids, fmt.Sprintf("native-%s-%d", stream, i))
+	}
+	return ids
 }
 
 // The same package at the next revision, which is what an upgrade installs:
