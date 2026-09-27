@@ -282,6 +282,14 @@ func (s *Spool) Quarantine(stream Stream, reason string, sequences ...uint64) er
 	return kept.settle(sequences, quarantined, reason)
 }
 
+func (s *Spool) Admitted(stream Stream) <-chan struct{} {
+	kept, err := s.queue(stream)
+	if err != nil {
+		return announced()
+	}
+	return kept.admitted()
+}
+
 func (s *Spool) Room(stream Stream) int64 {
 	kept, err := s.queue(stream)
 	if err != nil {
