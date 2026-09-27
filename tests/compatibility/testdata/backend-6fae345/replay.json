@@ -1,0 +1,39 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "6fae3457bb2b721fc891e1c80bf12a5f3fc408c2",
+    "contracts": "v0.14.0",
+    "broker": "redpandadata/redpanda:v24.2.20, one node, --smp=1 --overprovisioned, on the loopback of one host"
+  },
+  "recorded_at": "2026-09-27T16:30:19Z",
+  "measured": "the requests of events-original and events-replayed in delivery.json, admitted in that order by the gateway's own admitter publishing to a topic of a real broker, and the topic read back whole",
+  "batches": [
+    {
+      "request": "events-original",
+      "batch_id": "0190f5d2-7c3e-7a41-9b6e-000000000001",
+      "accepted": true,
+      "durable": true,
+      "received": 3
+    },
+    {
+      "request": "events-replayed",
+      "batch_id": "0190f5d2-7c3e-7a41-9b6e-000000000002",
+      "accepted": true,
+      "durable": true,
+      "received": 3
+    }
+  ],
+  "backbone": {
+    "records": 6,
+    "copies": {
+      "replayed-0000": 2,
+      "replayed-0001": 2,
+      "replayed-0002": 2
+    },
+    "copies_differ_only_in_reception": true,
+    "reception_batches": [
+      "0190f5d2-7c3e-7a41-9b6e-000000000001",
+      "0190f5d2-7c3e-7a41-9b6e-000000000002"
+    ]
+  }
+}

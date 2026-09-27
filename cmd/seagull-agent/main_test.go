@@ -56,6 +56,8 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/transport"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
+	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
+	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 )
 
 const childArguments = "SEAGULL_AGENT_TEST_ARGUMENTS"
@@ -532,6 +534,103 @@ func TestAnAgentThatIsNotEnrolledHasNothingToRenew(t *testing.T) {
 	}
 	if !slices.Equal(components, []any{"configuration"}) {
 		t.Fatalf("an agent that is not enrolled ran %v", components)
+	}
+}
+
+func TestAnEnrolledAgentDeliversWhatItsSpoolHoldsAsItRuns(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	signing := listening(t, trustBundle(path))
+	var mu sync.Mutex
+	var received, agents []string
+	ingest := signing.serving(t, &served{}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		var batch ingestv1.EventBatch
+		if err != nil || r.URL.Path != "/v1/events" || proto.Unmarshal(body, &batch) != nil {
+			http.Error(w, "not a batch of events", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		for _, event := range batch.GetEvents() {
+			received = append(received, event.GetEventId())
+		}
+		agents = append(agents, r.TLS.PeerCertificates[0].Subject.CommonName)
+		mu.Unlock()
+		acknowledged, _ := proto.Marshal(&ingestv1.BatchAck{Accepted: true, Durable: true, Received: uint32(len(batch.GetEvents()))})
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.Write(acknowledged)
+	}))
+	rewrite(t, path, state, map[string]string{"server": servers(ingest.URL, signing.listen(t).URL, trustBundle(path))})
+	enrollWith(t, path, signing)
+	held, release := spoolIn(t, state)
+	var ids []string
+	for i := range 3 {
+		id := fmt.Sprintf("event-%d", i)
+		payload, err := proto.Marshal(&eventv1.Event{EventId: id, SchemaVersion: protocol.EventSchemaVersion})
+		if err == nil {
+			_, err = held.Admit(spool.Events, spool.Record{ID: id, Payload: payload})
+		}
+		if err != nil {
+			t.Fatalf("admit %s: %v", id, err)
+		}
+		ids = append(ids, id)
+	}
+	release()
+
+	entries, stop := running(t, path)
+	var components []any
+	deadline := time.After(10 * time.Second)
+	for delivered := false; !delivered; {
+		select {
+		case entry := <-entries:
+			if entry["msg"] == "component_started" {
+				components = append(components, entry["component"], entry["policy"])
+			}
+		case <-time.After(10 * time.Millisecond):
+		case <-deadline:
+			t.Fatalf("the platform received %v within 10s", received)
+		}
+		mu.Lock()
+		delivered = len(received) == len(ids)
+		mu.Unlock()
+	}
+	code, rest := stop()
+	for _, entry := range rest {
+		if entry["msg"] == "component_started" {
+			components = append(components, entry["component"], entry["policy"])
+		}
+	}
+	if code != 0 || !slices.Equal(components, []any{"configuration", "essential", "renewal", "optional", "delivery", "essential"}) {
+		t.Fatalf("the agent exited with %d after running %v", code, components)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(received, ids) || slices.ContainsFunc(agents, func(agent string) bool { return agent != "web-01" }) {
+		t.Fatalf("the platform received %v from %v", received, agents)
+	}
+	opened, _ := logged(t, serveStopped(t, path), "spool_opened")
+	if events, _ := opened["events"].(map[string]any); events["outstanding"] != float64(0) || events["delivered"] != float64(3) {
+		t.Fatalf("after delivering, the agent opened its spool as %v", opened)
+	}
+}
+
+func TestADeliveryThePlatformHoldsBackSaysWhatToDo(t *testing.T) {
+	path, state := "/etc/seagull-agent/agent.json", "/var/lib/seagull-agent"
+	for _, c := range []struct {
+		err  error
+		says string
+	}{
+		{err: &protocol.Exclusion{Reason: protocol.Unidentified}, says: "reads no agent in the certificate this installation presents"},
+		{err: &protocol.Exclusion{Reason: protocol.Unregistered}, says: "registers the agent this installation was enrolled as"},
+		{err: &protocol.Exclusion{Reason: protocol.Unadmitted}, says: `replaces the installation with "seagull-agent -config /etc/seagull-agent/agent.json installation replace"`},
+		{err: &protocol.Incompatibility{Field: "event_class", Value: "EVENT_CLASS_AUTHENTICATION", Record: 0}, says: "run an agent release the platform takes"},
+		{err: &protocol.Dispute{Field: "time.event_time"}, says: "check the clock of this host against the platform's"},
+		{err: &protocol.Refusal{Status: http.StatusNotFound}, says: "server.ingest_url in /etc/seagull-agent/agent.json names the platform's ingest listener"},
+		{err: fmt.Errorf("%w: text/html", protocol.ErrNoAcknowledgement), says: "server.ingest_url in /etc/seagull-agent/agent.json"},
+	} {
+		if told := recovery(path, state, fmt.Errorf("deliver events: %w", c.err)); !strings.Contains(told, c.says) {
+			t.Errorf("%v is recovered from with %q", c.err, told)
+		}
 	}
 }
 

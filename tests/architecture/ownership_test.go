@@ -118,6 +118,24 @@ var dependencyRules = []dependencyRule{
 		reason:    "renewal reaches the platform through the transport alone, which authenticates it and presents the agent's credential; renewal only checks certificates the platform issued or published",
 	},
 	{
+		packages: "internal/delivery",
+		forbidden: []string{
+			modulePath + "/internal/config",
+			modulePath + "/internal/modules",
+			modulePath + "/internal/identity",
+			modulePath + "/internal/pki",
+			modulePath + "/internal/enrollment",
+			modulePath + "/internal/renewal",
+		},
+		transitive: true,
+		reason:     "delivery sends what the spool holds with what it is handed: the listener, the batch limits and the transport come from the composition root, the credential is the transport's to present, and no collector takes part in it",
+	},
+	{
+		packages:  "internal/delivery",
+		forbidden: []string{"crypto/tls"},
+		reason:    "delivery reaches the platform through the transport alone, which authenticates it and presents the agent's credential; delivery decides what to send and what an answer means",
+	},
+	{
 		packages:   "internal/governor",
 		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
 		transitive: true,
@@ -431,6 +449,43 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				ImportPath: modulePath + "/internal/renewal",
 				Imports:    []string{"crypto/x509", "net/http", contractsPath + "/gen/go/seagull/agent/v1", modulePath + "/internal/enrollment", modulePath + "/internal/transport"},
 				Deps:       []string{"crypto/tls", "crypto/x509", "net/http", contractsPath + "/gen/go/seagull/agent/v1", modulePath + "/internal/enrollment", modulePath + "/internal/transport"},
+			},
+		},
+		{
+			name: "delivery reading the listener it sends to from the configuration",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/delivery",
+				Imports:    []string{modulePath + "/internal/config", modulePath + "/internal/spool"},
+				Deps:       []string{modulePath + "/internal/config", modulePath + "/internal/platform/files", modulePath + "/internal/spool"},
+			},
+			want: []string{modulePath + "/internal/config"},
+		},
+		{
+			name: "delivery opening the key it presents",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/delivery",
+				Imports:    []string{modulePath + "/internal/transport"},
+				Deps:       []string{modulePath + "/internal/identity", modulePath + "/internal/pki", modulePath + "/internal/transport"},
+			},
+			want: []string{modulePath + "/internal/identity", modulePath + "/internal/pki"},
+		},
+		{
+			name: "delivery making its own connections",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/delivery",
+				Imports:    []string{"crypto/tls", "net/http"},
+				Deps:       []string{"crypto/tls", "net/http"},
+			},
+			want: []string{"crypto/tls"},
+		},
+		{
+			name: "delivery sending through the transport what the spool holds",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/delivery",
+				Imports: []string{modulePath + "/internal/governor", modulePath + "/internal/protocol", modulePath + "/internal/spool",
+					modulePath + "/internal/transport", contractsPath + "/gen/go/seagull/ingest/v1"},
+				Deps: []string{"crypto/tls", "net/http", modulePath + "/internal/governor", modulePath + "/internal/protocol",
+					modulePath + "/internal/spool", modulePath + "/internal/transport", contractsPath + "/gen/go/seagull/ingest/v1"},
 			},
 		},
 		{

@@ -23,13 +23,17 @@ const (
 )
 
 // What the recorded platform admits beyond the shape of a record: events and
-// inventory no older than these ages, and a batch within its body ceiling, of
-// which the batch identifier, the protocol version and the framing of a record
-// take less than BatchEnvelopeBytes when the batch carries one record.
+// inventory no older than these ages and no later than its own clock by more
+// than MaxClockSkew, inventory batches of at most MaxInventoryItemsPerBatch
+// items, and a batch within its body ceiling, of which the batch identifier,
+// the protocol version and the framing of a record take less than
+// BatchEnvelopeBytes when the batch carries one record.
 const (
-	MaxEventAge        = 168 * time.Hour
-	MaxInventoryAge    = 720 * time.Hour
-	BatchEnvelopeBytes = 1 << 10
+	MaxEventAge               = 168 * time.Hour
+	MaxInventoryAge           = 720 * time.Hour
+	MaxClockSkew              = 5 * time.Minute
+	MaxInventoryItemsPerBatch = 20_000
+	BatchEnvelopeBytes        = 1 << 10
 )
 
 const (
@@ -80,7 +84,11 @@ func incompatible[R proto.Message](version uint32, records []R, refusal *ingestv
 	if index < 0 || index >= len(records) {
 		return nil, false
 	}
-	value, meant := refused(records[index].ProtoReflect(), refusal.GetField())
+	return unspoken(records[index].ProtoReflect(), index, refusal)
+}
+
+func unspoken(record protoreflect.Message, index int, refusal *ingestv1.Rejection) (*Incompatibility, bool) {
+	value, meant := refused(record, refusal.GetField())
 	if !meant {
 		return nil, false
 	}

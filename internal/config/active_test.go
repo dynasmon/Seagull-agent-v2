@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
 )
@@ -36,10 +37,18 @@ func TestAReloadThatChangesWhatTheAgentSettledAsItStartedIsRefused(t *testing.T)
 			settings.Identity.StateDirectory = "/var/lib/seagull-agent-elsewhere"
 		},
 		"what holds its keys": func(settings *config.Config) { settings.Identity.KeyProvider = "tpm" },
+		"where it delivers":   func(settings *config.Config) { settings.Server.IngestURL = "https://gateway.example:9443" },
 		"where it renews":     func(settings *config.Config) { settings.Server.RenewalURL = "https://control.example:9446" },
-		"whom it trusts":      func(settings *config.Config) { settings.Server.TrustBundle = "/etc/seagull-agent/other-ca.pem" },
-		"the log it writes":   func(settings *config.Config) { settings.Logging.Format = "text" },
-		"how long it stops":   func(settings *config.Config) { settings.Resources.ShutdownTimeout = config.Duration(0) },
+		"how long it connects": func(settings *config.Config) {
+			settings.Transport.ConnectTimeout = config.Duration(20 * time.Second)
+		},
+		"how long a request takes": func(settings *config.Config) {
+			settings.Transport.RequestTimeout = config.Duration(time.Minute)
+		},
+		"how much of an answer it reads": func(settings *config.Config) { settings.Transport.MaxResponseBytes = 128 << 10 },
+		"whom it trusts":                 func(settings *config.Config) { settings.Server.TrustBundle = "/etc/seagull-agent/other-ca.pem" },
+		"the log it writes":              func(settings *config.Config) { settings.Logging.Format = "text" },
+		"how long it stops":              func(settings *config.Config) { settings.Resources.ShutdownTimeout = config.Duration(0) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			active := config.Activate(started)

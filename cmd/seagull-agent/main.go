@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
+	"github.com/dynasmon/Seagull-agent-v2/internal/delivery"
 	"github.com/dynasmon/Seagull-agent-v2/internal/enrollment"
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
@@ -210,6 +211,19 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 			return refused(err)
 		}
 		composed = append(composed, agentruntime.Component{Name: "renewal", Policy: agentruntime.Optional, Run: renewer.Run})
+		delivered, err := delivery.New(delivery.Options{
+			Spool:    spooled,
+			Client:   client,
+			Governor: governed,
+			URL:      settings.Server.IngestURL,
+			Batching: func() delivery.Batching { return batching(held.active.Settings()) },
+			Logger:   logger,
+			Recovery: func(err error) string { return recovery(path, state, err) },
+		})
+		if err != nil {
+			return refused(err)
+		}
+		composed = append(composed, agentruntime.Component{Name: "delivery", Policy: agentruntime.Essential, Run: delivered.Run})
 	}
 	agent, err := agentruntime.New(logger, time.Duration(settings.Resources.ShutdownTimeout), composed...)
 	if err != nil {
@@ -462,6 +476,14 @@ func limits(settings config.Config) spool.Limits {
 			spool.Events:    min(kept, protocol.MaxEventAge),
 			spool.Inventory: min(kept, protocol.MaxInventoryAge),
 		},
+	}
+}
+
+func batching(settings config.Config) delivery.Batching {
+	return delivery.Batching{
+		MaxBytes:            int(settings.Transport.MaxBatchBytes),
+		MaxEvents:           settings.Transport.MaxEventsPerBatch,
+		MaxInventoryRecords: settings.Transport.MaxInventoryRecordsPerBatch,
 	}
 }
 
@@ -880,6 +902,25 @@ func recovery(path, state string, err error) string {
 			return "nothing: the agent asks again later, and the platform's operators find in its log why it did not answer"
 		}
 		return "check that server.renewal_url in " + path + " names the platform's renewal listener, and run an agent release that platform renews"
+	}
+	var excluded *protocol.Exclusion
+	var unspoken *protocol.Incompatibility
+	var disputed *protocol.Dispute
+	var answered *protocol.Refusal
+	switch {
+	case errors.As(err, &excluded) && excluded.Reason == protocol.Unidentified:
+		return "the platform reads no agent in the certificate this installation presents: " + reissuing
+	case errors.As(err, &excluded) && excluded.Reason == protocol.Unregistered:
+		return "the platform knows no such agent: an operator registers the agent this installation was enrolled as; the records wait meanwhile, and are never sent as another agent"
+	case errors.As(err, &excluded):
+		return "the platform no longer admits this agent: an operator admits it again, or, when it was revoked or decommissioned, replaces the installation with " + replacement +
+			" and enrolls it as a new agent, and the records this installation holds are never sent as that one"
+	case errors.As(err, &unspoken):
+		return "run an agent release the platform takes, or a platform that takes what this agent sends: the records wait meanwhile, and expire when neither comes in time"
+	case errors.As(err, &disputed):
+		return "check the clock of this host against the platform's: the records wait until the platform admits the moments they carry, or until they expire"
+	case errors.As(err, &answered), errors.Is(err, protocol.ErrNoAcknowledgement):
+		return "check that server.ingest_url in " + path + " names the platform's ingest listener, and run an agent release that platform takes"
 	}
 	switch {
 	case errors.Is(err, config.ErrInvalid):

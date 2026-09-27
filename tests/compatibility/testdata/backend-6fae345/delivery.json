@@ -1,0 +1,158 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "6fae3457bb2b721fc891e1c80bf12a5f3fc408c2",
+    "contracts": "v0.14.0"
+  },
+  "recorded_at": "2026-09-27T16:28:09Z",
+  "exchanges": [
+    {
+      "name": "events-original",
+      "route": "POST /v1/events",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:09 GMT",
+      "published": 3
+    },
+    {
+      "name": "events-replayed",
+      "route": "POST /v1/events",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:09 GMT",
+      "published": 6
+    },
+    {
+      "name": "events-too-old",
+      "route": "POST /v1/events",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:09 GMT",
+      "published": 6
+    },
+    {
+      "name": "events-ahead",
+      "route": "POST /v1/events",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:09 GMT",
+      "published": 6
+    },
+    {
+      "name": "events-too-many",
+      "route": "POST /v1/events",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:09 GMT",
+      "published": 6
+    },
+    {
+      "name": "events-malformed-payload",
+      "route": "POST /v1/events",
+      "status": 400,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:09 GMT",
+      "published": 6
+    },
+    {
+      "name": "events-unsupported-media-type",
+      "route": "POST /v1/events",
+      "status": 415,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:09 GMT",
+      "published": 6
+    },
+    {
+      "name": "events-malformed-batch-id",
+      "route": "POST /v1/events",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:09 GMT",
+      "published": 6
+    },
+    {
+      "name": "inventory-original",
+      "route": "POST /v1/inventory",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:09 GMT",
+      "published": 2
+    },
+    {
+      "name": "inventory-replayed",
+      "route": "POST /v1/inventory",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:09 GMT",
+      "published": 4
+    },
+    {
+      "name": "inventory-too-many-items",
+      "route": "POST /v1/inventory",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:10 GMT",
+      "published": 4
+    },
+    {
+      "name": "inventory-too-old",
+      "route": "POST /v1/inventory",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:10 GMT",
+      "published": 4
+    },
+    {
+      "name": "inventory-ahead",
+      "route": "POST /v1/inventory",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:10 GMT",
+      "published": 4
+    },
+    {
+      "name": "events-backbone-unavailable",
+      "route": "POST /v1/events",
+      "status": 503,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:10 GMT",
+      "retry_after": "5",
+      "published": 0
+    },
+    {
+      "name": "inventory-backbone-unavailable",
+      "route": "POST /v1/inventory",
+      "status": 503,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:10 GMT",
+      "retry_after": "5",
+      "published": 0
+    },
+    {
+      "name": "events-rate-limited",
+      "route": "POST /v1/events",
+      "status": 429,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:10 GMT",
+      "retry_after": "1",
+      "published": 1
+    },
+    {
+      "name": "events-body-too-large",
+      "route": "POST /v1/events",
+      "status": 413,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:10 GMT",
+      "published": 0
+    },
+    {
+      "name": "events-at-capacity",
+      "route": "POST /v1/events",
+      "status": 503,
+      "content_type": "application/x-protobuf",
+      "date": "Sun, 27 Sep 2026 16:28:10 GMT",
+      "retry_after": "1",
+      "published": 0
+    }
+  ]
+}
