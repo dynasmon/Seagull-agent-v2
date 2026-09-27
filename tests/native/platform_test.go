@@ -20,6 +20,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,6 +31,8 @@ import (
 
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
+	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
+	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
 
 // The platform an installed agent enrolls with and renews through, as the
@@ -42,6 +46,9 @@ type platform struct {
 	renewal   *httptest.Server
 	renewals  atomic.Int32
 	renewed   atomic.Pointer[string]
+	taking    atomic.Bool
+	mu        sync.Mutex
+	stored    map[string][]string
 }
 
 func emulate(t *testing.T) *platform {
@@ -67,8 +74,8 @@ func emulate(t *testing.T) *platform {
 	if err != nil {
 		t.Fatalf("parse the certificate of the platform's authority: %v", err)
 	}
-	emulated := &platform{authority: authority, key: key}
-	emulated.ingest = emulated.listen(t, http.NotFoundHandler())
+	emulated := &platform{authority: authority, key: key, stored: map[string][]string{}}
+	emulated.ingest = emulated.listen(t, http.HandlerFunc(emulated.admit))
 	emulated.renewal = emulated.listen(t, http.HandlerFunc(emulated.renew))
 	return emulated
 }
@@ -160,6 +167,56 @@ func (p *platform) issue(requested []byte, agent string, notBefore, notAfter tim
 			ExpiresAt:         timestamppb.New(certificate.NotAfter),
 		},
 	})
+}
+
+// A batch as the recorded gateway answers one: decoded with the published
+// contracts and acknowledged as durable once its backbone takes it, and refused
+// as not made durable while the backbone does not.
+func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
+	answer := func(status int, message proto.Message) {
+		encoded, _ := proto.Marshal(message)
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(status)
+		w.Write(encoded)
+	}
+	content, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
+	var ids []string
+	switch {
+	case err != nil || r.Method != http.MethodPost:
+	case r.URL.Path == "/v1/events":
+		var batch ingestv1.EventBatch
+		if err = proto.Unmarshal(content, &batch); err == nil {
+			for _, event := range batch.GetEvents() {
+				ids = append(ids, event.GetEventId())
+			}
+		}
+	case r.URL.Path == "/v1/inventory":
+		var batch inventoryv1.RecordBatch
+		if err = proto.Unmarshal(content, &batch); err == nil {
+			for _, record := range batch.GetRecords() {
+				ids = append(ids, record.GetRecordId())
+			}
+		}
+	}
+	if len(ids) == 0 {
+		answer(http.StatusBadRequest, &ingestv1.Rejection{Code: "malformed_payload", Detail: "the batch is not a valid protobuf message", EventIndex: -1})
+		return
+	}
+	if !p.taking.Load() {
+		w.Header().Set("Retry-After", "5")
+		answer(http.StatusServiceUnavailable, &ingestv1.Rejection{Code: "backbone_unavailable", Detail: "the batch was not made durable", EventIndex: -1})
+		return
+	}
+	p.mu.Lock()
+	p.stored[r.URL.Path] = append(p.stored[r.URL.Path], ids...)
+	p.mu.Unlock()
+	answer(http.StatusOK, &ingestv1.BatchAck{Accepted: true, Durable: true, Received: uint32(len(ids))})
+}
+
+func (p *platform) holds(path string) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Sorted(slices.Values(p.stored[path]))
 }
 
 // A renewal as the recorded platform answers one: to the agent the certificate
