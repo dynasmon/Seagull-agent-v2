@@ -46,6 +46,7 @@ type Reply struct {
 	Status      int
 	ContentType string
 	Body        []byte
+	Date        time.Time
 	Peer        []*x509.Certificate
 }
 
@@ -179,7 +180,8 @@ func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
 	if response.TLS != nil {
 		peer = slices.Clone(response.TLS.PeerCertificates)
 	}
-	return Reply{Status: response.StatusCode, ContentType: response.Header.Get("Content-Type"), Body: content, Peer: peer}, nil
+	date, _ := http.ParseTime(response.Header.Get("Date"))
+	return Reply{Status: response.StatusCode, ContentType: response.Header.Get("Content-Type"), Body: content, Date: date, Peer: peer}, nil
 }
 
 // Check authenticates the listener at address without presenting anything,
