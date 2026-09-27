@@ -83,6 +83,7 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "a drop-in bounds the service differently", run: g.override},
 		{name: "removing the package stops the service and keeps the installation", run: g.remove},
 		{name: "installing the package again runs the same installation", run: g.reinstall},
+		{name: "the service delivers its backlog once the platform takes it", run: g.deliver},
 		{name: "purging deletes the installation, its settings and the service's", run: g.purge},
 		{name: "installing after a purge makes a new installation", run: g.fresh},
 	} {
@@ -377,6 +378,33 @@ func (g *gate) reinstall(t *testing.T) {
 	g.same(t, 2)
 	if enabled := answer("systemctl", "is-enabled", unit); enabled != "enabled" {
 		t.Errorf("after the reinstallation the service is %s", enabled)
+	}
+}
+
+func (g *gate) deliver(t *testing.T) {
+	g.platform.taking.Store(true)
+	events, inventory := admittedIDs("events", admittedEvents), admittedIDs("inventory", admittedItems)
+	deadline := time.Now().Add(time.Minute)
+	for !slices.Equal(g.platform.holds("/v1/events"), events) || !slices.Equal(g.platform.holds("/v1/inventory"), inventory) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the platform holds %v and %v:\n%s", g.platform.holds("/v1/events"), g.platform.holds("/v1/inventory"),
+				answer("journalctl", "--no-pager", "--output", "cat", "_SYSTEMD_INVOCATION_ID="+g.invocation))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if resumed := await(t, g.invocation, "delivery_resumed", 10*time.Second); resumed["stream"] == nil {
+		t.Errorf("the agent reported %v as it delivered again", resumed)
+	}
+	run(t, "systemctl", "reset-failed", unit)
+	run(t, "systemctl", "restart", unit)
+	g.invocation = started(t, g.invocation)
+	opened := await(t, g.invocation, "spool_opened", 10*time.Second)
+	for stream, count := range map[string]int{"events": admittedEvents, "inventory": admittedItems} {
+		held, _ := opened[stream].(map[string]any)
+		if held["outstanding"] != float64(0) || held["delivered"] != float64(count) {
+			t.Errorf("after delivering, the agent read back %s as %v", stream, held)
+		}
+		owns(t, filepath.Join(state, "spool", stream, "ledger"), g.uid, g.gid, 0o600)
 	}
 }
 
