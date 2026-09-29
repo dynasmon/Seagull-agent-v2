@@ -309,8 +309,11 @@ func TestARenewalThatFailsIsRetriedWithinItsBounds(t *testing.T) {
 			t.Fatalf("logged %v", entry)
 		}
 		wait := next.Sub(at)
-		if lowest := time.Duration(float64(40*time.Millisecond<<attempt) * 0.79); wait < lowest || wait > 200*time.Millisecond*6/5 {
+		if base := min(40*time.Millisecond<<attempt, 200*time.Millisecond); wait < base*49/100 || wait > base*3/2 {
 			t.Errorf("attempt %d waited %s", attempt+1, wait)
+		}
+		if entry["failure"] != "capacity" {
+			t.Errorf("attempt %d failed as %v", attempt+1, entry["failure"])
 		}
 		if !at.After(previous) {
 			t.Errorf("attempt %d was logged at %s", attempt+1, at)
@@ -416,6 +419,7 @@ func TestAFailureIsLastingOnlyWhenSomebodyHasToAct(t *testing.T) {
 		lasting bool
 	}{
 		"the network":                   {err: fmt.Errorf("%w: connection refused", transport.ErrUnreachable)},
+		"a request never answered":      {err: fmt.Errorf("%w: context deadline exceeded", transport.ErrUnanswered)},
 		"a platform that is busy":       {err: &renewal.Refusal{Status: http.StatusTooManyRequests, Code: "rate_limited"}},
 		"a platform that is down":       {err: &renewal.Refusal{Status: http.StatusServiceUnavailable}},
 		"a revoked agent":               {err: &renewal.Refusal{Status: http.StatusUnprocessableEntity, Code: "illegal_move"}, lasting: true},
