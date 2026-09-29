@@ -32,6 +32,8 @@ const (
 	unreadable = "none: a record the agent cannot read as one its route carries could never be delivered, so it is counted as quarantined"
 )
 
+var errHeld = errors.New("the listener failed while the batch waited to be sent")
+
 type Spool interface {
 	Read(stream spool.Stream, from uint64, most, bytes int) ([]spool.Entry, error)
 	Acknowledge(stream spool.Stream, sequences ...uint64) error
@@ -315,11 +317,10 @@ func (r *route) deliver(ctx context.Context, sent *batch) error {
 	if err != nil {
 		return err
 	}
-	sent.sent++
-	reply, err := r.send(ctx, sent)
-	if err := ctx.Err(); err != nil {
+	reply, err := r.send(ctx, sent, turn)
+	if stopped := ctx.Err(); stopped != nil || errors.Is(err, errHeld) {
 		turn.Abandoned()
-		return err
+		return stopped
 	}
 	verdict := r.judge(sent, reply, err)
 	if verdict.listener {
@@ -347,9 +348,13 @@ func (r *route) deliver(ctx context.Context, sent *batch) error {
 	return nil
 }
 
-func (r *route) send(ctx context.Context, sent *batch) (transport.Reply, error) {
+func (r *route) send(ctx context.Context, sent *batch, turn *link.Turn) (transport.Reply, error) {
 	var reply transport.Reply
 	err := r.options.Governor.Upload(ctx, r.class, func(ctx context.Context, meter *governor.Meter) error {
+		if !turn.Stands() {
+			return errHeld
+		}
+		sent.sent++
 		sending, stop := context.WithCancel(ctx)
 		defer stop()
 		var err error
