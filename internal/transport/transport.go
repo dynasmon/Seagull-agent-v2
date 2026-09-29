@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -24,6 +26,7 @@ const (
 	idle           = 30 * time.Second
 	keepAlive      = 30 * time.Second
 	maxHeaderBytes = 16 << 10
+	longestAsked   = 24 * time.Hour
 )
 
 type Options struct {
@@ -47,6 +50,7 @@ type Reply struct {
 	ContentType string
 	Body        []byte
 	Date        time.Time
+	RetryAfter  time.Duration
 	Peer        []*x509.Certificate
 }
 
@@ -181,7 +185,14 @@ func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
 		peer = slices.Clone(response.TLS.PeerCertificates)
 	}
 	date, _ := http.ParseTime(response.Header.Get("Date"))
-	return Reply{Status: response.StatusCode, ContentType: response.Header.Get("Content-Type"), Body: content, Date: date, Peer: peer}, nil
+	return Reply{
+		Status:      response.StatusCode,
+		ContentType: response.Header.Get("Content-Type"),
+		Body:        content,
+		Date:        date,
+		RetryAfter:  asked(response.Header.Get("Retry-After"), date),
+		Peer:        peer,
+	}, nil
 }
 
 // Check authenticates the listener at address without presenting anything,
@@ -229,6 +240,25 @@ func (c *Client) Check(ctx context.Context, address string) (Peer, error) {
 }
 
 func (c *Client) Close() { c.current.Load().transport.CloseIdleConnections() }
+
+func asked(header string, date time.Time) time.Duration {
+	header = strings.TrimSpace(header)
+	if header != "" && strings.Trim(header, "0123456789") == "" {
+		seconds, err := strconv.ParseInt(header, 10, 64)
+		if err != nil || seconds > int64(longestAsked/time.Second) {
+			return longestAsked
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	at, err := http.ParseTime(header)
+	if err != nil {
+		return 0
+	}
+	if date.IsZero() {
+		date = time.Now()
+	}
+	return min(max(at.Sub(date), 0), longestAsked)
+}
 
 func body(held io.Reader) io.ReadCloser {
 	if held == nil {
