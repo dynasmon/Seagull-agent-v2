@@ -1794,6 +1794,10 @@ conventions:
   nothing of the contracts: it authenticates connections and moves bytes, while
   what they carry, whose records they are and where the credential it presents
   is kept belong to others;
+- `internal/link` imports nothing of the agent but the transport and
+  `internal/secrets`, and nothing of the contracts: it keeps whether a listener
+  answers and when it is tried again, while what travels to the listener, what
+  an answer means and whose records wait on it belong to delivery and renewal;
 - no production code names `InsecureSkipVerify`, or uses the default client,
   the default transport or the environment's proxy of `net/http`: the agent
   sends only to a platform it authenticated, over a client whose every bound it
