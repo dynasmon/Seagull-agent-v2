@@ -182,6 +182,13 @@ func (t *Turn) Failed(class Class, asked time.Duration, reason error) time.Time 
 	return next
 }
 
+func (t *Turn) Stands() bool {
+	l := t.link
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return !t.done && (!l.failing || t.epoch == l.epoch)
+}
+
 func (t *Turn) Abandoned() {
 	l := t.link
 	l.mu.Lock()
