@@ -759,14 +759,16 @@ When:
   its certificates at once does not renew them at once, and a restart does not
   move the moment; `credential_renewal_scheduled` says when, and an agent that
   starts past that point renews at once;
-- a failure the network or a busy platform explains, a lost connection, a 5xx
-  or a 429, is retried after a minute, doubling up to an hour, each wait a fifth
-  longer or shorter at random; a failure somebody has to act on, a refusal, a
+- a failure the network or a busy platform explains, a lost connection, a
+  request the listener never answered, a 5xx or a 429, is retried after a
+  minute, doubling up to an hour; a failure somebody has to act on, a refusal, a
   certificate the listener refused, a listener the agent cannot authenticate or
-  an answer that does not verify, is retried every hour. Each is logged as
-  `credential_not_renewed`, a warning or an error, with the attempt, the next
-  one and a `recovery`, and the agent never enrolls itself again whatever the
-  platform answers;
+  an answer that does not verify, is retried every hour. Each wait is drawn as
+  every wait before the platform is tried again is, as
+  [The connection to the platform](#the-connection-to-the-platform) describes.
+  Each failure is logged as `credential_not_renewed`, a warning or an error,
+  with its class when it has one, the attempt, the next one and a `recovery`,
+  and the agent never enrolls itself again whatever the platform answers;
 - the agent waits an hour at most before it looks at the clock again, so a
   clock that moved, or a host that slept, moves the renewal with it.
 
@@ -1310,11 +1312,18 @@ What the agent is told, apart:
 - `ErrUnauthenticated`: the agent had no credential to present;
 - `ErrRefused`: the listener refused the agent's certificate during the
   handshake, as issued by an authority it does not know, expired or revoked;
-- `ErrUnreachable`: the network, a timeout, or a listener that never finished
-  the handshake;
+- `ErrUnreachable`: the request never reached the listener: its name did not
+  resolve, nothing answered the connection, or the listener never finished the
+  handshake;
+- `ErrUnanswered`: the listener took the request and did not answer it, because
+  the request outlasted `transport.request_timeout` or the connection was cut
+  before the answer ended. The platform may have acted on it;
 - a reply, whatever its status: a refusal is an answer like any other, read
   whole up to `transport.max_response_bytes` or not at all, as
-  `ErrReplyTooLarge`.
+  `ErrReplyTooLarge`. It says when the platform answered, by its own clock, and
+  how long it asked the agent to wait with `Retry-After`, in seconds or as a
+  moment by that clock, read as a day at most and as nothing when it cannot be
+  read.
 
 Being authenticated is not being admitted. Once the handshake is done, the
 platform decides whether it still admits the agent its certificate names, and
@@ -1331,7 +1340,10 @@ What a request may take:
 
 - connecting and the TLS handshake take at most `transport.connect_timeout`, and
   a whole request, from dialing to the end of the reply, at most
-  `transport.request_timeout`;
+  `transport.request_timeout`. Resolving the listener's name is part of
+  connecting, so a name server that never answers holds a request no longer
+  than the connect timeout, and a name that resolves to several addresses is
+  tried address by address within it;
 - at most `resources.max_concurrent_uploads` connections are open to a listener
   at once, one idles for 30 seconds at most, below the idle timeouts of the
   platform's listeners, and the headers of a reply are read up to 16 KiB;
@@ -1355,7 +1367,11 @@ The evidence:
   certificate, a client's certificate or TLS 1.2 alone; open no connection
   without a usable credential; tell a refused certificate from a closed port, a
   listener that never answers the handshake and one that never answers the
-  request; release a cancelled request and its connection, and every goroutine
+  request; tell a request the listener dropped or never answered from one that
+  never reached it; wait no longer than the connect timeout on a name server
+  that answers nothing; read the wait an answer asks for in seconds and as a
+  moment by the platform's clock, a day at most, and ignore one nobody can read;
+  release a cancelled request and its connection, and every goroutine
   it started; stop reading an endless reply and never reuse its connection;
   keep to the connection limit; present a renewed credential from the next
   request on; and accept a platform that replaced its certificate or its
@@ -1382,6 +1398,105 @@ What it does not claim:
   operator's decision;
 - a deployment that reaches the platform only through a proxy is not supported.
 
+## The connection to the platform
+
+`internal/link` keeps the agent's connection to a listener of the platform:
+whether the listener answers, since when it has not and why, and when it is
+tried again. Delivery's two routes share the link to the ingest listener, since
+the platform serves both on one listener, behind one certificate, one roster,
+one rate limit and one capacity bound. Renewal asks its own listener on the
+schedule [Renewal](#renewal) describes, and waits as the link does.
+
+Every batch takes a turn on the link before it takes an upload:
+
+- while the listener answers, every route has its turn at once;
+- once the listener fails, one request at a time tries it again, when its wait
+  is over, while the other route waits on the link, holding no upload and
+  opening no connection. A batch that took its turn before the listener failed,
+  and had not been sent yet, is not sent;
+- the first answer, whatever it says of the batch it answers, lets every route
+  through at once, and an outage several requests ran into is counted once.
+
+What fails the listener, and what fails a batch alone:
+
+| Failure | What happened | Holds | First wait, doubling up to |
+| --- | --- | --- | --- |
+| `transport` | the name did not resolve, nothing answered the connection, or the handshake never finished | both routes | a second, five minutes |
+| `transport` | the listener took the request and never answered it | its route | a second, five minutes |
+| `tls` | the listener could not be authenticated | both routes | a minute, an hour |
+| `authorization` | the agent has no credential it can present, the listener refused it, or the platform refuses the agent itself: `unauthenticated_agent`, `agent_not_registered` or `agent_not_admitted` | both routes | a minute, an hour |
+| `capacity` | a 429 or a 503 that does not name the batch: `rate_limited`, `gateway_at_capacity`, or no code at all, the gateway taking nothing from the agent then | both routes | a second, five minutes |
+| `capacity` | any other 5xx, such as `backbone_unavailable` | its route | a second, five minutes |
+
+A refusal of what a batch carries holds its route as [Delivery](#delivery)
+describes, and is no failure of the connection.
+
+Every wait is drawn anywhere between half and one and a half times its value, so
+agents that failed at the same moment drift apart with every failure. A wait the
+platform asks for with `Retry-After` is never cut short, up to five minutes, and
+is drawn anywhere up to twice as long, so a fleet told to come back in a second
+does not come back in the same second. `connection_failing` says when a listener
+starts failing, and again when the class of its failure changes, as a warning,
+or as an error with a `recovery` when somebody has to act; `connection_restored`
+says how long it failed and after how many attempts. `delivery_failed` and
+`credential_not_renewed` name the class of each failure as `failure`.
+
+Which listeners: only those the configuration names, `server.ingest_url` and
+`server.renewal_url`, authenticated as
+[Reaching the platform](#reaching-the-platform) describes, with no redirect
+followed and no proxy used. The platform publishes no other listener to fail
+over to: a deployment serves its agents one ingest listener, and a name that
+resolves to several addresses is tried address by address within
+`transport.connect_timeout`, which is all the failover the agent does.
+
+No heartbeat: the contracts carry no message for one and the platform serves no
+listener that takes it; it reads when it last heard from an agent off the
+telemetry that landed. The agent keeps locally what a heartbeat would say of its
+connection: when the listener last answered, since when it fails, why, and when
+it is tried next; when each route last delivered, and when the oldest record it
+holds was admitted. The validity of its certificate, and when it renews it, are
+kept by the installation and [Renewal](#renewal). Nothing outside the agent
+reads any of it yet.
+
+The evidence:
+
+- `internal/link` is tested on a clock of its own: every request has its turn
+  while the listener answers; one request at a time tries a listener that
+  fails, once its wait is over; the first answer lets the rest through; an
+  outage several requests ran into is counted once; a turn taken before the
+  listener failed no longer stands; a request that stopped gives its turn back;
+  a failure somebody has to act on waits longer and says what to do; and a wait
+  the platform asked for is never cut short;
+- a fleet of ten thousand agents that lose the platform at the same instant is
+  modelled with the waits the agent draws. After the first ten seconds no
+  second carries more than a fifth of the fleet's attempts, 13% in the model;
+  after the first minute no more than a twentieth, 3.5%; after ten minutes no
+  more than a hundredth, 0.6%. Once the platform returns after half an hour, no
+  second brings back more than a hundredth of the fleet, and every agent is back
+  within seven and a half minutes. A fleet asked to come back in a second, or
+  in five, comes back over the following second, or five, with no tenth of
+  that holding a fifth of it;
+- `internal/delivery` is tested through a network that passes, holds or closes
+  every connection. While it holds them, one connection at a time tries the
+  listener, and both routes count their backlog and date its oldest record;
+  once it passes, both routes deliver. A gateway that asks the agent to wait a
+  second is sent nothing, on either route, for that second. A request the
+  gateway took and dropped holds inventory while events are delivered. A
+  listener that flaps between the three, over and over, leaves no goroutine,
+  descriptor or upload behind once everything is delivered. A collector admits
+  at its own pace, never waiting on a connection, while every connection hangs;
+- every answer the recorded gateway gave that asked the agent to wait, a second
+  or five, is one the agent sends again after, and never sooner.
+
+What it does not claim:
+
+- that a fleet which failed at the same instant spreads its first attempts: they
+  come within the first seconds, as close together as the failures were, and
+  spread from then on;
+- a wait longer than five minutes because the platform asked for one;
+- failover to another listener, or a heartbeat;
+- that the state it keeps can be read from outside the agent.
+
 ## Delivery
 
 `internal/delivery` sends the platform what the spool holds, and decides from
@@ -1405,8 +1520,10 @@ admitted under, is quarantined without being sent, since no batch that carried
 it could be read, and `record_not_delivered` says so.
 
 Each route delivers on its own, one batch at a time and in the order its records
-were admitted, so a route the platform does not take holds nothing back on the
-other. Events are critical and inventory is bulk, as the governor serves them. A
+were admitted, so a route whose batches the platform does not take holds nothing
+back on the other, while a listener that fails holds back both, as
+[The connection to the platform](#the-connection-to-the-platform) describes.
+Events are critical and inventory is bulk, as the governor serves them. A
 batch holds at most `transport.max_batch_bytes`, its envelope included, at most
 `transport.max_events_per_batch` events or
 `transport.max_inventory_records_per_batch` inventory records, and inventory
@@ -1421,14 +1538,15 @@ follows from it:
 | The platform answered | Outcome | What delivery does |
 | --- | --- | --- |
 | 200 with an acknowledgement that is `accepted`, `durable` and counts every record the batch carried | durable | writes the acknowledgement down in the spool, and only then drops the records |
-| 200 with an acknowledgement short of that; 408, 429 or 5xx, such as `rate_limited`, `gateway_at_capacity` or `backbone_unavailable`; 400 `unreadable_body`; or no answer | unconfirmed | sends the same batch again soon |
+| 200 with an acknowledgement short of that; 408 or any other 5xx, such as `backbone_unavailable`; 400 `unreadable_body`; a listener that never answered, or could not be reached | unconfirmed | sends the same batch again soon; a listener that could not be reached holds both routes |
+| 429 or 503 that does not name the batch: `rate_limited`, `gateway_at_capacity`, or no code at all | busy | holds both routes, and sends the same batch again soon |
 | 422 `invalid_event` or `invalid_record` refusing one record for what it holds | refused | quarantines the record, sends the records before it again at once, and the ones after it in smaller batches |
 | 413, or 422 `batch_too_large` | too large | sends the first half again at once and the rest in batches half as large, and quarantines a record the platform refuses alone |
 | 400 `malformed_payload` | undecodable | halves the batch the same way, until the record the platform cannot decode is alone, and quarantines it |
-| 403 refusing the agent itself | agent refused | keeps every record, and sends the same batch again later |
+| 403 refusing the agent itself | agent refused | keeps every record, holds both routes, and sends the same batch again later |
 | 426, or a record carrying a version or a value the platform does not speak | incompatible | the same |
 | a record refused over a moment the platform's clock has not reached | disputed | the same |
-| anything else: another status or code, a success that acknowledges nothing, a reply larger than `transport.max_response_bytes`, a listener the agent cannot authenticate or present its credential to | unexpected | the same |
+| anything else: another status or code, a success that acknowledges nothing, a reply larger than `transport.max_response_bytes`, a listener the agent cannot authenticate or present its credential to | unexpected | the same, holding both routes when the listener could not be authenticated or took no credential |
 
 Only a durable acknowledgement drops a record, and an HTTP success alone never
 does. The acknowledgement carries no batch identifier and no record, so what it
@@ -1479,12 +1597,16 @@ refusal that is not the record's fault is never a reason to quarantine it:
   at, by more than the five minutes the platform tolerates, is the record's
   own mistake: both are refused for good.
 
-What is sent again waits: a second after the first unconfirmed answer, doubling
-up to five minutes, and a minute after the first of any other, doubling up to an
-hour, each spread by a fifth so a fleet does not return at once. A durable
-answer ends the wait. `delivery_failed` reports every attempt that failed, as a
-warning when the platform did not confirm and as an error with a `recovery`
-otherwise, with the batch, its records, the outcome and the next attempt;
+What is sent again waits: a second after the first unconfirmed or busy answer,
+doubling up to five minutes, and a minute after the first of any other, doubling
+up to an hour, each drawn between half and one and a half times that so a fleet
+does not return at once, and never sooner than a `Retry-After` asked, up to five
+minutes. A failure of the listener is waited out once, on the link, for both
+routes; a failure of the batch, by its route alone. A durable answer ends the
+wait. `delivery_failed` reports every attempt that failed, as a warning when the
+platform did not confirm or was busy and as an error with a `recovery`
+otherwise, with the batch, its records, the outcome, the class of the failure
+when it has one, and the next attempt;
 `delivery_resumed` says how long the route failed once it delivers again;
 `record_refused` names each record quarantined and the platform's reason, and
 `batch_split` each batch sent again in halves. A stop cancels the request on its
@@ -1539,8 +1661,6 @@ What delivery does not claim:
   expires;
 - that a batch holding several records the platform refuses is settled in one
   request: the platform names one refused record at a time;
-- `Retry-After`: the agent waits as described above, whatever the platform
-  suggests;
 - more than two uploads at once: each route sends one batch at a time, so
   `resources.max_concurrent_uploads` above two changes nothing yet. With two at
   once, an inventory batch shares the upload budget with events, which go first,
