@@ -462,6 +462,44 @@ func TestAReplySaysWhenThePlatformAnsweredByItsOwnClock(t *testing.T) {
 	}
 }
 
+func TestAReplySaysHowLongThePlatformAskedTheAgentToWait(t *testing.T) {
+	answered := time.Date(2026, time.September, 27, 14, 3, 9, 0, time.UTC)
+	stamped := []string{answered.Format(http.TimeFormat)}
+	for name, c := range map[string]struct {
+		date, after []string
+		want        time.Duration
+	}{
+		"seconds, as a busy gateway asks":          {date: stamped, after: []string{"5"}, want: 5 * time.Second},
+		"no time at all":                           {date: stamped, after: []string{"0"}},
+		"nothing asked":                            {date: stamped},
+		"a moment by the platform's own clock":     {date: stamped, after: []string{answered.Add(90 * time.Second).Format(http.TimeFormat)}, want: 90 * time.Second},
+		"a moment the platform's clock has passed": {date: stamped, after: []string{answered.Add(-time.Minute).Format(http.TimeFormat)}},
+		"a moment by the agent's clock":            {after: []string{time.Now().UTC().Add(time.Hour).Format(http.TimeFormat)}, want: time.Hour},
+		"longer than a day":                        {date: stamped, after: []string{"86401"}, want: 24 * time.Hour},
+		"more seconds than a number holds":         {date: stamped, after: []string{"99999999999999999999999999"}, want: 24 * time.Hour},
+		"a negative time":                          {date: stamped, after: []string{"-5"}},
+		"words":                                    {date: stamped, after: []string{"soon"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agents := authorityNamed(t, "Seagull agents")
+			listener := serve(t, authorityNamed(t, "Seagull platform"), agents, func(w http.ResponseWriter, r *http.Request) {
+				w.Header()["Date"] = c.date
+				w.Header()["Retry-After"] = c.after
+				w.WriteHeader(http.StatusServiceUnavailable)
+			})
+			key := agentKey(t)
+			client := compose(t, listener.trusted, &held{credential: transport.Credential{Chain: agents.agent(t, "web-01", key.Public()), Signer: key}})
+			reply, err := client.Post(t.Context(), batch(listener.URL+"/v1/events", "sshd"))
+			if err != nil {
+				t.Fatalf("send: %v", err)
+			}
+			if reply.RetryAfter > c.want || reply.RetryAfter < c.want-2*time.Second || (c.date != nil && reply.RetryAfter != c.want) {
+				t.Fatalf("the reply asks the agent to wait %s, and the platform wrote %q at %q", reply.RetryAfter, c.after, c.date)
+			}
+		})
+	}
+}
+
 func TestTheAgentFollowsNoRedirect(t *testing.T) {
 	agents := authorityNamed(t, "Seagull agents")
 	platform := serve(t, authorityNamed(t, "Seagull platform"), agents, func(w http.ResponseWriter, r *http.Request) {
