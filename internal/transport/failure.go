@@ -18,6 +18,7 @@ var (
 	ErrUnauthenticated = errors.New("the agent holds no credential it can authenticate with")
 	ErrRefused         = errors.New("the platform refused the agent's credential")
 	ErrUnreachable     = errors.New("the platform could not be reached")
+	ErrUnanswered      = errors.New("the platform took the request and did not answer it")
 	ErrReplyTooLarge   = errors.New("the platform's reply is larger than the agent reads")
 )
 
