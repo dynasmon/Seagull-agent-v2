@@ -65,6 +65,7 @@ type Peer struct {
 
 type Client struct {
 	options   Options
+	resolver  *net.Resolver
 	current   atomic.Pointer[connections]
 	presented atomic.Pointer[tls.Certificate]
 }
@@ -74,7 +75,9 @@ type connections struct {
 	transport *http.Transport
 }
 
-func New(options Options) (*Client, error) {
+func New(options Options) (*Client, error) { return compose(options, nil) }
+
+func compose(options Options, resolver *net.Resolver) (*Client, error) {
 	var problems []error
 	roots, err := anchors(options.Authorities)
 	if err != nil {
@@ -95,7 +98,7 @@ func New(options Options) (*Client, error) {
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("compose the transport: %w", errors.Join(problems...))
 	}
-	client := &Client{options: options}
+	client := &Client{options: options, resolver: resolver}
 	client.current.Store(client.connect(roots))
 	return client, nil
 }
@@ -117,7 +120,7 @@ func (c *Client) connect(roots *x509.CertPool) *connections {
 	protocols.SetHTTP1(true)
 	return &connections{roots: roots, transport: &http.Transport{
 		Proxy:       nil,
-		DialContext: (&net.Dialer{Timeout: c.options.ConnectTimeout, KeepAlive: keepAlive}).DialContext,
+		DialContext: (&net.Dialer{Timeout: c.options.ConnectTimeout, KeepAlive: keepAlive, Resolver: c.resolver}).DialContext,
 		TLSClientConfig: &tls.Config{
 			MinVersion:           tls.VersionTLS13,
 			RootCAs:              roots,
@@ -205,7 +208,7 @@ func (c *Client) Check(ctx context.Context, address string) (Peer, error) {
 	}
 	var asked atomic.Bool
 	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{Timeout: c.options.ConnectTimeout},
+		NetDialer: &net.Dialer{Timeout: c.options.ConnectTimeout, Resolver: c.resolver},
 		Config: &tls.Config{
 			MinVersion: tls.VersionTLS13,
 			RootCAs:    c.current.Load().roots,
