@@ -780,6 +780,11 @@ func TestAnAgentWhoseCertificateExpiredStillStarts(t *testing.T) {
 	if started["agent_id"] != "web-01" || started["credential_generation"] != float64(1) {
 		t.Fatalf("an agent whose certificate expired started as %v", started)
 	}
+	expiry := expired.NotAfter.UTC().Format(time.RFC3339)
+	if _, said, _ := asked(t, path); !strings.Contains(said, "credential: failed since "+expiry+": the certificate of credential generation 1 expired at "+expiry) ||
+		!strings.Contains(said, "  what to do: have the platform issue the installation a new certificate") {
+		t.Fatalf("the status of an agent whose certificate expired says:\n%s", said)
+	}
 }
 
 func TestKeysSurviveAnActivationInterruptedBeforeItsStateWasWritten(t *testing.T) {
