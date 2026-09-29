@@ -76,7 +76,7 @@ func TestAListenerThatFailsIsTriedByOneRequestAtATimeUntilItAnswers(t *testing.T
 		}
 		state := connected.State()
 		if !state.Failing.Equal(began) || state.Failure != link.Transport || state.Attempts != 2 || !state.Next.Equal(again) ||
-			!strings.Contains(state.Reason, "connection refused") || !state.Answered.IsZero() {
+			!strings.Contains(state.Reason, "connection refused") || !strings.HasPrefix(state.Recovery, "none: ") || !state.Answered.IsZero() {
 			t.Fatalf("after two failed attempts the link holds %+v", state)
 		}
 		synctest.Wait()
@@ -94,7 +94,7 @@ func TestAListenerThatFailsIsTriedByOneRequestAtATimeUntilItAnswers(t *testing.T
 			t.Fatalf("%d of the requests left had their turn once the listener answered", len(turns))
 		}
 		(<-turns).Answered()
-		if state := connected.State(); !state.Failing.IsZero() || state.Attempts != 0 || !state.Answered.Equal(again) {
+		if state := connected.State(); !state.Failing.IsZero() || state.Attempts != 0 || state.Recovery != "" || !state.Answered.Equal(again) {
 			t.Fatalf("once the listener answered the link holds %+v", state)
 		}
 
@@ -174,6 +174,9 @@ func TestAFailureThatWaitsOnSomebodyIsHeldLongerAndSaysWhatToDo(t *testing.T) {
 		if len(failing) != 2 || failing[0]["level"] != "WARN" || failing[1]["level"] != "ERROR" || failing[1]["failure"] != "authorization" ||
 			failing[1]["recovery"] != "recover from agent_not_admitted" || failing[1]["attempt"] != float64(2) {
 			t.Fatalf("logged %v as the failure changed", failing)
+		}
+		if state := connected.State(); state.Recovery != "recover from agent_not_admitted" {
+			t.Fatalf("the link says to %q", state.Recovery)
 		}
 	})
 }
