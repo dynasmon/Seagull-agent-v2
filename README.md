@@ -228,19 +228,20 @@ the enabled ones to `internal/runtime`, which owns their lifecycle.
   panicked may have left shared state inconsistent; durable state has to
   survive that just as it survives any other crash.
 
-Three components are composed: the configuration the agent holds, which reads
-the file again whenever the agent is asked to, and, once the installation is
-enrolled, the [renewal](#renewal) that keeps its credential current and the
-[delivery](#delivery) that sends the platform what the spool holds. The renewal
-is optional, so an agent whose renewal failed keeps collecting what it will
-deliver once it holds a certificate again. The delivery is essential: it never
-stops over what the platform answers, and one that stopped for any other reason
-stops the agent, which its service starts again. The spool is not a component,
-since it starts no work of its own: the agent opens it with the installation,
-reads back what it holds before it starts, and closes it as it stops. Neither is
-the governor, which bounds the expensive work of whoever asks it and starts none
-of its own. Collection and local admission will each arrive as a component of
-their own.
+The components composed are the configuration the agent holds, which reads the
+file again whenever the agent is asked to; once the installation is enrolled,
+the [renewal](#renewal) that keeps its credential current and the
+[delivery](#delivery) that sends the platform what the spool holds; and the
+[status](#status), optional, which writes down what the agent says of itself.
+The renewal is optional, so an agent whose renewal failed keeps collecting what
+it will deliver once it holds a certificate again. The delivery is essential: it
+never stops over what the platform answers, and one that stopped for any other
+reason stops the agent, which its service starts again. The spool is not a
+component, since it starts no work of its own: the agent opens it with the
+installation, reads back what it holds before it starts, and closes it as it
+stops. Neither is the governor, which bounds the expensive work of whoever asks
+it and starts none of its own. Collection and local admission will each arrive
+as a component of their own.
 
 ## Configuration
 
@@ -398,7 +399,10 @@ again and twice as long after each failure, up to five minutes, spread by a
 fifth so the endpoints of a fleet that failed together do not return together.
 Five failures in a row spend a module's budget; a module that collected for five
 minutes has its failures forgiven. What a module reported is kept with its
-state, bounded, and is never a label.
+state, bounded, and is never a label. `module_restarting` and `module_started`
+are written for a module's first restart and each time its count of restarts
+doubles, so a module that keeps failing after five minutes of collecting does
+not fill the log; the health of the collection counts every restart.
 
 The set of modules that should be collecting is applied whole: a name this build
 does not have refuses the set, so nothing is half applied; a module the set
@@ -766,9 +770,12 @@ When:
   an answer that does not verify, is retried every hour. Each wait is drawn as
   every wait before the platform is tried again is, as
   [The connection to the platform](#the-connection-to-the-platform) describes.
-  Each failure is logged as `credential_not_renewed`, a warning or an error,
-  with its class when it has one, the attempt, the next one and a `recovery`,
-  and the agent never enrolls itself again whatever the platform answers;
+  A failure is logged as `credential_not_renewed`, a warning or an error, with
+  its class when it has one, the attempt, the next one and a `recovery`, the
+  first time, each time the count of failed attempts doubles and each time an
+  attempt fails otherwise than the one before; the [status](#status) counts
+  every attempt. The agent never enrolls itself again whatever the platform
+  answers;
 - the agent waits an hour at most before it looks at the clock again, so a
   clock that moved, or a host that slept, moves the renewal with it.
 
@@ -1603,10 +1610,12 @@ up to an hour, each drawn between half and one and a half times that so a fleet
 does not return at once, and never sooner than a `Retry-After` asked, up to five
 minutes. A failure of the listener is waited out once, on the link, for both
 routes; a failure of the batch, by its route alone. A durable answer ends the
-wait. `delivery_failed` reports every attempt that failed, as a warning when the
-platform did not confirm or was busy and as an error with a `recovery`
-otherwise, with the batch, its records, the outcome, the class of the failure
-when it has one, and the next attempt;
+wait. `delivery_failed` reports the first attempt that failed, each attempt that
+doubles their count and each that fails otherwise than the one before, as a
+warning when the platform did not confirm or was busy and as an error with a
+`recovery` otherwise, with the batch, its records, the outcome, the class of the
+failure when it has one, the attempt and the next one; the [status](#status)
+counts every attempt;
 `delivery_resumed` says how long the route failed once it delivers again;
 `record_refused` names each record quarantined and the platform's reason, and
 `batch_split` each batch sent again in halves. A stop cancels the request on its
@@ -1668,6 +1677,105 @@ What delivery does not claim:
   `transport.request_timeout` is sent again;
 - that a quarantined record can be sent again: it is counted and reported, not
   set aside for an operator.
+
+## Status
+
+The running agent writes down what it says of itself where somebody on the
+endpoint can read it: `status/status.json` in the installation's state
+directory, private to the account the agent runs as, written as the agent
+starts, every 30 seconds after, and once more as it stops. Each write replaces
+the one before whole. `seagull-agent -config FILE status` prints it, run as the
+account the agent runs as, as the other commands are:
+
+    sudo -u seagull-agent seagull-agent -config /etc/seagull-agent/agent.json status
+
+It reads the file without the installation's lock, so it runs beside the agent,
+and exits with 0 only while the agent runs as it should: with 1 when a part of
+it is degraded or failed, when it stopped, when it has not written its status
+for three of its intervals, and when there is no status to read, saying which.
+
+For each part of the agent it says its state and since when, and, when the part
+does not run as it should, why and what to do about it, in the words of the log:
+
+| Part | Degraded, or failed, when |
+| --- | --- |
+| `configuration` | the last reload was refused, so the agent runs on a configuration the file no longer holds |
+| `collection` | a collector does not collect; this build has none, so it is disabled |
+| `spool` | a stream holds all its budget allows and refuses what is admitted to it; failed when it can no longer make a record durable |
+| `delivery` | the installation is not enrolled, the ingest listener fails, or a route's batches fail |
+| `credential` | renewal fails, or the host's clock is behind the certificate; failed once the certificate expired |
+| `resources` | the agent holds more memory than `resources.memory_limit` |
+
+The agent is in the state of its worst part, and a part nothing asked for is
+disabled and weighs nothing. Then, for each stream, what waits and when the
+oldest record waiting was admitted, when the route last delivered and, while it
+fails, since when, how often, why and when it tries next; what the spool settled
+otherwise, as expired, lost or quarantined; and apart, what it refused to admit.
+A record refused is one the agent never kept, a gap in what it collected; a
+record waiting is one it keeps and could not deliver yet, an outage. Then, for
+the ingest listener, when it last answered and, while it fails, since when and
+why; the credential's generation, serial and validity, and when it renews; and
+what the agent spends: the memory it holds against its target and ceiling, its
+goroutines, the uploads and scans it holds and those waiting, and the scans it
+deferred.
+
+The file is JSON, `format` 1, with `written_at`, `every_seconds`, `state`,
+`agent`, `components`, `modules`, `streams`, `listeners`, `credential` and
+`resources`. Every text in it is a kilobyte at most, and it holds what the log
+already says: names, states, times, counts, reasons and what to do, and of the
+credential, the serial and the validity the installation records. No key, no
+certificate and nothing a request carries is in it.
+
+A failure that repeats does not fill the log. `delivery_failed`,
+`delivery_not_read`, `delivery_not_settled`, `credential_not_renewed`,
+`module_restarting`, `module_started` and `status_not_written` are written for
+the first attempt and each time the count of attempts doubles, and
+`delivery_failed` and `credential_not_renewed` also whenever an attempt fails
+otherwise than the one before; a failure that repeats the same way n times
+writes about log2(n) lines. The status counts every attempt, and
+`delivery_resumed`, `connection_restored` and `credential_renewed` say when the
+failure ended. What else the agent logs happens once for each event, change or
+record, bounded by whatever causes it. The journal keeps what the agent writes
+for as long as the host's journald configuration says: the agent keeps no log of
+its own, and its status is one file it replaces.
+
+No remote reporting: the contracts carry no message for the agent's status and
+the platform serves no listener that takes one, so the status stays on the
+endpoint. `tests/architecture` keeps `internal/status` from reaching the
+network, reading a contract or importing anything of the agent but
+`internal/secrets` and `internal/platform/files`: it is handed the snapshot it
+writes, and nothing it keeps authenticates the agent.
+
+The evidence:
+
+- `internal/status` is tested on a clock of its own: it writes the status as the
+  agent starts, each interval after and as it stops; replaces it whole and
+  keeps it private; discards an interrupted write; refuses to read a status
+  that is missing, damaged, larger than it reads, written by a newer agent, or
+  open to another account; writes each text as a kilobyte at most; reports a
+  status it cannot write at the first failure and each doubling of their count;
+  and prints what state the agent is in, what to do, what waits apart from what
+  was refused, and no terminal escape it was handed;
+- `cmd/seagull-agent` runs the agent and reads its status: before it ever ran,
+  while an installation that is not enrolled runs, degraded with what to do,
+  and once it stopped; with an enrolled agent the platform no longer admits,
+  delivery degraded with the platform's reason, what to do, the records waiting
+  and when the oldest was admitted, and the listener failing; the same agent
+  running, with 0, once the platform takes its records; a certificate that
+  expired as failed, with what to do; a refused reload; a full spool as a gap;
+  and a status that holds no key or certificate material and is private;
+- delivery, renewal, the collection and the status each log a failure that
+  repeats at its first attempt and each doubling of their count, and a
+  delivery that fails forty times says so in six lines while its stats count
+  every attempt, with the reason and what to do.
+
+What it does not claim:
+
+- that it is live: it is as fresh as its last write, 30 seconds at most while
+  the agent runs;
+- how old the records of an installation that is not enrolled are: it counts
+  them, and their age is read by the delivery that waits on them;
+- remote reporting, or a heartbeat.
 
 ## What the agent writes down
 
