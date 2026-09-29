@@ -256,6 +256,11 @@ func (g *gate) start(t *testing.T) {
 		t.Errorf("the service lets %q of the agent's memory reach swap: %v", swapped, err)
 	}
 	await(t, g.invocation, "spool_opened", time.Second)
+	said := g.reported(t, true)
+	if !strings.HasPrefix(said, "the agent is running: ") || !strings.Contains(said, "agent "+agentID+", installation "+g.installation) || !strings.Contains(said, "delivery: running\n") {
+		t.Errorf("the service account reads the status of the running agent as:\n%s", said)
+	}
+	owns(t, filepath.Join(state, "status", "status.json"), g.uid, g.gid, 0o600)
 }
 
 func (g *gate) renew(t *testing.T) {
@@ -298,6 +303,9 @@ func (g *gate) backlog(t *testing.T) {
 	await(t, g.invocation, "agent_stopped", 10*time.Second)
 	if result, status := property(t, "Result"), property(t, "ExecMainStatus"); result != "success" || status != "0" {
 		t.Errorf("the agent stopped with %s and exit status %s", result, status)
+	}
+	if said, err := as(t, "-config", configuration, "status"); err == nil || !strings.HasPrefix(said, "the agent stopped: ") || !strings.Contains(said, ": the agent was asked to stop\n") {
+		t.Errorf("once the service stopped, the service account read its status as %v:\n%s", err, said)
 	}
 	if said := g.admit(t); said != fmt.Sprintf("%d %d", admittedEvents, admittedItems) {
 		t.Fatalf("the spool admitted %q", said)
@@ -405,6 +413,32 @@ func (g *gate) deliver(t *testing.T) {
 			t.Errorf("after delivering, the agent read back %s as %v", stream, held)
 		}
 		owns(t, filepath.Join(state, "spool", stream, "ledger"), g.uid, g.gid, 0o600)
+	}
+	said := g.reported(t, true)
+	for _, line := range []string{
+		"events: nothing waiting; nothing delivered since the agent started\n",
+		fmt.Sprintf("  kept: %d delivered, 0 expired, 0 lost, 0 quarantined\n", admittedEvents),
+		fmt.Sprintf("  kept: %d delivered, 0 expired, 0 lost, 0 quarantined\n", admittedItems),
+	} {
+		if !strings.Contains(said, line) {
+			t.Errorf("after delivering, the status does not say %q:\n%s", line, said)
+		}
+	}
+}
+
+func (g *gate) reported(t *testing.T, running bool) string {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		said, err := as(t, "-config", configuration, "status")
+		pid := property(t, "MainPID")
+		if (err == nil) == running && strings.Contains(said, "process "+pid+" started ") {
+			return said
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the service account read the status of process %s as %v:\n%s", pid, err, said)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -694,6 +728,9 @@ func snapshot(t *testing.T) map[string]string {
 	err := filepath.WalkDir(state, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if path == filepath.Join(state, "status") {
+			return filepath.SkipDir
 		}
 		described, err := entry.Info()
 		if err != nil {
