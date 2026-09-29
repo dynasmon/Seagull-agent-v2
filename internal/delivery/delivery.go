@@ -82,6 +82,8 @@ type RouteStats struct {
 	Attempts  int
 	Outcome   protocol.Outcome
 	Failure   link.Class
+	Reason    string
+	Recovery  string
 	Next      time.Time
 }
 
@@ -196,6 +198,7 @@ type route struct {
 	until        time.Time
 	acknowledged time.Time
 	last         judgement
+	recovery     string
 	retrying     time.Time
 
 	mu    sync.Mutex
@@ -429,7 +432,7 @@ func (r *route) delivered(sent *batch) {
 	r.options.Logger.Debug("batch_delivered", r.attributes(slog.String("batch_id", sent.id), slog.Int("records", len(sent.entries)),
 		slog.Int("bytes", len(sent.body)), slog.Int("attempts", sent.sent))...)
 	r.pending, r.until, r.failures, r.own = nil, time.Time{}, 0, 0
-	r.acknowledged, r.last, r.retrying = time.Now(), judgement{}, time.Time{}
+	r.acknowledged, r.last, r.recovery, r.retrying = time.Now(), judgement{}, "", time.Time{}
 	if r.window > 0 {
 		r.window = min(2*r.window, widest)
 	}
@@ -488,11 +491,11 @@ func (r *route) retry(sent *batch, verdict judgement, asked time.Duration) {
 }
 
 func (r *route) report(sent *batch, verdict judgement, next time.Time) {
-	r.last, r.retrying = verdict, next
 	level, recovery := slog.LevelWarn, resending
 	if lasting(verdict) {
 		level, recovery = slog.LevelError, r.options.Recovery(verdict.Reason)
 	}
+	r.last, r.recovery, r.retrying = verdict, recovery, next
 	attributes := r.attributes(slog.String("batch_id", sent.id), slog.Int("records", len(sent.entries)),
 		slog.Uint64("first", sent.entries[0].sequence), slog.Uint64("last", sent.entries[len(sent.entries)-1].sequence),
 		slog.String("outcome", verdict.Outcome.String()))
@@ -518,6 +521,10 @@ func (r *route) record() {
 	}
 	if r.failures > 0 {
 		state.Failing, state.Attempts, state.Outcome, state.Failure, state.Next = r.failing, r.failures, r.last.Outcome, r.last.failure, r.retrying
+		state.Recovery = r.recovery
+		if r.last.Reason != nil {
+			state.Reason = r.last.Reason.Error()
+		}
 	}
 	r.mu.Lock()
 	r.state = state
