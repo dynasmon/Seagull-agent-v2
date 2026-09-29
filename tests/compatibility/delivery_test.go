@@ -7,11 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-agent-v2/internal/link"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
@@ -134,6 +136,40 @@ func TestTheAgentReadsEveryAnswerARecordedGatewayGaveAsWhatItMeans(t *testing.T)
 			if !judgedHere[name] {
 				t.Errorf("%s recorded no %s exchange", recorded.name(), name)
 			}
+		}
+	}
+}
+
+func TestTheAgentWaitsAsLongAsARecordedGatewayAskedBeforeSendingAgain(t *testing.T) {
+	policy, err := link.Policy{}.Settled()
+	if err != nil {
+		t.Fatalf("settle the documented policy: %v", err)
+	}
+	for _, recorded := range deliveryRecordings(t) {
+		asking := 0
+		for _, sent := range recorded.Exchanges {
+			if sent.RetryAfter == "" {
+				continue
+			}
+			asking++
+			t.Run(recorded.name()+"/"+sent.Name, func(t *testing.T) {
+				seconds, err := strconv.Atoi(sent.RetryAfter)
+				if err != nil || seconds < 1 {
+					t.Fatalf("the gateway asked the agent to wait %q", sent.RetryAfter)
+				}
+				if outcome := judged[sent.Name].outcome; outcome != protocol.Busy && outcome != protocol.Unconfirmed {
+					t.Fatalf("an answer asking the agent to wait is judged %v", outcome)
+				}
+				asked := time.Duration(seconds) * time.Second
+				for range 1000 {
+					if wait := policy.Wait(1, false, asked); wait < asked || wait > 2*asked {
+						t.Fatalf("asked to wait %s, the agent waits %s", asked, wait)
+					}
+				}
+			})
+		}
+		if asking == 0 {
+			t.Errorf("%s recorded no answer asking the agent to wait", recorded.name())
 		}
 	}
 }
