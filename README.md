@@ -1719,9 +1719,9 @@ what the agent spends: the memory it holds against its target and ceiling, its
 goroutines, the uploads and scans it holds and those waiting, and the scans it
 deferred.
 
-The file is JSON, `format` 1, with `written_at`, `every_seconds`, `state`,
-`agent`, `components`, `modules`, `streams`, `listeners`, `credential` and
-`resources`. Every text in it is a kilobyte at most, and it holds what the log
+The file is JSON, `format` 1, with `written_at`, `every_seconds`, `state`, and
+`reason` once the agent stopped, `agent`, `components`, `modules`, `streams`,
+`listeners`, `credential` and `resources`. Every text in it is a kilobyte at most, and it holds what the log
 already says: names, states, times, counts, reasons and what to do, and of the
 credential, the serial and the validity the installation records. No key, no
 certificate and nothing a request carries is in it.
@@ -1765,9 +1765,9 @@ The evidence:
   expired as failed, with what to do; a refused reload; a full spool as a gap;
   and a status that holds no key or certificate material and is private;
 - delivery, renewal, the collection and the status each log a failure that
-  repeats at its first attempt and each doubling of their count, and a
-  delivery that fails forty times says so in six lines while its stats count
-  every attempt, with the reason and what to do.
+  repeats at its first attempt and each doubling of their count: a delivery
+  that fails forty times or more writes a line for each doubling alone, while
+  its stats count every attempt, with the reason and what to do.
 
 What it does not claim:
 
