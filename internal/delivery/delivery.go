@@ -317,18 +317,16 @@ func (r *route) deliver(ctx context.Context, sent *batch) error {
 	if err != nil {
 		return err
 	}
-	reply, err := r.send(ctx, sent, turn)
+	verdict, asked, next, err := r.send(ctx, sent, turn)
 	if stopped := ctx.Err(); stopped != nil || errors.Is(err, errHeld) {
 		turn.Abandoned()
 		return stopped
 	}
-	verdict := r.judge(sent, reply, err)
 	if verdict.listener {
 		r.failed(false)
-		r.report(sent, verdict, turn.Failed(verdict.failure, reply.RetryAfter, verdict.Reason))
+		r.report(sent, verdict, next)
 		return nil
 	}
-	turn.Answered()
 	switch verdict.Outcome {
 	case protocol.Durable:
 		if err := r.settle(ctx, sent, "acknowledgement", func() error { return r.options.Spool.Acknowledge(r.stream, sent.sequences()...) }); err != nil {
@@ -343,13 +341,17 @@ func (r *route) deliver(ctx context.Context, sent *batch) error {
 		}
 		r.split(sent, verdict.Verdict)
 	default:
-		r.retry(sent, verdict, reply.RetryAfter)
+		r.retry(sent, verdict, asked)
 	}
 	return nil
 }
 
-func (r *route) send(ctx context.Context, sent *batch, turn *link.Turn) (transport.Reply, error) {
-	var reply transport.Reply
+func (r *route) send(ctx context.Context, sent *batch, turn *link.Turn) (judgement, time.Duration, time.Time, error) {
+	var (
+		verdict judgement
+		asked   time.Duration
+		next    time.Time
+	)
 	err := r.options.Governor.Upload(ctx, r.class, func(ctx context.Context, meter *governor.Meter) error {
 		if !turn.Stands() {
 			return errHeld
@@ -357,23 +359,33 @@ func (r *route) send(ctx context.Context, sent *batch, turn *link.Turn) (transpo
 		sent.sent++
 		sending, stop := context.WithCancel(ctx)
 		defer stop()
-		var err error
-		reply, err = r.options.Client.Post(sending, transport.Request{
+		reply, err := r.options.Client.Post(sending, transport.Request{
 			URL:         r.url,
 			ContentType: protocol.ContentType,
 			Body:        meter.Reader(sending, bytes.NewReader(sent.body)),
 			Length:      int64(len(sent.body)),
 		})
-		return err
+		if stopped := ctx.Err(); stopped != nil {
+			return stopped
+		}
+		verdict, asked = r.judge(sent, reply, err), reply.RetryAfter
+		if verdict.listener {
+			next = turn.Failed(verdict.failure, asked, verdict.Reason)
+			return nil
+		}
+		turn.Answered()
+		return nil
 	})
-	return reply, err
+	return verdict, asked, next, err
 }
 
 // A failure of the listener holds every route to it on the link, and waits as
 // the link does: one the transport reports before the request reached the
 // listener, a refusal of the agent, and an answer that the listener, whatever
-// it is sent, takes nothing now. A request the listener took and never
-// answered, and a refusal of what a batch carried, hold the route alone.
+// it is sent, takes nothing now. The turn is settled before the upload is
+// given back, so a route waiting to upload learns of it before it sends. A
+// request the listener took and never answered, and a refusal of what a batch
+// carried, hold the route alone.
 func (r *route) judge(sent *batch, reply transport.Reply, err error) judgement {
 	switch {
 	case errors.Is(err, transport.ErrUnanswered):
