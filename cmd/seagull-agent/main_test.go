@@ -532,7 +532,7 @@ func TestAnAgentThatIsNotEnrolledHasNothingToRenew(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("the agent exited with %d", code)
 	}
-	if !slices.Equal(components, []any{"configuration"}) {
+	if !slices.Equal(components, []any{"configuration", "status"}) {
 		t.Fatalf("an agent that is not enrolled ran %v", components)
 	}
 }
@@ -600,7 +600,7 @@ func TestAnEnrolledAgentDeliversWhatItsSpoolHoldsAsItRuns(t *testing.T) {
 			components = append(components, entry["component"], entry["policy"])
 		}
 	}
-	if code != 0 || !slices.Equal(components, []any{"configuration", "essential", "renewal", "optional", "delivery", "essential"}) {
+	if code != 0 || !slices.Equal(components, []any{"configuration", "essential", "renewal", "optional", "delivery", "essential", "status", "optional"}) {
 		t.Fatalf("the agent exited with %d after running %v", code, components)
 	}
 	mu.Lock()

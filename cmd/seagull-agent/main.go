@@ -34,6 +34,7 @@ import (
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
+	"github.com/dynasmon/Seagull-agent-v2/internal/status"
 	"github.com/dynasmon/Seagull-agent-v2/internal/transport"
 )
 
@@ -42,6 +43,8 @@ const (
 	certificatesDirectory = "certificates"
 	trustDirectory        = "trust"
 	spoolDirectory        = "spool"
+	statusDirectory       = "status"
+	statusEvery           = 30 * time.Second
 )
 
 const usage = `Usage:
@@ -53,6 +56,7 @@ const usage = `Usage:
   seagull-agent -config FILE enrollment import ISSUED     activate the certificate the platform answered the request with, held in ISSUED
   seagull-agent -config FILE enrollment renew             ask the platform for the next certificate now, as the enrolled agent
   seagull-agent -config FILE installation replace         replace the installation with a new one that is not enrolled
+  seagull-agent -config FILE status                       print what the agent last said of itself, and exit with 0 only while it runs as it should
   seagull-agent -version                                  print the build identity and the wire versions it speaks, and exit
 
 A running agent reads its configuration again when it receives SIGHUP, and
@@ -105,12 +109,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return renew(ctx, *path, stdout, stderr)
 	case configured && slices.Equal(flags.Args(), []string{"installation", "replace"}):
 		return replace(*path, stdout, stderr)
+	case configured && slices.Equal(flags.Args(), []string{"status"}):
+		return report(*path, stdout, stderr)
 	}
 	flags.Usage()
 	return 2
 }
 
 func serve(ctx context.Context, stderr io.Writer, path string, components ...agentruntime.Component) int {
+	began := time.Now()
 	withheld := dumps.Withhold()
 	granted, err := privileges.Held()
 	if err != nil {
@@ -127,7 +134,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	memory(logger, withheld)
 	resources(logger, settings)
 	state := settings.Identity.StateDirectory
-	held := &configuration{logger: logger, path: path, active: config.Activate(settings), level: level}
+	held := &configuration{logger: logger, path: path, active: config.Activate(settings), level: level, applied: began}
 	refused := func(err error) int {
 		logger.Error("agent_not_started", slog.Any("error", err), slog.String("recovery", recovery(path, state, err)))
 		return 1
@@ -187,6 +194,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 		return refused(err)
 	}
 	held.governor = governed
+	observed := &observing{began: began, path: path, state: state, installation: installation, spool: spooled, governor: governed, configuration: held}
 	composed := append([]agentruntime.Component{held.component(asked)}, components...)
 	if isEnrolled {
 		client, err := platform(settings, chosen.authorities, credential)
@@ -211,6 +219,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 			return refused(err)
 		}
 		composed = append(composed, agentruntime.Component{Name: "renewal", Policy: agentruntime.Optional, Run: renewer.Run})
+		observed.renewer = renewer
 		delivered, err := delivery.New(delivery.Options{
 			Spool:    spooled,
 			Client:   client,
@@ -224,7 +233,17 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 			return refused(err)
 		}
 		composed = append(composed, agentruntime.Component{Name: "delivery", Policy: agentruntime.Essential, Run: delivered.Run})
+		observed.delivery = delivered
 	}
+	kept, err := installation.Directory(statusDirectory)
+	if err != nil {
+		return refused(err)
+	}
+	keeper, err := status.NewKeeper(kept, statusEvery, observed.snapshot, logger)
+	if err != nil {
+		return refused(err)
+	}
+	composed = append(composed, agentruntime.Component{Name: "status", Policy: agentruntime.Optional, Run: keeper.Run})
 	agent, err := agentruntime.New(logger, time.Duration(settings.Resources.ShutdownTimeout), composed...)
 	if err != nil {
 		logger.Error("agent_not_started", slog.Any("error", err))
@@ -233,9 +252,11 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	trust(logger, chosen, unread)
 	logger.Info("agent_starting", started...)
 	if err := agent.Run(ctx); err != nil {
+		keeper.Stopped("the agent stopped as it could not run on: " + err.Error())
 		logger.Error("agent_stopped", slog.Any("error", err))
 		return 1
 	}
+	keeper.Stopped("the agent was asked to stop")
 	logger.Info("agent_stopped")
 	return 0
 }
@@ -307,6 +328,12 @@ type configuration struct {
 	level    *slog.LevelVar
 	spool    *spool.Spool
 	governor *governor.Governor
+
+	mu        sync.Mutex
+	applied   time.Time
+	refused   error
+	refusedAt time.Time
+	hint      string
 }
 
 func (c *configuration) component(asked <-chan os.Signal) agentruntime.Component {
@@ -334,9 +361,13 @@ func (c *configuration) reload() error {
 		err = c.active.Reload(candidate)
 	}
 	if err != nil {
+		hint := recovery(c.path, "", err)
+		c.mu.Lock()
+		c.refused, c.refusedAt, c.hint = err, time.Now(), hint
+		c.mu.Unlock()
 		c.logger.Error("configuration_not_reloaded", slog.Any("error", err),
 			slog.String("running_on", "the configuration the agent read before"),
-			slog.String("recovery", recovery(c.path, "", err)))
+			slog.String("recovery", hint))
 		return nil
 	}
 	apply(candidate, c.level)
@@ -348,6 +379,9 @@ func (c *configuration) reload() error {
 			return fmt.Errorf("apply the configuration read from %s: %w", c.path, err)
 		}
 	}
+	c.mu.Lock()
+	c.refused, c.applied = nil, time.Now()
+	c.mu.Unlock()
 	c.logger.Info("configuration_reloaded", slog.String("config", c.path), slog.String("log_level", candidate.Logging.Level))
 	resources(c.logger, candidate)
 	return nil
@@ -944,6 +978,16 @@ func recovery(path, state string, err error) string {
 		return "run the agent release that wrote this state, or discard the installation with " + replacement
 	case errors.Is(err, spool.ErrDamaged):
 		return "take out of " + filepath.Join(state, spoolDirectory) + " what the agent did not write there, or discard the installation with " + replacement
+	case errors.Is(err, spool.ErrUnavailable):
+		return "restart the agent once the filesystem that holds " + filepath.Join(state, spoolDirectory) + " takes writes again: a spool that could not make a record durable admits nothing until the agent starts again"
+	case errors.Is(err, status.ErrUnwritten):
+		return "start the agent: it writes its status as it starts, and every " + statusEvery.String() + " while it runs"
+	case errors.Is(err, status.ErrInsecure):
+		return "read the status as the account the agent runs as, and keep " + state + " private to that account"
+	case errors.Is(err, status.ErrNewer):
+		return "run the agent release that wrote the status, or start this one, which writes it anew"
+	case errors.Is(err, status.ErrDamaged):
+		return "start the agent again: it writes its status anew as it starts"
 	case errors.Is(err, identity.ErrDamaged):
 		return "restore " + state + " from a backup of this installation, or discard the installation with " + replacement + " and enroll the new one"
 	case errors.Is(err, pki.ErrKeyMissing), errors.Is(err, pki.ErrKeyDamaged), errors.Is(err, pki.ErrCertificateMissing), errors.Is(err, pki.ErrCertificateDamaged):
