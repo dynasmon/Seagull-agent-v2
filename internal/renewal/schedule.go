@@ -120,6 +120,7 @@ func (r *Renewer) Run(ctx context.Context) error {
 		retry    time.Time
 		said     string
 		planned  string
+		previous link.Class
 	)
 	for {
 		active, enrolled := r.options.Installation.Enrollment()
@@ -183,6 +184,11 @@ func (r *Renewer) Run(ctx context.Context) error {
 				}
 				state.Attempts, state.Failure, state.Reason, state.Recovery, state.Next = failures, class, err.Error(), recovery, retry
 			})
+			changed := failures == 1 || class != previous
+			previous = class
+			if !changed && failures&(failures-1) != 0 {
+				continue
+			}
 			level := slog.LevelWarn
 			if lasting {
 				level = slog.LevelError
@@ -195,7 +201,7 @@ func (r *Renewer) Run(ctx context.Context) error {
 				slog.Time("next_attempt", retry), slog.Time("not_after", certificate.NotAfter), slog.String("recovery", recovery))...)
 			continue
 		}
-		failures, retry = 0, time.Time{}
+		failures, retry, previous = 0, time.Time{}, 0
 		r.note(func(state *State) { *state = State{RenewsAt: r.Due(renewed.Enrollment), Renewed: time.Now()} })
 		r.report(renewed)
 	}

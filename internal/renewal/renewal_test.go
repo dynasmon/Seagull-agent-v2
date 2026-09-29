@@ -298,8 +298,8 @@ func TestARenewalThatFailsIsRetriedWithinItsBounds(t *testing.T) {
 	cancel()
 	<-stopped
 	failed := renewing.logs.entries(t, "credential_not_renewed")
-	if len(failed) != 3 {
-		t.Fatalf("logged %d failed renewals, the platform failed 3", len(failed))
+	if len(failed) != 2 {
+		t.Fatalf("logged %d failed renewals, the platform failed 3 times alike and the third is not a doubling of the count", len(failed))
 	}
 	var previous time.Time
 	for attempt, entry := range failed {
@@ -319,6 +319,49 @@ func TestARenewalThatFailsIsRetriedWithinItsBounds(t *testing.T) {
 			t.Errorf("attempt %d was logged at %s", attempt+1, at)
 		}
 		previous = at
+	}
+	renewed := held.active(t)
+	if state := renewing.renewer.State(); state.Renewed.IsZero() || !state.Failing.IsZero() || state.Attempts != 0 || !state.RenewsAt.Equal(renewing.renewer.Due(renewed)) {
+		t.Fatalf("once it renewed, the renewal stands at %+v", state)
+	}
+}
+
+func TestARenewalThatKeepsFailingSaysSoEachTimeItsAttemptsDouble(t *testing.T) {
+	signing := authorityNamed(t, "Seagull agents")
+	signing.backdate = 0
+	serving := listen(t, signing)
+	held := enrolled(t, signing, "web-01", 4*time.Second)
+	serving.change(func(p *platform) { p.failures = 1 << 20 })
+	renewing := renewerFor(t, held, serving, []*x509.Certificate{signing.certificate}, month, renewal.Policy{Retry: time.Millisecond, Longest: 2 * time.Millisecond, Recheck: 50 * time.Millisecond})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- renewing.renewer.Run(ctx) }()
+	deadline := time.After(20 * time.Second)
+	for renewing.renewer.State().Attempts < 40 {
+		select {
+		case <-deadline:
+			t.Fatalf("the renewal failed %d times within 20s", renewing.renewer.State().Attempts)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	state := renewing.renewer.State()
+	cancel()
+	<-stopped
+	if state.Failing.IsZero() || state.Failure.String() != "capacity" || !strings.Contains(state.Reason, "certificate_not_signed") || state.Recovery == "" || state.Next.IsZero() {
+		t.Fatalf("while the platform failed it, the renewal stood at %+v", state)
+	}
+	var attempts []float64
+	for _, entry := range renewing.logs.entries(t, "credential_not_renewed") {
+		attempts = append(attempts, entry["attempt"].(float64))
+	}
+	for i, attempt := range attempts {
+		if want := float64(int(1) << i); attempt != want {
+			t.Fatalf("logged the failed renewals %v, one for each doubling of the count", attempts)
+		}
+	}
+	if len(attempts) < 6 || len(attempts) > 7 {
+		t.Fatalf("logged %d of the %d or so failed renewals", len(attempts), state.Attempts)
 	}
 }
 
