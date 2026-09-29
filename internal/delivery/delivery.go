@@ -318,9 +318,15 @@ func (r *route) deliver(ctx context.Context, sent *batch) error {
 		return err
 	}
 	verdict, asked, next, err := r.send(ctx, sent, turn)
-	if stopped := ctx.Err(); stopped != nil || errors.Is(err, errHeld) {
+	if stopped := ctx.Err(); stopped != nil || err != nil {
 		turn.Abandoned()
-		return stopped
+		switch {
+		case stopped != nil:
+			return stopped
+		case errors.Is(err, errHeld):
+			return nil
+		}
+		return err
 	}
 	if verdict.listener {
 		r.failed(false)
