@@ -339,9 +339,11 @@ func (c *Collection) collect(ctx context.Context, held *module) {
 		c.mu.Lock()
 		held.restarts++
 		held.running, held.reason, held.since = true, "", time.Now()
-		attributes := append(held.attributes(), slog.Int("restarts", held.restarts))
+		attributes, noted := append(held.attributes(), slog.Int("restarts", held.restarts)), doubled(held.restarts)
 		c.mu.Unlock()
-		c.logger.Info("module_started", attributes...)
+		if noted {
+			c.logger.Info("module_started", attributes...)
+		}
 	}
 }
 
@@ -360,9 +362,12 @@ func (c *Collection) failed(held *module, err error, ran time.Duration) (time.Du
 		return 0, err
 	}
 	wait := c.backoff(held.failures)
-	attributes := append(held.attributes(), slog.Any("error", err), slog.Int("failures", held.failures))
+	attributes := append(held.attributes(), slog.Any("error", err), slog.Int("failures", held.failures), slog.Int("restart", held.restarts+1))
+	noted := doubled(held.restarts + 1)
 	c.mu.Unlock()
-	c.logger.Warn("module_restarting", append(attributes, slog.Duration("in", wait))...)
+	if noted {
+		c.logger.Warn("module_restarting", append(attributes, slog.Duration("in", wait))...)
+	}
 	return wait, nil
 }
 
@@ -432,6 +437,8 @@ func await(running []waiting, within time.Duration) []string {
 	}
 	return stuck
 }
+
+func doubled(count int) bool { return count&(count-1) == 0 }
 
 func bounded(reason string) string {
 	if len(reason) <= maxReason {
