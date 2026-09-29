@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"slices"
 	"strconv"
@@ -165,7 +166,9 @@ func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
 	}
 	bounded, cancel := context.WithTimeout(ctx, c.options.RequestTimeout)
 	defer cancel()
-	sent, err := http.NewRequestWithContext(bounded, http.MethodPost, target.String(), body(request.Body))
+	var connected atomic.Bool
+	traced := httptrace.WithClientTrace(bounded, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
+	sent, err := http.NewRequestWithContext(traced, http.MethodPost, target.String(), body(request.Body))
 	if err != nil {
 		return Reply{}, fmt.Errorf("send to %s: %w", target.Redacted(), err)
 	}
@@ -173,12 +176,12 @@ func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
 	sent.Header.Set("Content-Type", request.ContentType)
 	response, err := c.current.Load().transport.RoundTrip(sent)
 	if err != nil {
-		return Reply{}, failure(ctx, target, err)
+		return Reply{}, failure(ctx, target, connected.Load(), err)
 	}
 	defer response.Body.Close()
 	content, err := io.ReadAll(io.LimitReader(response.Body, c.options.MaxResponseBytes+1))
 	if err != nil {
-		return Reply{}, failure(ctx, target, err)
+		return Reply{}, failure(ctx, target, true, err)
 	}
 	if int64(len(content)) > c.options.MaxResponseBytes {
 		return Reply{}, fmt.Errorf("%w: %s answered with more than %d bytes", ErrReplyTooLarge, target.Redacted(), c.options.MaxResponseBytes)
@@ -223,7 +226,7 @@ func (c *Client) Check(ctx context.Context, address string) (Peer, error) {
 	defer cancel()
 	connection, err := dialer.DialContext(bounded, "tcp", reachable(target))
 	if err != nil {
-		return Peer{}, failure(ctx, target, err)
+		return Peer{}, failure(ctx, target, false, err)
 	}
 	defer connection.Close()
 	state := connection.(*tls.Conn).ConnectionState()

@@ -79,7 +79,7 @@ func TestARenewalInterruptedBeforeItsAnswerIsResumedWithTheSameKey(t *testing.T)
 	first := held.active(t)
 	renewing := renewerFor(t, held, serving, []*x509.Certificate{signing.certificate}, time.Nanosecond, renewal.Policy{})
 	serving.change(func(p *platform) { p.lose = true })
-	if _, err := renewing.renewer.Renew(t.Context()); !errors.Is(err, transport.ErrUnreachable) || renewal.Lasting(err) {
+	if _, err := renewing.renewer.Renew(t.Context()); !errors.Is(err, transport.ErrUnanswered) || renewal.Lasting(err) {
 		t.Fatalf("a renewal whose answer was lost returned %v", err)
 	}
 	pending, asked := held.installation.Pending()

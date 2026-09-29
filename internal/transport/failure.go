@@ -30,8 +30,8 @@ var refusals = []uint8{42, 43, 44, 45, 46, 48, 49, 116}
 
 // A caller that stopped is told so, and never that the platform failed. The
 // rest says whose failure it was: the platform's certificate, the agent's, or
-// the network between them.
-func failure(ctx context.Context, target *url.URL, err error) error {
+// the network between them, before the request reached the listener or after.
+func failure(ctx context.Context, target *url.URL, connected bool, err error) error {
 	if stopped := ctx.Err(); stopped != nil {
 		return stopped
 	}
@@ -44,6 +44,9 @@ func failure(ctx context.Context, target *url.URL, err error) error {
 			return fmt.Errorf("%w: %s answered %s", ErrRefused, target.Redacted(), text)
 		}
 		return fmt.Errorf("%w: %s answered %s", ErrUntrusted, target.Redacted(), text)
+	}
+	if connected {
+		return fmt.Errorf("%w: %s: %s", ErrUnanswered, target.Redacted(), secrets.Bounded(err.Error()))
 	}
 	return fmt.Errorf("%w: %s: %s", ErrUnreachable, target.Redacted(), secrets.Bounded(err.Error()))
 }

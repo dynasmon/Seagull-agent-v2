@@ -234,11 +234,23 @@ func TestARefusedCredentialIsToldApartFromAPlatformThatCannotBeReached(t *testin
 		}
 	})
 	began = time.Now()
-	if _, err := client.Post(t.Context(), batch(slow.URL+"/v1/events", "sshd")); !errors.Is(err, transport.ErrUnreachable) {
+	if _, err := client.Post(t.Context(), batch(slow.URL+"/v1/events", "sshd")); !errors.Is(err, transport.ErrUnanswered) || errors.Is(err, transport.ErrUnreachable) {
 		t.Fatalf("a platform that never answers the request answered with %v", err)
 	}
 	if took := time.Since(began); took < 2*time.Second || took > 2*time.Second+settle/2 {
 		t.Fatalf("a request nobody answered was waited for %s, with a request timeout of 2s", took)
+	}
+
+	dropped := serve(t, trusted, agents, func(w http.ResponseWriter, r *http.Request) {
+		if hijacked, _, err := w.(http.Hijacker).Hijack(); err == nil {
+			hijacked.Close()
+		}
+	})
+	if _, err := client.Post(t.Context(), batch(dropped.URL+"/v1/events", "sshd")); !errors.Is(err, transport.ErrUnanswered) {
+		t.Fatalf("a platform that dropped the connection after taking the request answered with %v", err)
+	}
+	if seen := dropped.requests(); len(seen) != 1 {
+		t.Fatalf("a platform that dropped the connection took %d requests", len(seen))
 	}
 }
 
