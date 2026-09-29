@@ -143,6 +143,13 @@ var dependencyRules = []dependencyRule{
 		reason:     "the link keeps whether a listener answers and when it is tried again: what travels to the listener, what an answer means and whose records wait on it belong to delivery and renewal, and a failure is known to it by what the transport reported",
 	},
 	{
+		packages:   "internal/status",
+		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
+		allowed:    []string{modulePath + "/internal/secrets", modulePath + "/internal/platform/files"},
+		transitive: true,
+		reason:     "the status writes down what the agent is handed to say of itself and reads back only what it wrote: it holds no key, reads no contract and reaches no network, so nothing it keeps authenticates the agent or asks the platform anything",
+	},
+	{
 		packages:   "internal/governor",
 		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
 		transitive: true,
@@ -519,6 +526,32 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				ImportPath: modulePath + "/internal/link",
 				Imports:    []string{"log/slog", "math/rand/v2", "sync", modulePath + "/internal/secrets", modulePath + "/internal/transport"},
 				Deps:       []string{"crypto/tls", "log/slog", "math/rand/v2", "net/http", "sync", modulePath + "/internal/secrets", modulePath + "/internal/transport"},
+			},
+		},
+		{
+			name: "the status reading the credential it reports on",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/status",
+				Imports:    []string{modulePath + "/internal/pki", "encoding/json"},
+				Deps:       []string{"encoding/json", modulePath + "/internal/pki", modulePath + "/internal/platform/files"},
+			},
+			want: []string{modulePath + "/internal/pki"},
+		},
+		{
+			name: "the status telling the platform how the agent is doing",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/status",
+				Imports:    []string{"net/http", contractsPath + "/gen/go/seagull/agent/v1"},
+				Deps:       []string{"crypto/tls", "net/http", contractsPath + "/gen/go/seagull/agent/v1"},
+			},
+			want: []string{"crypto/tls", "net/http", contractsPath + "/gen/go/seagull/agent/v1"},
+		},
+		{
+			name: "the status keeping the snapshot it is handed",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/status",
+				Imports:    []string{"encoding/json", "os", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
+				Deps:       []string{"encoding/json", "os", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
 			},
 		},
 		{
