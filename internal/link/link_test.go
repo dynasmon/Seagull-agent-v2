@@ -135,6 +135,30 @@ func TestAnOutageSeveralRequestsRanIntoIsCountedOnceAndAnAnswerSinceStands(t *te
 	})
 }
 
+func TestATurnTakenBeforeTheListenerFailedNoLongerStands(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		connected, _ := compose(t, measured)
+		early, _ := connected.Take(t.Context())
+		failing, _ := connected.Take(t.Context())
+		if !early.Stands() || !failing.Stands() {
+			t.Fatal("a turn taken while the listener answers does not stand")
+		}
+		time.Sleep(time.Until(failing.Failed(link.Transport, 0, errors.New("connection refused"))))
+		if early.Stands() || failing.Stands() {
+			t.Fatal("a turn stands after the listener failed, or after it was settled")
+		}
+		probe, _ := connected.Take(t.Context())
+		if !probe.Stands() {
+			t.Fatal("the turn to try a failing listener again does not stand")
+		}
+		probe.Answered()
+		late, _ := connected.Take(t.Context())
+		if !late.Stands() || !early.Stands() {
+			t.Fatal("a turn does not stand once the listener answers again")
+		}
+	})
+}
+
 func TestAFailureThatWaitsOnSomebodyIsHeldLongerAndSaysWhatToDo(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		connected, written := compose(t, measured)
