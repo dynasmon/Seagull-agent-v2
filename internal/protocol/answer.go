@@ -22,6 +22,7 @@ type Outcome int
 const (
 	Durable Outcome = iota + 1
 	Unconfirmed
+	Busy
 	RecordRefused
 	BatchTooLarge
 	BatchUndecodable
@@ -37,6 +38,8 @@ func (o Outcome) String() string {
 		return "durable"
 	case Unconfirmed:
 		return "unconfirmed"
+	case Busy:
+		return "busy"
 	case RecordRefused:
 		return "record_refused"
 	case BatchTooLarge:
