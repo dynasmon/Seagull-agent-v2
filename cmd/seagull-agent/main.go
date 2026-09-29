@@ -976,6 +976,8 @@ func recovery(path, state string, err error) string {
 		return "run the agent to create an installation"
 	case errors.Is(err, transport.ErrUntrusted):
 		return "check that server.trust_bundle in " + path + " holds the authority that issued the platform's certificate, and that the address names a host that certificate was issued for"
+	case errors.Is(err, transport.ErrUnanswered):
+		return "nothing: the agent asks again; if the platform keeps taking requests it does not answer, check that it answers within transport.request_timeout in " + path
 	case errors.Is(err, transport.ErrUnreachable):
 		return "check that the host the address names resolves and can be reached from this machine over the network"
 	case errors.Is(err, fs.ErrNotExist):

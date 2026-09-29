@@ -8,12 +8,11 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"math/rand/v2"
 	"net/http"
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
-	"github.com/dynasmon/Seagull-agent-v2/internal/transport"
+	"github.com/dynasmon/Seagull-agent-v2/internal/link"
 )
 
 // When the next certificate is asked for, as a share of the lifetime of the
@@ -23,7 +22,6 @@ import (
 const (
 	earliest = 7.0 / 12
 	spread   = 2.0 / 12
-	jitter   = 0.2
 )
 
 // A Policy bounds how often the agent asks: Retry after the first failure,
@@ -55,11 +53,7 @@ func (p Policy) settled() (Policy, error) {
 }
 
 func (p Policy) wait(failures int, lasting bool) time.Duration {
-	wait := p.Longest
-	if !lasting {
-		wait = time.Duration(min(float64(p.Retry)*math.Pow(2, float64(failures-1)), float64(p.Longest)))
-	}
-	return time.Duration(float64(wait) * (1 - jitter + 2*jitter*rand.Float64()))
+	return link.Policy{Retry: p.Retry, RetryLongest: p.Longest, Hold: p.Longest, HoldLongest: p.Longest}.Wait(failures, lasting, 0)
 }
 
 func (r *Renewer) Due(active identity.Enrollment) time.Time {
@@ -78,7 +72,22 @@ func Lasting(err error) bool {
 	if errors.As(err, &refused) {
 		return refused.Status < http.StatusInternalServerError && refused.Status != http.StatusTooManyRequests && refused.Status != http.StatusRequestTimeout
 	}
-	return !errors.Is(err, transport.ErrUnreachable)
+	class, classified := link.Of(err)
+	return !classified || class.Lasting()
+}
+
+func failure(err error) (link.Class, bool) {
+	var refused *Refusal
+	if !errors.As(err, &refused) {
+		return link.Of(err)
+	}
+	switch refused.Status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusUnprocessableEntity:
+		return link.Authorization, true
+	case http.StatusTooManyRequests:
+		return link.Capacity, true
+	}
+	return link.Capacity, refused.Status >= http.StatusInternalServerError
 }
 
 func (r *Renewer) Run(ctx context.Context) error {
@@ -145,9 +154,12 @@ func (r *Renewer) Run(ctx context.Context) error {
 			if lasting {
 				level = slog.LevelError
 			}
-			logger.Log(ctx, level, "credential_not_renewed", slog.String("agent_id", active.AgentID), slog.Uint64("credential_generation", active.Generation),
-				slog.Any("error", err), slog.Int("attempt", failures), slog.Time("next_attempt", retry), slog.Time("not_after", certificate.NotAfter),
-				slog.String("recovery", r.options.Recovery(err)))
+			attributes := []any{slog.String("agent_id", active.AgentID), slog.Uint64("credential_generation", active.Generation)}
+			if class, classified := failure(err); classified {
+				attributes = append(attributes, slog.String("failure", class.String()))
+			}
+			logger.Log(ctx, level, "credential_not_renewed", append(attributes, slog.Any("error", err), slog.Int("attempt", failures),
+				slog.Time("next_attempt", retry), slog.Time("not_after", certificate.NotAfter), slog.String("recovery", r.options.Recovery(err)))...)
 			continue
 		}
 		failures, retry = 0, time.Time{}

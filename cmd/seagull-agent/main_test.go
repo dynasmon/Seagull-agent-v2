@@ -627,6 +627,7 @@ func TestADeliveryThePlatformHoldsBackSaysWhatToDo(t *testing.T) {
 		{err: &protocol.Dispute{Field: "time.event_time"}, says: "check the clock of this host against the platform's"},
 		{err: &protocol.Refusal{Status: http.StatusNotFound}, says: "server.ingest_url in /etc/seagull-agent/agent.json names the platform's ingest listener"},
 		{err: fmt.Errorf("%w: text/html", protocol.ErrNoAcknowledgement), says: "server.ingest_url in /etc/seagull-agent/agent.json"},
+		{err: fmt.Errorf("%w: context deadline exceeded", transport.ErrUnanswered), says: "transport.request_timeout in /etc/seagull-agent/agent.json"},
 	} {
 		if told := recovery(path, state, fmt.Errorf("deliver events: %w", c.err)); !strings.Contains(told, c.says) {
 			t.Errorf("%v is recovered from with %q", c.err, told)

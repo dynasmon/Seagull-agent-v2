@@ -22,6 +22,7 @@ type Outcome int
 const (
 	Durable Outcome = iota + 1
 	Unconfirmed
+	Busy
 	RecordRefused
 	BatchTooLarge
 	BatchUndecodable
@@ -37,6 +38,8 @@ func (o Outcome) String() string {
 		return "durable"
 	case Unconfirmed:
 		return "unconfirmed"
+	case Busy:
+		return "busy"
 	case RecordRefused:
 		return "record_refused"
 	case BatchTooLarge:
@@ -57,18 +60,22 @@ func (o Outcome) String() string {
 }
 
 const (
-	statusOK              = 200
-	statusRequestTimeout  = 408
-	statusTooLarge        = 413
-	statusTooManyRequests = 429
-	statusServerError     = 500
+	statusOK                 = 200
+	statusRequestTimeout     = 408
+	statusTooLarge           = 413
+	statusTooManyRequests    = 429
+	statusServerError        = 500
+	statusServiceUnavailable = 503
 )
 
-// What the recorded gateway refuses a batch with when it could not take the
-// batch then, when the batch is larger than it takes, and when it could not
-// decode the batch at all. None of them refuses a record for what it holds.
+// What the recorded gateway refuses a batch with when it takes nothing from
+// the agent then, whatever it sends, since both routes share its rate limit
+// and its capacity; when it could not take this batch then; when the batch is
+// larger than it takes; and when it could not decode the batch at all. None of
+// them refuses a record for what it holds.
 var (
-	unavailable = []string{"rate_limited", "gateway_at_capacity", "backbone_unavailable", "unreadable_body"}
+	busy        = []string{"rate_limited", "gateway_at_capacity"}
+	unavailable = []string{"backbone_unavailable", "unreadable_body"}
 	oversized   = []string{"batch_body_too_large", "batch_too_large"}
 	undecodable = "malformed_payload"
 )
@@ -146,6 +153,8 @@ func (r Route) Judge(sent []Sent, answer Answer) Verdict {
 		switch {
 		case answer.Status == statusTooLarge:
 			return Verdict{Outcome: BatchTooLarge, Record: -1, Reason: said}
+		case holding(answer.Status):
+			return Verdict{Outcome: Busy, Record: -1, Reason: said}
 		case passing(answer.Status):
 			return Verdict{Outcome: Unconfirmed, Record: -1, Reason: said}
 		}
@@ -160,6 +169,8 @@ func (r Route) Judge(sent []Sent, answer Answer) Verdict {
 	case code == unsupportedProtocol:
 		return Verdict{Outcome: Incompatible, Record: -1, Reason: &Incompatibility{
 			Field: "protocol_version", Value: strconv.Itoa(Version), Record: -1, Detail: said.Detail}}
+	case slices.Contains(busy, code):
+		return Verdict{Outcome: Busy, Record: -1, Reason: said}
 	case slices.Contains(unavailable, code):
 		return Verdict{Outcome: Unconfirmed, Record: -1, Reason: said}
 	case slices.Contains(oversized, code):
@@ -168,6 +179,8 @@ func (r Route) Judge(sent []Sent, answer Answer) Verdict {
 		return Verdict{Outcome: BatchUndecodable, Record: -1, Reason: said}
 	case code == r.shape().refusing:
 		return r.refused(sent, refusal, said, answer.Date)
+	case holding(answer.Status):
+		return Verdict{Outcome: Busy, Record: -1, Reason: said}
 	case passing(answer.Status):
 		return Verdict{Outcome: Unconfirmed, Record: -1, Reason: said}
 	}
@@ -264,6 +277,10 @@ func protobuf(contentType string) bool {
 	return err == nil && (media == ContentType || media == "application/protobuf")
 }
 
+func holding(status int) bool {
+	return status == statusTooManyRequests || status == statusServiceUnavailable
+}
+
 func passing(status int) bool {
-	return status == statusRequestTimeout || status == statusTooManyRequests || status >= statusServerError
+	return status == statusRequestTimeout || status >= statusServerError
 }

@@ -14,8 +14,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"slices"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -24,6 +27,7 @@ const (
 	idle           = 30 * time.Second
 	keepAlive      = 30 * time.Second
 	maxHeaderBytes = 16 << 10
+	longestAsked   = 24 * time.Hour
 )
 
 type Options struct {
@@ -47,6 +51,7 @@ type Reply struct {
 	ContentType string
 	Body        []byte
 	Date        time.Time
+	RetryAfter  time.Duration
 	Peer        []*x509.Certificate
 }
 
@@ -61,6 +66,7 @@ type Peer struct {
 
 type Client struct {
 	options   Options
+	resolver  *net.Resolver
 	current   atomic.Pointer[connections]
 	presented atomic.Pointer[tls.Certificate]
 }
@@ -70,7 +76,9 @@ type connections struct {
 	transport *http.Transport
 }
 
-func New(options Options) (*Client, error) {
+func New(options Options) (*Client, error) { return compose(options, nil) }
+
+func compose(options Options, resolver *net.Resolver) (*Client, error) {
 	var problems []error
 	roots, err := anchors(options.Authorities)
 	if err != nil {
@@ -91,7 +99,7 @@ func New(options Options) (*Client, error) {
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("compose the transport: %w", errors.Join(problems...))
 	}
-	client := &Client{options: options}
+	client := &Client{options: options, resolver: resolver}
 	client.current.Store(client.connect(roots))
 	return client, nil
 }
@@ -113,7 +121,7 @@ func (c *Client) connect(roots *x509.CertPool) *connections {
 	protocols.SetHTTP1(true)
 	return &connections{roots: roots, transport: &http.Transport{
 		Proxy:       nil,
-		DialContext: (&net.Dialer{Timeout: c.options.ConnectTimeout, KeepAlive: keepAlive}).DialContext,
+		DialContext: (&net.Dialer{Timeout: c.options.ConnectTimeout, KeepAlive: keepAlive, Resolver: c.resolver}).DialContext,
 		TLSClientConfig: &tls.Config{
 			MinVersion:           tls.VersionTLS13,
 			RootCAs:              roots,
@@ -158,7 +166,9 @@ func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
 	}
 	bounded, cancel := context.WithTimeout(ctx, c.options.RequestTimeout)
 	defer cancel()
-	sent, err := http.NewRequestWithContext(bounded, http.MethodPost, target.String(), body(request.Body))
+	var connected atomic.Bool
+	traced := httptrace.WithClientTrace(bounded, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
+	sent, err := http.NewRequestWithContext(traced, http.MethodPost, target.String(), body(request.Body))
 	if err != nil {
 		return Reply{}, fmt.Errorf("send to %s: %w", target.Redacted(), err)
 	}
@@ -166,12 +176,12 @@ func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
 	sent.Header.Set("Content-Type", request.ContentType)
 	response, err := c.current.Load().transport.RoundTrip(sent)
 	if err != nil {
-		return Reply{}, failure(ctx, target, err)
+		return Reply{}, failure(ctx, target, connected.Load(), err)
 	}
 	defer response.Body.Close()
 	content, err := io.ReadAll(io.LimitReader(response.Body, c.options.MaxResponseBytes+1))
 	if err != nil {
-		return Reply{}, failure(ctx, target, err)
+		return Reply{}, failure(ctx, target, true, err)
 	}
 	if int64(len(content)) > c.options.MaxResponseBytes {
 		return Reply{}, fmt.Errorf("%w: %s answered with more than %d bytes", ErrReplyTooLarge, target.Redacted(), c.options.MaxResponseBytes)
@@ -181,7 +191,14 @@ func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
 		peer = slices.Clone(response.TLS.PeerCertificates)
 	}
 	date, _ := http.ParseTime(response.Header.Get("Date"))
-	return Reply{Status: response.StatusCode, ContentType: response.Header.Get("Content-Type"), Body: content, Date: date, Peer: peer}, nil
+	return Reply{
+		Status:      response.StatusCode,
+		ContentType: response.Header.Get("Content-Type"),
+		Body:        content,
+		Date:        date,
+		RetryAfter:  asked(response.Header.Get("Retry-After"), date),
+		Peer:        peer,
+	}, nil
 }
 
 // Check authenticates the listener at address without presenting anything,
@@ -194,7 +211,7 @@ func (c *Client) Check(ctx context.Context, address string) (Peer, error) {
 	}
 	var asked atomic.Bool
 	dialer := &tls.Dialer{
-		NetDialer: &net.Dialer{Timeout: c.options.ConnectTimeout},
+		NetDialer: &net.Dialer{Timeout: c.options.ConnectTimeout, Resolver: c.resolver},
 		Config: &tls.Config{
 			MinVersion: tls.VersionTLS13,
 			RootCAs:    c.current.Load().roots,
@@ -209,7 +226,7 @@ func (c *Client) Check(ctx context.Context, address string) (Peer, error) {
 	defer cancel()
 	connection, err := dialer.DialContext(bounded, "tcp", reachable(target))
 	if err != nil {
-		return Peer{}, failure(ctx, target, err)
+		return Peer{}, failure(ctx, target, false, err)
 	}
 	defer connection.Close()
 	state := connection.(*tls.Conn).ConnectionState()
@@ -229,6 +246,25 @@ func (c *Client) Check(ctx context.Context, address string) (Peer, error) {
 }
 
 func (c *Client) Close() { c.current.Load().transport.CloseIdleConnections() }
+
+func asked(header string, date time.Time) time.Duration {
+	header = strings.TrimSpace(header)
+	if header != "" && strings.Trim(header, "0123456789") == "" {
+		seconds, err := strconv.ParseInt(header, 10, 64)
+		if err != nil || seconds > int64(longestAsked/time.Second) {
+			return longestAsked
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	at, err := http.ParseTime(header)
+	if err != nil {
+		return 0
+	}
+	if date.IsZero() {
+		date = time.Now()
+	}
+	return min(max(at.Sub(date), 0), longestAsked)
+}
 
 func body(held io.Reader) io.ReadCloser {
 	if held == nil {

@@ -524,6 +524,7 @@ type setup struct {
 	policy   delivery.Policy
 	timeout  time.Duration
 	uploads  int
+	url      string
 }
 
 func deliver(t *testing.T, held *spool.Spool, serving *platform, holding *credential, change func(*setup)) *delivering {
@@ -533,6 +534,7 @@ func deliver(t *testing.T, held *spool.Spool, serving *platform, holding *creden
 		policy:   fast,
 		timeout:  2 * time.Second,
 		uploads:  2,
+		url:      serving.URL,
 	}
 	if change != nil {
 		change(&chosen)
@@ -562,7 +564,7 @@ func deliver(t *testing.T, held *spool.Spool, serving *platform, holding *creden
 		Spool:    held,
 		Client:   client,
 		Governor: governed,
-		URL:      serving.URL,
+		URL:      chosen.url,
 		Batching: func() delivery.Batching { return *limits.Load() },
 		Policy:   chosen.policy,
 		Logger:   logger,

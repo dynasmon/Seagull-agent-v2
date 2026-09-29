@@ -234,11 +234,23 @@ func TestARefusedCredentialIsToldApartFromAPlatformThatCannotBeReached(t *testin
 		}
 	})
 	began = time.Now()
-	if _, err := client.Post(t.Context(), batch(slow.URL+"/v1/events", "sshd")); !errors.Is(err, transport.ErrUnreachable) {
+	if _, err := client.Post(t.Context(), batch(slow.URL+"/v1/events", "sshd")); !errors.Is(err, transport.ErrUnanswered) || errors.Is(err, transport.ErrUnreachable) {
 		t.Fatalf("a platform that never answers the request answered with %v", err)
 	}
 	if took := time.Since(began); took < 2*time.Second || took > 2*time.Second+settle/2 {
 		t.Fatalf("a request nobody answered was waited for %s, with a request timeout of 2s", took)
+	}
+
+	dropped := serve(t, trusted, agents, func(w http.ResponseWriter, r *http.Request) {
+		if hijacked, _, err := w.(http.Hijacker).Hijack(); err == nil {
+			hijacked.Close()
+		}
+	})
+	if _, err := client.Post(t.Context(), batch(dropped.URL+"/v1/events", "sshd")); !errors.Is(err, transport.ErrUnanswered) {
+		t.Fatalf("a platform that dropped the connection after taking the request answered with %v", err)
+	}
+	if seen := dropped.requests(); len(seen) != 1 {
+		t.Fatalf("a platform that dropped the connection took %d requests", len(seen))
 	}
 }
 
@@ -457,6 +469,44 @@ func TestAReplySaysWhenThePlatformAnsweredByItsOwnClock(t *testing.T) {
 			}
 			if !reply.Date.Equal(c.want) {
 				t.Fatalf("the reply says the platform answered at %s, and it wrote %q", reply.Date, c.date)
+			}
+		})
+	}
+}
+
+func TestAReplySaysHowLongThePlatformAskedTheAgentToWait(t *testing.T) {
+	answered := time.Date(2026, time.September, 27, 14, 3, 9, 0, time.UTC)
+	stamped := []string{answered.Format(http.TimeFormat)}
+	for name, c := range map[string]struct {
+		date, after []string
+		want        time.Duration
+	}{
+		"seconds, as a busy gateway asks":          {date: stamped, after: []string{"5"}, want: 5 * time.Second},
+		"no time at all":                           {date: stamped, after: []string{"0"}},
+		"nothing asked":                            {date: stamped},
+		"a moment by the platform's own clock":     {date: stamped, after: []string{answered.Add(90 * time.Second).Format(http.TimeFormat)}, want: 90 * time.Second},
+		"a moment the platform's clock has passed": {date: stamped, after: []string{answered.Add(-time.Minute).Format(http.TimeFormat)}},
+		"a moment by the agent's clock":            {after: []string{time.Now().UTC().Add(time.Hour).Format(http.TimeFormat)}, want: time.Hour},
+		"longer than a day":                        {date: stamped, after: []string{"86401"}, want: 24 * time.Hour},
+		"more seconds than a number holds":         {date: stamped, after: []string{"99999999999999999999999999"}, want: 24 * time.Hour},
+		"a negative time":                          {date: stamped, after: []string{"-5"}},
+		"words":                                    {date: stamped, after: []string{"soon"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agents := authorityNamed(t, "Seagull agents")
+			listener := serve(t, authorityNamed(t, "Seagull platform"), agents, func(w http.ResponseWriter, r *http.Request) {
+				w.Header()["Date"] = c.date
+				w.Header()["Retry-After"] = c.after
+				w.WriteHeader(http.StatusServiceUnavailable)
+			})
+			key := agentKey(t)
+			client := compose(t, listener.trusted, &held{credential: transport.Credential{Chain: agents.agent(t, "web-01", key.Public()), Signer: key}})
+			reply, err := client.Post(t.Context(), batch(listener.URL+"/v1/events", "sshd"))
+			if err != nil {
+				t.Fatalf("send: %v", err)
+			}
+			if reply.RetryAfter > c.want || reply.RetryAfter < c.want-2*time.Second || (c.date != nil && reply.RetryAfter != c.want) {
+				t.Fatalf("the reply asks the agent to wait %s, and the platform wrote %q at %q", reply.RetryAfter, c.after, c.date)
 			}
 		})
 	}

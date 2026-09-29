@@ -136,6 +136,13 @@ var dependencyRules = []dependencyRule{
 		reason:    "delivery reaches the platform through the transport alone, which authenticates it and presents the agent's credential; delivery decides what to send and what an answer means",
 	},
 	{
+		packages:   "internal/link",
+		forbidden:  []string{modulePath, contractsPath},
+		allowed:    []string{modulePath + "/internal/transport", modulePath + "/internal/secrets"},
+		transitive: true,
+		reason:     "the link keeps whether a listener answers and when it is tried again: what travels to the listener, what an answer means and whose records wait on it belong to delivery and renewal, and a failure is known to it by what the transport reported",
+	},
+	{
 		packages:   "internal/governor",
 		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
 		transitive: true,
@@ -486,6 +493,32 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 					modulePath + "/internal/transport", contractsPath + "/gen/go/seagull/ingest/v1"},
 				Deps: []string{"crypto/tls", "net/http", modulePath + "/internal/governor", modulePath + "/internal/protocol",
 					modulePath + "/internal/spool", modulePath + "/internal/transport", contractsPath + "/gen/go/seagull/ingest/v1"},
+			},
+		},
+		{
+			name: "the link reading the records that wait on it",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/link",
+				Imports:    []string{modulePath + "/internal/spool", modulePath + "/internal/transport"},
+				Deps:       []string{modulePath + "/internal/platform/files", modulePath + "/internal/secrets", modulePath + "/internal/spool", modulePath + "/internal/transport"},
+			},
+			want: []string{modulePath + "/internal/platform/files", modulePath + "/internal/spool"},
+		},
+		{
+			name: "the link reading what the gateway answered",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/link",
+				Imports:    []string{modulePath + "/internal/protocol"},
+				Deps:       []string{ingest, modulePath + "/internal/protocol", modulePath + "/internal/secrets"},
+			},
+			want: []string{ingest, modulePath + "/internal/protocol"},
+		},
+		{
+			name: "the link knowing a failure by what the transport reported",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/link",
+				Imports:    []string{"log/slog", "math/rand/v2", "sync", modulePath + "/internal/secrets", modulePath + "/internal/transport"},
+				Deps:       []string{"crypto/tls", "log/slog", "math/rand/v2", "net/http", "sync", modulePath + "/internal/secrets", modulePath + "/internal/transport"},
 			},
 		},
 		{
