@@ -13,8 +13,6 @@ import (
 	"log/slog"
 	"sync"
 	"time"
-
-	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 )
 
 type Options struct {
@@ -34,6 +32,7 @@ type Link struct {
 	failures int
 	class    Class
 	reason   string
+	recovery string
 	since    time.Time
 	until    time.Time
 	answered time.Time
@@ -46,6 +45,7 @@ type State struct {
 	Failing  time.Time
 	Failure  Class
 	Reason   string
+	Recovery string
 	Attempts int
 	Next     time.Time
 }
@@ -105,7 +105,8 @@ func (l *Link) State() State {
 	defer l.mu.Unlock()
 	state := State{Listener: l.options.Listener, Answered: l.answered}
 	if l.failing {
-		state.Failing, state.Failure, state.Reason, state.Attempts, state.Next = l.since, l.class, l.reason, l.failures, l.until
+		state.Failing, state.Failure, state.Reason, state.Recovery = l.since, l.class, l.reason, l.recovery
+		state.Attempts, state.Next = l.failures, l.until
 	}
 	return state
 }
@@ -129,7 +130,7 @@ func (t *Turn) Answered() {
 	}
 	restored := []any{slog.String("listener", l.options.Listener), slog.String("failure", l.class.String()),
 		slog.Int("attempts", l.failures), slog.Duration("failing", now.Sub(l.since))}
-	l.failing, l.probing, l.failures, l.class, l.reason, l.since, l.until = false, false, 0, 0, "", time.Time{}, time.Time{}
+	l.failing, l.probing, l.failures, l.class, l.reason, l.recovery, l.since, l.until = false, false, 0, 0, "", "", time.Time{}, time.Time{}
 	l.epoch++
 	l.announce()
 	l.mu.Unlock()
@@ -142,6 +143,10 @@ func (t *Turn) Answered() {
 // counted once, and an answer given since stands.
 func (t *Turn) Failed(class Class, asked time.Duration, reason error) time.Time {
 	l := t.link
+	recovery := "none: the agent tries the listener again, one request at a time, until it answers"
+	if class.Lasting() {
+		recovery = l.options.Recovery(reason)
+	}
 	l.mu.Lock()
 	now := time.Now()
 	if t.done || t.epoch != l.epoch {
@@ -156,29 +161,29 @@ func (t *Turn) Failed(class Class, asked time.Duration, reason error) time.Time 
 	t.done = true
 	said := ""
 	if reason != nil {
-		said = secrets.Bounded(reason.Error())
+		said = reason.Error()
 	}
 	changed := !l.failing || l.class != class
 	if !l.failing {
 		l.since = now
 	}
 	l.failures++
-	l.failing, l.probing, l.class, l.reason = true, false, class, said
+	l.failing, l.probing, l.class, l.reason, l.recovery = true, false, class, said, recovery
 	l.until = now.Add(l.options.Policy.Wait(l.failures, class.Lasting(), asked))
 	l.epoch++
 	l.announce()
 	failing := []any{slog.String("listener", l.options.Listener), slog.String("failure", class.String()), slog.String("error", said),
-		slog.Time("failing_since", l.since), slog.Int("attempt", l.failures), slog.Time("next_attempt", l.until)}
+		slog.Time("failing_since", l.since), slog.Int("attempt", l.failures), slog.Time("next_attempt", l.until), slog.String("recovery", recovery)}
 	next := l.until
 	l.mu.Unlock()
 	if !changed {
 		return next
 	}
+	level := slog.LevelWarn
 	if class.Lasting() {
-		l.options.Logger.Error("connection_failing", append(failing, slog.String("recovery", l.options.Recovery(reason)))...)
-		return next
+		level = slog.LevelError
 	}
-	l.options.Logger.Warn("connection_failing", append(failing, slog.String("recovery", "none: the agent tries the listener again, one request at a time, until it answers"))...)
+	l.options.Logger.Log(context.Background(), level, "connection_failing", failing...)
 	return next
 }
 

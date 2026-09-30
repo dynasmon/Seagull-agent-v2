@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -64,6 +65,9 @@ type Renewer struct {
 	options Options
 	target  *url.URL
 	trusted []*x509.Certificate
+
+	mu    sync.Mutex
+	state State
 }
 
 type Renewed struct {

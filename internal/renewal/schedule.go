@@ -52,6 +52,29 @@ func (p Policy) settled() (Policy, error) {
 	return p, nil
 }
 
+type State struct {
+	RenewsAt time.Time
+	Renewed  time.Time
+	Failing  time.Time
+	Attempts int
+	Failure  link.Class
+	Reason   string
+	Recovery string
+	Next     time.Time
+}
+
+func (r *Renewer) State() State {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.state
+}
+
+func (r *Renewer) note(change func(*State)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	change(&r.state)
+}
+
 func (p Policy) wait(failures int, lasting bool) time.Duration {
 	return link.Policy{Retry: p.Retry, RetryLongest: p.Longest, Hold: p.Longest, HoldLongest: p.Longest}.Wait(failures, lasting, 0)
 }
@@ -97,6 +120,7 @@ func (r *Renewer) Run(ctx context.Context) error {
 		retry    time.Time
 		said     string
 		planned  string
+		previous link.Class
 	)
 	for {
 		active, enrolled := r.options.Installation.Enrollment()
@@ -128,6 +152,7 @@ func (r *Renewer) Run(ctx context.Context) error {
 		}
 		said = ""
 		due := r.Due(active)
+		r.note(func(state *State) { state.RenewsAt = due })
 		if planned != certificate.FingerprintSHA256 {
 			planned = certificate.FingerprintSHA256
 			logger.Info("credential_renewal_scheduled", slog.String("agent_id", active.AgentID), slog.Uint64("credential_generation", active.Generation),
@@ -149,20 +174,35 @@ func (r *Renewer) Run(ctx context.Context) error {
 		if err != nil {
 			failures++
 			lasting := Lasting(err)
-			retry = time.Now().Add(r.options.Policy.wait(failures, lasting))
+			now := time.Now()
+			retry = now.Add(r.options.Policy.wait(failures, lasting))
+			class, _ := failure(err)
+			recovery := r.options.Recovery(err)
+			r.note(func(state *State) {
+				if failures == 1 {
+					state.Failing = now
+				}
+				state.Attempts, state.Failure, state.Reason, state.Recovery, state.Next = failures, class, err.Error(), recovery, retry
+			})
+			changed := failures == 1 || class != previous
+			previous = class
+			if !changed && failures&(failures-1) != 0 {
+				continue
+			}
 			level := slog.LevelWarn
 			if lasting {
 				level = slog.LevelError
 			}
 			attributes := []any{slog.String("agent_id", active.AgentID), slog.Uint64("credential_generation", active.Generation)}
-			if class, classified := failure(err); classified {
+			if class != 0 {
 				attributes = append(attributes, slog.String("failure", class.String()))
 			}
 			logger.Log(ctx, level, "credential_not_renewed", append(attributes, slog.Any("error", err), slog.Int("attempt", failures),
-				slog.Time("next_attempt", retry), slog.Time("not_after", certificate.NotAfter), slog.String("recovery", r.options.Recovery(err)))...)
+				slog.Time("next_attempt", retry), slog.Time("not_after", certificate.NotAfter), slog.String("recovery", recovery))...)
 			continue
 		}
-		failures, retry = 0, time.Time{}
+		failures, retry, previous = 0, time.Time{}, 0
+		r.note(func(state *State) { *state = State{RenewsAt: r.Due(renewed.Enrollment), Renewed: time.Now()} })
 		r.report(renewed)
 	}
 }

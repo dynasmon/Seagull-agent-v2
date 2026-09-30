@@ -143,14 +143,16 @@ func TestABatchIsSentAgainAsItWasUntilThePlatformAcknowledgesItDurably(t *testin
 		}
 	}
 	failures := running.logs.entries(t, "delivery_failed")
-	if len(failures) != 6 {
-		t.Fatalf("logged %d failed deliveries:\n%s", len(failures), running.logs)
-	}
+	var attempts []float64
 	levels := map[string]string{"unconfirmed": "WARN", "unexpected": "ERROR"}
 	for _, failure := range failures {
+		attempts = append(attempts, failure["attempt"].(float64))
 		if failure["level"] != levels[failure["outcome"].(string)] || failure["batch_id"] != arrivals[0].id || failure["records"] != float64(10) {
 			t.Errorf("logged %v", failure)
 		}
+	}
+	if !slices.Equal(attempts, []float64{1, 2, 4, 5, 6}) {
+		t.Fatalf("logged the failed attempts %v, want the first, those that doubled the count and those that failed otherwise than the one before:\n%s", attempts, running.logs)
 	}
 	eventually(t, "reporting that the delivery resumed", func() bool { return len(running.logs.entries(t, "delivery_resumed")) > 0 })
 	if resumed := running.logs.entries(t, "delivery_resumed"); len(resumed) != 1 || resumed[0]["attempts"] != float64(6) {
@@ -324,8 +326,8 @@ func TestARefusalThatNeedsSomebodyToActKeepsEveryRecordUntilThePlatformTakesThem
 				t.Fatalf("the spool counts %+v", kept)
 			}
 			failures := running.logs.entries(t, "delivery_failed")
-			if len(failures) != 3 {
-				t.Fatalf("logged %d failed deliveries", len(failures))
+			if len(failures) != 2 || failures[0]["attempt"] != float64(1) || failures[1]["attempt"] != float64(2) {
+				t.Fatalf("logged %v as three attempts failed alike", failures)
 			}
 			for _, failure := range failures {
 				if failure["level"] != "ERROR" || failure["outcome"] != c.outcome || !strings.HasPrefix(failure["recovery"].(string), "recover from ") {
@@ -338,6 +340,38 @@ func TestARefusalThatNeedsSomebodyToActKeepsEveryRecordUntilThePlatformTakesThem
 				}
 			}
 		})
+	}
+}
+
+func TestAFailureThatRepeatsIsWrittenDownEachTimeItsAttemptsDouble(t *testing.T) {
+	serving := emulate(t)
+	held := spoolIn(t, spoolDirectory(t))
+	admitEvents(t, held, "event", 3)
+	serving.set(func(w http.ResponseWriter, arrived *received) bool {
+		refuse(w, http.StatusUpgradeRequired, "unsupported_protocol_version", "", -1)
+		return true
+	})
+	running := deliver(t, held, serving, enrolled(t, serving), func(chosen *setup) {
+		chosen.policy = delivery.Policy{Retry: time.Millisecond, RetryLongest: time.Millisecond, Hold: time.Millisecond, HoldLongest: 2 * time.Millisecond}
+	})
+	eventually(t, "failing forty times", func() bool { return running.delivery.Stats().Routes[0].Attempts >= 40 })
+	route := running.delivery.Stats().Routes[0]
+	if route.Stream != spool.Events || route.Outcome != protocol.Incompatible || route.Failing.IsZero() || !route.Delivered.IsZero() ||
+		!strings.Contains(route.Reason, "protocol_version") || route.Recovery != "recover from "+route.Reason || route.Oldest.IsZero() {
+		t.Fatalf("while the platform refused its protocol, the route stood at %+v", route)
+	}
+	running.halt(t)
+	var attempts []float64
+	for _, failure := range running.logs.entries(t, "delivery_failed") {
+		attempts = append(attempts, failure["attempt"].(float64))
+	}
+	for i, attempt := range attempts {
+		if attempt != float64(int(1)<<i) {
+			t.Fatalf("logged the failed attempts %v, one for each doubling of their count", attempts)
+		}
+	}
+	if len(attempts) < 6 {
+		t.Fatalf("logged %d of the %d or more failed attempts", len(attempts), route.Attempts)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -53,28 +54,36 @@ func TestAModuleThatFailsIsStartedAgainWithAGrowingWait(t *testing.T) {
 	stop, stopped := running(t, collection)
 	defer func() { stop(); _ = stopped() }()
 
-	for range 3 {
+	for range 4 {
 		failing.started(t)
 		failing.fail(t, errors.New("the journal moved"))
 	}
 	failing.started(t)
 
-	if held := health(t, collection, map[string]modules.State{"auth": modules.Running}); held["auth"].Restarts != 3 {
-		t.Fatalf("the agent started auth again %d times, it failed 3 times", held["auth"].Restarts)
+	if held := health(t, collection, map[string]modules.State{"auth": modules.Running}); held["auth"].Restarts != 4 {
+		t.Fatalf("the agent started auth again %d times, it failed 4 times", held["auth"].Restarts)
 	}
-	var waits []time.Duration
+	var restarts []float64
 	for _, entry := range entries(t, logs, "module_restarting") {
+		restart, _ := entry["restart"].(float64)
 		waited, _ := entry["in"].(float64)
-		waits = append(waits, time.Duration(waited))
-	}
-	if len(waits) != 3 {
-		t.Fatalf("the agent waited before %d restarts, it restarted 3 times", len(waits))
-	}
-	for attempt, waited := range waits {
-		want := time.Duration(1<<attempt) * time.Millisecond
-		if waited < want*4/5 || waited > want*6/5 {
-			t.Errorf("the agent waited %s before restart %d, around %s was due", waited, attempt+1, want)
+		restarts = append(restarts, restart)
+		want := time.Duration(1<<(int(restart)-1)) * time.Millisecond
+		if time.Duration(waited) < want*4/5 || time.Duration(waited) > want*6/5 {
+			t.Errorf("the agent waited %s before restart %v, around %s was due", time.Duration(waited), restart, want)
 		}
+	}
+	if !slices.Equal(restarts, []float64{1, 2, 4}) {
+		t.Fatalf("the agent logged restarts %v of four, want the first and each that doubled their count", restarts)
+	}
+	var started []float64
+	for _, entry := range entries(t, logs, "module_started") {
+		if restarts, found := entry["restarts"].(float64); found {
+			started = append(started, restarts)
+		}
+	}
+	if !slices.Equal(started, []float64{0, 1, 2, 4}) {
+		t.Fatalf("the agent logged the module started again after restarts %v", started)
 	}
 }
 

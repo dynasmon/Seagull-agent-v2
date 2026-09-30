@@ -532,7 +532,7 @@ func TestAnAgentThatIsNotEnrolledHasNothingToRenew(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("the agent exited with %d", code)
 	}
-	if !slices.Equal(components, []any{"configuration"}) {
+	if !slices.Equal(components, []any{"configuration", "status"}) {
 		t.Fatalf("an agent that is not enrolled ran %v", components)
 	}
 }
@@ -600,7 +600,7 @@ func TestAnEnrolledAgentDeliversWhatItsSpoolHoldsAsItRuns(t *testing.T) {
 			components = append(components, entry["component"], entry["policy"])
 		}
 	}
-	if code != 0 || !slices.Equal(components, []any{"configuration", "essential", "renewal", "optional", "delivery", "essential"}) {
+	if code != 0 || !slices.Equal(components, []any{"configuration", "essential", "renewal", "optional", "delivery", "essential", "status", "optional"}) {
 		t.Fatalf("the agent exited with %d after running %v", code, components)
 	}
 	mu.Lock()
@@ -779,6 +779,11 @@ func TestAnAgentWhoseCertificateExpiredStillStarts(t *testing.T) {
 	started, _ := logged(t, serveStopped(t, path), "agent_starting")
 	if started["agent_id"] != "web-01" || started["credential_generation"] != float64(1) {
 		t.Fatalf("an agent whose certificate expired started as %v", started)
+	}
+	expiry := expired.NotAfter.UTC().Format(time.RFC3339)
+	if _, said, _ := asked(t, path); !strings.Contains(said, "credential: failed since "+expiry+": the certificate of credential generation 1 expired at "+expiry) ||
+		!strings.Contains(said, "  what to do: have the platform issue the installation a new certificate") {
+		t.Fatalf("the status of an agent whose certificate expired says:\n%s", said)
 	}
 }
 
