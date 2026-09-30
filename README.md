@@ -836,7 +836,15 @@ When the credential cannot be renewed:
 - a platform that no longer renews the agent, because an operator disabled,
   revoked or decommissioned it, answers `illegal_move`. The agent keeps its
   credential and asks again every hour, since disabling is reversible; a
-  revoked or decommissioned agent is replaced, never revived.
+  revoked or decommissioned agent is replaced, never revived;
+- a platform that renews only the certificate it last issued an agent, as
+  backend commit 2829b0d does, answers a certificate a renewal replaced with
+  `illegal_move` too, saying `the certificate was already replaced`. An
+  installation hears it once a copy of it renewed first, or once the answer to
+  its own renewal was lost, and cannot tell which:
+  [Forgery, replay and copies](#forgery-replay-and-copies) says what an operator
+  does. The agent keeps delivering with the certificate until it expires, and
+  asks again every hour.
 
 `seagull-agent -config FILE enrollment renew` renews at once, as the running
 agent would, while the agent is stopped: it says which generation and key it
@@ -880,15 +888,16 @@ The evidence:
   seconds, renew from the command line, check the platform against the
   authorities it published, and reset to a `server.trust_bundle` an operator
   changed;
-- the exchanges were recorded from the renewal handler of the recorded backend
+- the exchanges were recorded from the renewal handler of each recorded backend
   commit, served as its control plane serves it, with the agent's binary
   renewing its credential: keeping its key, rotating it, while the platform
   published its next authority, signed with it, retired the current one before
-  and after moving its listener, and finally revoked the agent. The recording
-  also shows the platform renewing a generation two renewals had replaced.
-  `tests/compatibility` verifies every answer as the agent does, and checks
-  which key each renewal asked with and which authorities each answer
-  published.
+  and after moving its listener, and finally revoked the agent. The recording of
+  backend commit 6fae345 also shows the platform renewing a generation two
+  renewals had replaced, and that of backend commit 2829b0d refusing it.
+  `tests/compatibility` verifies every answer as the agent does, checks which
+  key each renewal asked with and which authorities each answer published, and
+  holds which recorded commit renews a replaced certificate.
 
 What it does not claim:
 
@@ -1678,6 +1687,154 @@ What delivery does not claim:
 - that a quarantined record can be sent again: it is counted and reported, not
   set aside for an operator.
 
+## Forgery, replay and copies
+
+Which agent the platform takes a request for is decided by what the agent
+holds, never by what it says. The connection proves possession of the key the
+platform's authority certified for an agent, and the platform's registry decides
+whether it admits that agent and in which tenant. Nothing the agent writes in a
+record or a header stands in for either, and the agent writes nothing of the
+kind:
+
+- a request carries a batch, its media type and its length, and the `Host` and
+  `User-Agent` headers Go writes, and names no agent, tenant, installation,
+  release or build;
+- the platform replaces the agent and the tenant of every record it admits, and
+  the whole of its reception, with what the certificate and the registration
+  say, and keeps the rest of the record as the agent wrote it, the host it
+  observed included. A record claiming another agent is published as the agent
+  that sent it;
+- the agent reports no release or build to the platform, and a platform could
+  not rely on one: whoever runs a changed binary with the key reports whatever
+  they choose. A certificate proves who holds the key, not which code holds it
+  or that the host is sound.
+
+Forging an agent takes its key:
+
+- a certificate is public, and one copied without its key cannot sign the
+  handshake, so the platform refuses the connection before any request reaches
+  it. The agent's own transport never presents a certificate its key does not
+  match;
+- no build of the agent carries a key, a certificate or an authority, and the
+  package adds none: an installation draws its own key, is issued its
+  certificate for that key, and trusts the authority its settings name. A copied
+  binary or package authenticates as no agent;
+- the agent signs nothing above TLS. A signature made with the key that
+  authenticates the connection proves nothing the connection does not: whoever
+  holds the key can sign anything, and whoever does not cannot connect. What a
+  record holds once the platform has it is the platform's to protect.
+
+Sending again is not forging:
+
+- the agent sends a batch again whenever it cannot know that the platform made
+  it durable, with the same records under the same identifiers and as the same
+  bytes, as [Delivery](#delivery) describes. The platform takes it whole, since
+  it cannot know it already has it, and keeps and decides it once: fed a batch
+  and the same batch sent again, backend commit 2829b0d's own pipeline, on a real
+  broker and store, stored the same three events, the same three detections of a
+  rule that fires on each failed logon and the one detection of a rule counting
+  three, as for the batch sent once;
+- a record keeps its identifier and its bytes for as long as the agent holds it,
+  and one whose bytes do not carry the identifier it was admitted under is
+  quarantined rather than sent.
+
+A copy is the agent:
+
+- whoever holds a copy of an installation's key and certificate, from its state
+  directory, a backup, a disk image or a snapshot of a virtual machine, is that
+  agent to the platform. On the ingest path nothing tells the two apart: the
+  platform answered both alike and published what both sent as the agent. A
+  copied key is a compromise, recovered from as [Renewal](#renewal) describes:
+  revoke the agent, which refuses every holder, register a new one and replace
+  the installation;
+- the one sign a platform gives comes at renewal, and not every platform gives
+  it. Backend commit 2829b0d renews only the certificate it last issued an
+  agent, so the first holder to renew carries on and the other is refused from
+  its next renewal on, with `illegal_move` and `the certificate was already
+  replaced`. A copy renews at the moment the original does, since that moment is
+  drawn from the installation and the certificate a copy shares, so the refusal
+  comes at the first renewal after the copy was made, and the refused holder
+  keeps delivering until its certificate expires. Backend commit 6fae345 renews a
+  replaced certificate, so there two holders renew side by side and nothing
+  tells either of them;
+- the agent reports that refusal as `credential_not_renewed`, with the
+  platform's words and a `recovery`, and its [status](#status) shows the
+  credential degraded. The same refusal follows a renewal whose answer was lost,
+  when the platform issued the certificate and the agent never received it, and
+  nothing in the refusal tells the two apart. So the operator decides: a key that
+  may have been copied, from a host that was imaged, restored or cloned, or a
+  backup that left its owners' hands, is revoked with its agent and the
+  installation replaced; otherwise the operator has the platform issue the
+  installation a new certificate, as [Enrollment](#enrollment) describes, and a
+  copy, if there is one, can no longer renew;
+- nothing else is read as a sign of a copy. The hostname, the addresses and the
+  machine identifiers are observations and never identity, and the agent
+  compares none of them. Every event carries `collection.sequence`, which the
+  recorded platforms store for a search to read and decide nothing from, and the
+  contracts carry no epoch, so the agent claims no gap and no copy found by
+  counting.
+
+Revocation takes effect at the agent's next request once the platform applied
+it. The renewal listener reads the registry as it answers, so the next renewal
+is refused. The gateway refuses the agent once its roster holds the revocation,
+within the propagation [Renewal](#renewal) measured, 10.2 ms at most on one host,
+and, for a revocation recorded while the broker was down, at the control plane's
+next sweep once the broker is back, every 30 seconds by default. That is the
+deadline the agent is held to, and it adds nothing to it: it keeps no admission
+of its own, every request is answered by the roster as it stands, and a refusal
+holds every record for an operator, as
+[Reaching the platform](#reaching-the-platform) describes. Both holders of a
+copied credential were refused once the revocation reached the roster.
+
+The evidence:
+
+- `tests/architecture` builds the agent for linux, windows and darwin and finds
+  no PEM block, and no certificate or private key encoded as DER, anywhere in
+  the bytes of each build, and recognises one hidden in any of those forms;
+- `internal/transport` is tested with a client that presents an agent's
+  certificate with a key of its own: the listener, set up as the platform's,
+  refuses the handshake and receives no request, and the agent's own transport
+  refuses to present it. A request's headers are tested to be its media type,
+  its length and Go's `User-Agent`, beside the host it is sent to, and nothing
+  else;
+- the ingest gateway of backend commit 2829b0d was recorded, driven by its own
+  end-to-end harness, taking a batch of events and one of inventory whose records
+  claim another agent registered in another tenant, sent with headers claiming
+  the same; refusing the certificate of a registered agent presented with
+  another key; and taking a batch from each of two holders of one certificate and
+  key, then refusing both once the agent was revoked. `tests/compatibility` reads
+  each answer as the agent reads it and checks, record by record, that the
+  platform published the certificate's agent and the registration's tenant with
+  nothing else changed;
+- the batch sent and the same batch sent again, recorded from backend commit
+  6fae345's gateway, were admitted by backend commit 2829b0d's own admitter to a
+  real broker, stored by its event writer, decided by its analysis engine and
+  stored as detections by its detection writer, once alone and once with the
+  batch sent again, and `tests/compatibility` checks that nothing the platform
+  kept or decided grew;
+- the renewal handler of backend commit 2829b0d was recorded with the agent's
+  binary renewing, as for [Renewal](#renewal): an installation whose copy renewed
+  first is refused, an installation whose renewal the platform granted but whose
+  answer was dropped asks again with the key it asked with and is refused, and
+  the agent says what each may mean. The same recording shows that commit
+  refusing a generation two renewals replaced, which backend commit 6fae345
+  renewed.
+
+What it does not claim:
+
+- that the agent or its host is sound: a key proves who holds it, and a
+  compromised host holds it;
+- that a copy is found on the ingest path, before its next renewal, or at all by
+  a platform that renews a replaced certificate;
+- that the agent tells a copy from a lost answer: both are the platform's
+  `illegal_move`, and only the operator knows whether the key may have left the
+  host;
+- that the platform tells a record sent again from another agent's record under
+  the same identifier at the same moment: its store keeps one event per tenant,
+  moment and identifier, whichever agent sent it;
+- a revocation deadline for a deployment's network and broker, which the
+  measurement leaves out.
+
 ## Status
 
 The running agent writes down what it says of itself where somebody on the
@@ -1866,6 +2023,9 @@ conventions:
 - no production code outside `internal/pki` draws a private key, writes one out
   or reads one in, so every other part of the agent uses a key through
   `crypto.Signer` alone and a certificate request carries its public half;
+- no build of the agent carries a key, a certificate or an authority, as PEM or
+  as DER, anywhere in its bytes: an installation is given its identity and its
+  trust on its host, and a copied binary holds neither;
 - `internal/renewal` reads no configuration and reaches no collector, directly
   or through another package, and imports no TLS package itself: it is handed
   the listener, the authorities and the key lifetime it works with, and reaches
@@ -1973,11 +2133,18 @@ again that was also measured on a real broker. Beside them are the exchanges of
 [enrollment](#enrollment) and [renewal](#renewal), recorded from the control
 plane of the same commit with the agent's own binary asking for, importing and
 renewing the certificates, and the measurement of how long that commit takes to
-carry a revocation to the roster its gateway follows. The suite fails when `go.mod`
+carry a revocation to the roster its gateway follows. That commit, 6fae345, is
+what every other section means by the recorded backend commit. A later one,
+2829b0d, built from the same contracts, was recorded where it answers
+differently or where [Forgery, replay and copies](#forgery-replay-and-copies)
+needed it: its renewal handler, its gateway answering batches that claim another
+agent, a copied certificate and a copied credential, and its pipeline keeping
+and deciding a batch sent again. The suite fails when `go.mod`
 pins contracts no recorded platform was built with, when a recorded platform
 never durably accepted a version the agent speaks, or when a recorded refusal
-reads differently. Compatibility is claimed only with recorded platforms, and
-with no earlier release of the agent, because none exists.
+reads differently. Compatibility is claimed only with recorded platforms, for
+what each was recorded doing, and with no earlier release of the agent, because
+none exists.
 
 ## Working against a local contracts checkout
 
