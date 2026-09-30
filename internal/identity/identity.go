@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -22,10 +23,11 @@ import (
 )
 
 const (
-	format        = 1
-	stateFile     = "installation.json"
-	replacedDir   = "replaced"
-	maxStateBytes = 64 << 10
+	format          = 1
+	stateFile       = "installation.json"
+	replacedDir     = "replaced"
+	maxStateBytes   = 64 << 10
+	maxRequestBytes = 16 << 10
 )
 
 var (
@@ -83,6 +85,7 @@ type Enrollment struct {
 type Request struct {
 	AgentID     string    `json:"agent_id"`
 	KeyID       string    `json:"key_id"`
+	CSR         string    `json:"csr_pem,omitempty"`
 	RequestedAt time.Time `json:"requested_at"`
 }
 
@@ -636,6 +639,12 @@ func (r Request) validate() error {
 		return fmt.Errorf("the request names key_id %s, which is not a SHA-256 digest in lower-case hexadecimal", secrets.Shown(r.KeyID))
 	case r.RequestedAt.IsZero():
 		return errors.New("the request says nothing of when it was made")
+	case r.CSR == "":
+		return nil
+	}
+	block, rest := pem.Decode([]byte(r.CSR))
+	if len(r.CSR) > maxRequestBytes || block == nil || block.Type != "CERTIFICATE REQUEST" || len(block.Headers) > 0 || len(rest) > 0 {
+		return errors.New("the request keeps something other than one PEM certificate request as csr_pem")
 	}
 	return nil
 }
