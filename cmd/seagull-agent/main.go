@@ -927,7 +927,9 @@ func recovery(path, state string, err error) string {
 	if errors.As(err, &refused) {
 		switch {
 		case refused.Code == "illegal_move":
-			return "the platform no longer renews this agent: an operator enables it again, or, when it was revoked or decommissioned, replaces the installation with " + replacement + " and enrolls it as a new agent; the agent never enrolls itself again"
+			return "the platform no longer renews the certificate this installation presents: when an operator disabled the agent, they enable it again; when it was revoked or decommissioned, they replace the installation with " + replacement +
+				" and enroll it as a new agent; when the platform says the certificate was already replaced, it holds a newer certificate of this agent that this installation never activated, because the answer to a renewal was lost or because another installation holds this installation's key: if the key may have been copied, an operator revokes the agent and replaces the installation, and otherwise they " +
+				reissuing + "; the agent never enrolls itself again"
 		case refused.Code == "unknown_agent":
 			return "the platform knows no such agent: an operator registers a new one, replaces the installation with " + replacement + " and enrolls it as that agent"
 		case refused.Status == 429:

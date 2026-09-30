@@ -677,10 +677,14 @@ func TestARenewalThePlatformRefusesSaysWhatToDo(t *testing.T) {
 	for name, c := range map[string]struct {
 		code     string
 		status   int
-		recovery string
+		recovery []string
 	}{
-		"a revoked agent":         {code: "illegal_move", status: http.StatusUnprocessableEntity, recovery: "no longer renews this agent"},
-		"an agent renewing often": {code: "rate_limited", status: http.StatusTooManyRequests, recovery: "bounds how often an agent renews"},
+		"an agent or a certificate the platform no longer renews": {code: "illegal_move", status: http.StatusUnprocessableEntity, recovery: []string{
+			"no longer renews the certificate this installation presents", "when it was revoked or decommissioned",
+			"because the answer to a renewal was lost or because another installation holds this installation's key",
+			"revokes the agent and replaces the installation", "enrollment request AGENT_ID", "the agent never enrolls itself again",
+		}},
+		"an agent renewing often": {code: "rate_limited", status: http.StatusTooManyRequests, recovery: []string{"bounds how often an agent renews"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			state := stateDirectory(t)
@@ -693,8 +697,14 @@ func TestARenewalThePlatformRefusesSaysWhatToDo(t *testing.T) {
 			if code := run([]string{"-config", path, "enrollment", "renew"}, &stdout, &stderr); code != 1 || stdout.Len() != 0 {
 				t.Fatalf("exit code %d, stdout %q", code, stdout.String())
 			}
-			if said := stderr.String(); !strings.Contains(said, c.code) || !strings.Contains(said, c.recovery) {
+			said := stderr.String()
+			if !strings.Contains(said, c.code) {
 				t.Fatalf("the refusal was reported as %q", said)
+			}
+			for _, recovery := range c.recovery {
+				if !strings.Contains(said, recovery) {
+					t.Errorf("the refusal was reported as %q, which does not say %q", said, recovery)
+				}
 			}
 			started, _ := logged(t, serveStopped(t, path), "agent_starting")
 			if started["credential_generation"] != float64(1) {
