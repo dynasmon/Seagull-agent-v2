@@ -66,8 +66,47 @@ func TestAskingAgainForTheSameAgentMakesTheSameRequest(t *testing.T) {
 	if !again.Again || again.KeyID != first.KeyID || digest(parseRequest(t, again.Request).RawSubjectPublicKeyInfo) != first.KeyID {
 		t.Fatalf("asked again as %+v, first as %+v", again, first)
 	}
+	if !bytes.Equal(again.Request, first.Request) {
+		t.Fatal("asking again made another request than the one kept")
+	}
 	if keys := held.keysHeld(t); len(keys) != 1 {
 		t.Fatalf("asking twice drew %d keys", len(keys))
+	}
+}
+
+// A pending request an earlier release kept without its bytes, or whose bytes
+// are not the request its key made, is made anew and kept, and asked again as
+// kept from then on.
+func TestARequestKeptWithoutItsBytesIsMadeAnewAndKept(t *testing.T) {
+	held := install(t)
+	first, err := enrollment.Request(held.installation, held.keys, "web-01", time.Now())
+	if err != nil {
+		t.Fatalf("ask for a certificate: %v", err)
+	}
+	other, err := held.keys.Create()
+	if err != nil {
+		t.Fatalf("draw another key: %v", err)
+	}
+	elsewhere, err := pki.Request(other, "web-01")
+	if err != nil {
+		t.Fatalf("make another key's request: %v", err)
+	}
+	for name, kept := range map[string]string{"nothing": "", "another key's request": string(elsewhere)} {
+		t.Run(name, func(t *testing.T) {
+			pending, _ := held.installation.Pending()
+			pending.CSR = kept
+			if err := held.installation.Ask(pending); err != nil {
+				t.Fatalf("keep %s with the request: %v", name, err)
+			}
+			made, err := enrollment.Request(held.installation, held.keys, "web-01", time.Now())
+			if err != nil || !made.Again || made.KeyID != first.KeyID || bytes.Equal(made.Request, []byte(kept)) {
+				t.Fatalf("asking again over %s made %+v: %v", name, made, err)
+			}
+			again, err := enrollment.Request(held.installation, held.keys, "web-01", time.Now())
+			if err != nil || !bytes.Equal(again.Request, made.Request) {
+				t.Fatalf("the request made anew was not kept: %v", err)
+			}
+		})
 	}
 }
 
