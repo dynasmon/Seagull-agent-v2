@@ -1,0 +1,101 @@
+{
+  "exchanges": [
+    {
+      "name": "events-forged-origin",
+      "route": "POST /v1/events",
+      "certificate": "web-01",
+      "registered": "acme",
+      "presented_certificate": "37430c0ebed596c0b7b069052e25f2fc31eaa4e48fb83db9f254dbe83ce361ae",
+      "presented_key": "1e97162a279d2ce365a55747e6abdefa30a57c44d3e586171aa25b23f0c67189",
+      "headers": {
+        "X-Agent-Cert-CN": "web-02",
+        "X-Agent-Id": "web-02",
+        "X-Tenant-Id": "globex"
+      },
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "published": 2
+    },
+    {
+      "name": "inventory-forged-origin",
+      "route": "POST /v1/inventory",
+      "certificate": "web-01",
+      "registered": "acme",
+      "presented_certificate": "37430c0ebed596c0b7b069052e25f2fc31eaa4e48fb83db9f254dbe83ce361ae",
+      "presented_key": "1e97162a279d2ce365a55747e6abdefa30a57c44d3e586171aa25b23f0c67189",
+      "headers": {
+        "X-Agent-Cert-CN": "web-02",
+        "X-Agent-Id": "web-02",
+        "X-Tenant-Id": "globex"
+      },
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "published": 1
+    },
+    {
+      "name": "events-copied-certificate",
+      "route": "POST /v1/events",
+      "certificate": "web-01",
+      "registered": "acme",
+      "presented_certificate": "37430c0ebed596c0b7b069052e25f2fc31eaa4e48fb83db9f254dbe83ce361ae",
+      "presented_key": "31820d8a1c47facdcc155aa35007f8edb6637c736c0b2a1560101c44251e0165",
+      "status": 0,
+      "refused": "remote error: tls: error decrypting message",
+      "published": 0
+    },
+    {
+      "name": "events-cloned-original",
+      "route": "POST /v1/events",
+      "certificate": "web-03",
+      "registered": "acme",
+      "holder": "original",
+      "presented_certificate": "dd3713d65e1cb51804655bce3c3078cca43dee17b3807631111afc3a2f53b105",
+      "presented_key": "58fd9c2d2e05080fb635f8e82861db6b7505d6dd990ee21511f565eb81090aa8",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "published": 1
+    },
+    {
+      "name": "events-cloned-copy",
+      "route": "POST /v1/events",
+      "certificate": "web-03",
+      "registered": "acme",
+      "holder": "copy",
+      "presented_certificate": "dd3713d65e1cb51804655bce3c3078cca43dee17b3807631111afc3a2f53b105",
+      "presented_key": "58fd9c2d2e05080fb635f8e82861db6b7505d6dd990ee21511f565eb81090aa8",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "published": 1
+    },
+    {
+      "name": "events-cloned-original-revoked",
+      "route": "POST /v1/events",
+      "certificate": "web-03",
+      "registered": "acme",
+      "holder": "original",
+      "presented_certificate": "dd3713d65e1cb51804655bce3c3078cca43dee17b3807631111afc3a2f53b105",
+      "presented_key": "58fd9c2d2e05080fb635f8e82861db6b7505d6dd990ee21511f565eb81090aa8",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "published": 0
+    },
+    {
+      "name": "events-cloned-copy-revoked",
+      "route": "POST /v1/events",
+      "certificate": "web-03",
+      "registered": "acme",
+      "holder": "copy",
+      "presented_certificate": "dd3713d65e1cb51804655bce3c3078cca43dee17b3807631111afc3a2f53b105",
+      "presented_key": "58fd9c2d2e05080fb635f8e82861db6b7505d6dd990ee21511f565eb81090aa8",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "published": 0
+    }
+  ],
+  "platform": {
+    "commit": "2829b0d74797921493fd783ff0f38b08a72e1a54",
+    "contracts": "v0.14.0",
+    "repository": "github.com/dynasmon/Seagull-backend-v2"
+  },
+  "recorded_at": "2026-09-30T15:58:53Z"
+}

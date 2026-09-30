@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -147,12 +148,90 @@ func TestARecordedPlatformRotatedItsAuthorityWithoutStrandingTheAgent(t *testing
 	}
 }
 
-func TestARecordedPlatformStillRenewsAGenerationARenewalReplaced(t *testing.T) {
+// Whether a recorded platform refuses to renew a certificate a renewal already
+// replaced. The recorded commits differ, and the agent claims of each only what
+// it was recorded doing: one that binds a renewal to the certificate it last
+// issued renews one holder of an agent's credential at most, so a copy of an
+// installation that renews first leaves the original refused, and so does an
+// answer the agent never received, which it asks for again with the same key.
+var bindsRenewalToTheLastCertificate = map[string]bool{
+	"6fae3457bb2b721fc891e1c80bf12a5f3fc408c2": false,
+	"2829b0d74797921493fd783ff0f38b08a72e1a54": true,
+}
+
+func TestARecordedPlatformRenewsAReplacedGenerationOnlyWhereItBindsNoCertificate(t *testing.T) {
+	unrecorded := maps.Clone(bindsRenewalToTheLastCertificate)
 	for _, recorded := range renewalRecordings(t) {
-		superseded, kept := recorded.exchange(t, "renewal-superseded"), recorded.exchange(t, "renewal-kept")
-		if superseded.Status != http.StatusCreated || superseded.Presented != kept.Presented {
-			t.Errorf("the platform answered the generation two renewals replaced with %d", superseded.Status)
+		delete(unrecorded, recorded.Platform.Commit)
+		binds, stated := bindsRenewalToTheLastCertificate[recorded.Platform.Commit]
+		if !stated {
+			t.Errorf("%s was recorded without saying whether it renews a certificate a renewal replaced", recorded.Platform.Commit)
+			continue
 		}
+		superseded, kept := recorded.exchange(t, "renewal-superseded"), recorded.exchange(t, "renewal-kept")
+		if superseded.Presented != kept.Presented {
+			t.Errorf("the generation two renewals replaced presented key %s, and the first renewal %s", superseded.Presented, kept.Presented)
+		}
+		switch {
+		case binds:
+			recorded.expectReplaced(t, superseded)
+		case superseded.Status != http.StatusCreated:
+			t.Errorf("%s answered the generation two renewals replaced with %d", recorded.Platform.Commit, superseded.Status)
+		}
+	}
+	for commit := range unrecorded {
+		t.Errorf("%s is said to renew or refuse a replaced certificate, and no recording of it backs that", commit)
+	}
+}
+
+func TestOnARecordedPlatformThatBindsTheCertificateACopyThatRenewsFirstLeavesTheOriginalRefused(t *testing.T) {
+	for _, recorded := range renewalRecordings(t) {
+		if !bindsRenewalToTheLastCertificate[recorded.Platform.Commit] {
+			continue
+		}
+		copied, replaced := recorded.exchange(t, "renewal-copy"), recorded.exchange(t, "renewal-replaced")
+		if copied.Status != http.StatusCreated || copied.AgentID != replaced.AgentID || copied.Presented != replaced.Presented ||
+			keyOf(recorded.request(t, copied)) != keyOf(recorded.request(t, replaced)) {
+			t.Fatalf("the copy renewed with %d, presenting %s of %s, and the original presented %s of %s",
+				copied.Status, copied.Presented, copied.AgentID, replaced.Presented, replaced.AgentID)
+		}
+		recorded.expectReplaced(t, replaced)
+		for _, says := range []string{"the certificate was already replaced", "another installation holds this installation's key",
+			"revokes the agent and replaces the installation", "the agent never enrolls itself again"} {
+			if !strings.Contains(replaced.Said, says) {
+				t.Errorf("the installation a copy renewed ahead of said %q, which does not say %q", replaced.Said, says)
+			}
+		}
+	}
+}
+
+func TestOnARecordedPlatformThatBindsTheCertificateARenewalWhoseAnswerWasLostIsRefusedWhenAskedAgain(t *testing.T) {
+	for _, recorded := range renewalRecordings(t) {
+		if !bindsRenewalToTheLastCertificate[recorded.Platform.Commit] {
+			continue
+		}
+		lost, again := recorded.exchange(t, "renewal-unanswered"), recorded.exchange(t, "renewal-after-unanswered")
+		asked := keyOf(recorded.request(t, lost))
+		if lost.Status != http.StatusCreated || !strings.Contains(lost.Said, "did not answer") || asked == lost.Presented ||
+			again.Presented != lost.Presented || keyOf(recorded.request(t, again)) != asked {
+			t.Fatalf("the platform answered %d to a renewal asking for key %s with key %s, the agent said %q, and asked again for %s with %s",
+				lost.Status, asked, lost.Presented, lost.Said, keyOf(recorded.request(t, again)), again.Presented)
+		}
+		recorded.expectReplaced(t, again)
+		if !strings.Contains(again.Said, "because the answer to a renewal was lost") {
+			t.Errorf("an installation whose answer was lost said %q", again.Said)
+		}
+	}
+}
+
+func (r renewalRecording) expectReplaced(t *testing.T, sent renewalExchange) {
+	t.Helper()
+	var refused controlv1.Refusal
+	unmarshal(t, r.payload(t, sent.Name, "reply"), &refused)
+	read := &renewal.Refusal{Status: sent.Status, Code: refused.GetCode(), Detail: refused.GetDetail()}
+	if sent.Status != http.StatusUnprocessableEntity || refused.GetCode() != "illegal_move" ||
+		refused.GetDetail() != "the certificate was already replaced" || !renewal.Lasting(read) {
+		t.Errorf("%s was answered %d %q: %q", sent.Name, sent.Status, refused.GetCode(), refused.GetDetail())
 	}
 }
 

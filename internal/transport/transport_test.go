@@ -13,6 +13,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"maps"
 	"math/big"
 	"net"
 	"net/http"
@@ -61,8 +62,49 @@ func TestThePlatformKnowsTheAgentByItsCertificateAlone(t *testing.T) {
 			t.Errorf("the request names the agent in %s, and only its certificate may", name)
 		}
 	}
+	if names := slices.Sorted(maps.Keys(seen[0].headers)); !slices.Equal(names, []string{"Content-Length", "Content-Type", "User-Agent"}) ||
+		seen[0].headers.Get("User-Agent") != "Go-http-client/1.1" {
+		t.Errorf("the request carries %v: the agent claims no identity, tenant, release or build of its own", seen[0].headers)
+	}
 	if string(seen[0].body) != "sshd: accepted publickey" {
 		t.Errorf("the platform received %q", seen[0].body)
+	}
+}
+
+// Whoever copies the agent's certificate holds everything it states and none
+// of the key it was issued for. A client that presents it with a key of its
+// own cannot sign the handshake as the certificate's key, so the listener
+// refuses the connection before any request reaches it, and the agent's own
+// transport never presents a certificate its key does not match.
+func TestACertificateCopiedWithoutItsKeyAuthenticatesNobody(t *testing.T) {
+	agents := authorityNamed(t, "Seagull agents")
+	platform := serve(t, authorityNamed(t, "Seagull platform"), agents, admit)
+	key, copier := agentKey(t), agentKey(t)
+	copied := agents.agent(t, "web-01", key.Public())
+
+	roots := x509.NewCertPool()
+	roots.AddCert(platform.trusted[0])
+	impostor := &http.Client{Timeout: settle, Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		RootCAs:      roots,
+		Certificates: []tls.Certificate{{Certificate: copied, PrivateKey: copier}},
+	}}}
+	t.Cleanup(impostor.CloseIdleConnections)
+	response, err := impostor.Post(platform.URL+"/v1/events", protobuf, strings.NewReader("sshd: accepted publickey"))
+	if err == nil {
+		response.Body.Close()
+		t.Fatalf("a certificate presented without its key was answered with %d", response.StatusCode)
+	}
+	if !strings.Contains(err.Error(), "error decrypting message") {
+		t.Errorf("the listener refused a certificate presented without its key with %v, want the handshake signature refused", err)
+	}
+
+	client := compose(t, platform.trusted, &held{credential: transport.Credential{Chain: copied, Signer: copier}})
+	if _, err := client.Post(t.Context(), batch(platform.URL+"/v1/events", "sshd: accepted publickey")); !errors.Is(err, transport.ErrUnauthenticated) {
+		t.Fatalf("the agent presented a certificate its key does not match: %v", err)
+	}
+	if seen := platform.requests(); len(seen) != 0 {
+		t.Fatalf("a certificate presented without its key reached the platform as %+v", seen)
 	}
 }
 

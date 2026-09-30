@@ -1,0 +1,110 @@
+{
+  "authorities": {
+    "current": "renewal-authority-current.pem",
+    "next": "renewal-authority-next.pem"
+  },
+  "checked": "renewal https://127.0.0.1:37873 is authenticated: tls 1.3, a certificate for \"localhost\", \"127.0.0.1\" issued by \"Seagull Next Agent Test CA\" and valid until 2026-09-30T16:53:12Z; it asks for the certificate of an enrolled agent\nseagull-agent: ingest: the platform could not be authenticated: https://127.0.0.1:35049: x509: certificate signed by unknown authority\nseagull-agent: check that an authority the platform published to the installation issued the listener's certificate, and that the address names a host that certificate was issued for\nseagull-agent: the platform was checked against the 1 authority it published to the installation at 2026-09-30T15:53:12Z, which the agent trusts in place of server.trust_bundle",
+  "exchanges": [
+    {
+      "name": "renewal-kept",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "dd747d49df43b87f4849ebda27263858729fc3b3a970648305cb0d28208d37f1",
+      "agent_said": "installation 270ee8b4-86bc-4592-a3b3-693fafe5fa90 renewed agent web-01 to credential generation 2, with the key it held: certificate 12e695a79d413bcd38ec8f923862f750 issued by \"Seagull Agent Test CA\" and valid until 2026-09-30T16:53:12Z"
+    },
+    {
+      "name": "renewal-rotated",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "dd747d49df43b87f4849ebda27263858729fc3b3a970648305cb0d28208d37f1",
+      "agent_said": "installation 270ee8b4-86bc-4592-a3b3-693fafe5fa90 renewed agent web-01 to credential generation 3, with a new key, ae5c0d4be9612d78a0d2b5a08246e64a701fd3ebc038315d6d5b2a7d3cca780b: certificate 6686b24f4301437d7abfab30c6c8b8d6 issued by \"Seagull Agent Test CA\" and valid until 2026-09-30T16:53:12Z"
+    },
+    {
+      "name": "renewal-superseded",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 422,
+      "presented_key_id": "dd747d49df43b87f4849ebda27263858729fc3b3a970648305cb0d28208d37f1"
+    },
+    {
+      "name": "renewal-unanswered",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-02",
+      "status": 201,
+      "presented_key_id": "45f3451308087f11cbff9c8207be267e0d9902e6c37ff8c1cda38ddcc498232b",
+      "agent_said": "seagull-agent: the platform took the request and did not answer it: https://127.0.0.1:37873/v1/agents/certificate: EOF\nseagull-agent: nothing: the agent asks again; if the platform keeps taking requests it does not answer, check that it answers within transport.request_timeout in /tmp/TestRecordAgentRenewalEvidence431686868/004/etc/agent.json"
+    },
+    {
+      "name": "renewal-after-unanswered",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-02",
+      "status": 422,
+      "presented_key_id": "45f3451308087f11cbff9c8207be267e0d9902e6c37ff8c1cda38ddcc498232b",
+      "agent_said": "seagull-agent: the platform answered the renewal with 422 illegal_move: the certificate was already replaced\nseagull-agent: the platform no longer renews the certificate this installation presents: when an operator disabled the agent, they enable it again; when it was revoked or decommissioned, they replace the installation with \"seagull-agent -config /tmp/TestRecordAgentRenewalEvidence431686868/004/etc/agent.json installation replace\" and enroll it as a new agent; when the platform says the certificate was already replaced, it holds a newer certificate of this agent that this installation never activated, because the answer to a renewal was lost or because another installation holds this installation's key: if the key may have been copied, an operator revokes the agent and replaces the installation, and otherwise they have the platform issue the installation a new certificate, as an operator and with the agent stopped: ask with \"seagull-agent -config /tmp/TestRecordAgentRenewalEvidence431686868/004/etc/agent.json enrollment request AGENT_ID\" and activate what it answers with \"seagull-agent -config /tmp/TestRecordAgentRenewalEvidence431686868/004/etc/agent.json enrollment import ISSUED\"; the agent never enrolls itself again"
+    },
+    {
+      "name": "renewal-copy",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-03",
+      "status": 201,
+      "presented_key_id": "c1144d17131ef0fe0940216c030dc06518609ab103dbc0023f99849822ac626a",
+      "agent_said": "installation 3765190f-e7d4-4fd0-bdea-c3bd882cc3b6 renewed agent web-03 to credential generation 2, with the key it held: certificate 786283a595a50ecc4c54cb229d5c835a issued by \"Seagull Agent Test CA\" and valid until 2026-09-30T16:53:12Z"
+    },
+    {
+      "name": "renewal-replaced",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-03",
+      "status": 422,
+      "presented_key_id": "c1144d17131ef0fe0940216c030dc06518609ab103dbc0023f99849822ac626a",
+      "agent_said": "seagull-agent: the platform answered the renewal with 422 illegal_move: the certificate was already replaced\nseagull-agent: the platform no longer renews the certificate this installation presents: when an operator disabled the agent, they enable it again; when it was revoked or decommissioned, they replace the installation with \"seagull-agent -config /tmp/TestRecordAgentRenewalEvidence431686868/005/etc/agent.json installation replace\" and enroll it as a new agent; when the platform says the certificate was already replaced, it holds a newer certificate of this agent that this installation never activated, because the answer to a renewal was lost or because another installation holds this installation's key: if the key may have been copied, an operator revokes the agent and replaces the installation, and otherwise they have the platform issue the installation a new certificate, as an operator and with the agent stopped: ask with \"seagull-agent -config /tmp/TestRecordAgentRenewalEvidence431686868/005/etc/agent.json enrollment request AGENT_ID\" and activate what it answers with \"seagull-agent -config /tmp/TestRecordAgentRenewalEvidence431686868/005/etc/agent.json enrollment import ISSUED\"; the agent never enrolls itself again"
+    },
+    {
+      "name": "renewal-overlap",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "ae5c0d4be9612d78a0d2b5a08246e64a701fd3ebc038315d6d5b2a7d3cca780b",
+      "agent_said": "installation 270ee8b4-86bc-4592-a3b3-693fafe5fa90 renewed agent web-01 to credential generation 4, with the key it held: certificate 56360b009bdafa27a220edc51edc391e issued by \"Seagull Agent Test CA\" and valid until 2026-09-30T16:53:12Z\nit authenticates the platform against the 2 authorities the platform published from now on"
+    },
+    {
+      "name": "renewal-next-authority",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "ae5c0d4be9612d78a0d2b5a08246e64a701fd3ebc038315d6d5b2a7d3cca780b",
+      "agent_said": "installation 270ee8b4-86bc-4592-a3b3-693fafe5fa90 renewed agent web-01 to credential generation 5, with the key it held: certificate 63e50f846bb71fc6cdac2a46c6fcf8a7 issued by \"Seagull Next Agent Test CA\" and valid until 2026-09-30T16:53:12Z"
+    },
+    {
+      "name": "renewal-not-adopted",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "ae5c0d4be9612d78a0d2b5a08246e64a701fd3ebc038315d6d5b2a7d3cca780b",
+      "agent_said": "installation 270ee8b4-86bc-4592-a3b3-693fafe5fa90 renewed agent web-01 to credential generation 6, with the key it held: certificate 6360feec26045515efd0639eca777422 issued by \"Seagull Next Agent Test CA\" and valid until 2026-09-30T16:53:12Z\nseagull-agent: the authorities the platform published do not authenticate its renewal listener: x509: certificate signed by unknown authority\nseagull-agent: issue the platform's renewal listener a certificate from an authority the platform publishes: the agent adopts them as it next renews, and authenticates the platform against the ones it trusts until then"
+    },
+    {
+      "name": "renewal-removal",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 201,
+      "presented_key_id": "ae5c0d4be9612d78a0d2b5a08246e64a701fd3ebc038315d6d5b2a7d3cca780b",
+      "agent_said": "installation 270ee8b4-86bc-4592-a3b3-693fafe5fa90 renewed agent web-01 to credential generation 7, with the key it held: certificate 172f30217341513c16e0569a15d74930 issued by \"Seagull Next Agent Test CA\" and valid until 2026-09-30T16:53:12Z\nit authenticates the platform against the 1 authority the platform published from now on"
+    },
+    {
+      "name": "renewal-revoked",
+      "route": "POST /v1/agents/certificate",
+      "agent_id": "web-01",
+      "status": 422,
+      "presented_key_id": "ae5c0d4be9612d78a0d2b5a08246e64a701fd3ebc038315d6d5b2a7d3cca780b",
+      "agent_said": "seagull-agent: the platform answered the renewal with 422 illegal_move: the certificate identity cannot be bound to this agent: an agent that is revoked takes no furthe...\nseagull-agent: the platform no longer renews the certificate this installation presents: when an operator disabled the agent, they enable it again; when it was revoked or decommissioned, they replace the installation with \"seagull-agent -config /tmp/TestRecordAgentRenewalEvidence431686868/003/etc/agent.json installation replace\" and enroll it as a new agent; when the platform says the certificate was already replaced, it holds a newer certificate of this agent that this installation never activated, because the answer to a renewal was lost or because another installation holds this installation's key: if the key may have been copied, an operator revokes the agent and replaces the installation, and otherwise they have the platform issue the installation a new certificate, as an operator and with the agent stopped: ask with \"seagull-agent -config /tmp/TestRecordAgentRenewalEvidence431686868/003/etc/agent.json enrollment request AGENT_ID\" and activate what it answers with \"seagull-agent -config /tmp/TestRecordAgentRenewalEvidence431686868/003/etc/agent.json enrollment import ISSUED\"; the agent never enrolls itself again"
+    }
+  ],
+  "platform": {
+    "commit": "2829b0d74797921493fd783ff0f38b08a72e1a54",
+    "contracts": "v0.14.0",
+    "repository": "github.com/dynasmon/Seagull-backend-v2"
+  },
+  "recorded_at": "2026-09-30T15:53:12Z"
+}
