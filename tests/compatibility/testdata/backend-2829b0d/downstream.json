@@ -1,0 +1,74 @@
+{
+  "alone": {
+    "batches": [
+      {
+        "request": "events-original",
+        "batch_id": "0190f5d2-7c3e-7a41-9b6e-000000000001",
+        "accepted": true,
+        "durable": true,
+        "received": 3
+      }
+    ],
+    "backbone_records": 3,
+    "stored_events": 3,
+    "detections": {
+      "authentication.failed": {
+        "published": 3,
+        "distinct": 3,
+        "stored": 3
+      },
+      "authentication.repeated_failures": {
+        "published": 1,
+        "distinct": 1,
+        "stored": 1,
+        "counts": [
+          3
+        ]
+      }
+    }
+  },
+  "measured": "the requests of events-original and events-replayed in backend-6fae345/delivery.json, admitted by the gateway's own admitter to a topic of a real broker, which the platform's own event writer stored and its own analysis engine decided against a rule matching each failed authentication and a rule counting three from one address within five minutes, and whose detections its own detection writer stored; once for the original batch alone and once for the original and the replayed batch",
+  "platform": {
+    "broker": "redpandadata/redpanda:v24.2.20, one node, --smp=1 --overprovisioned, on the loopback of one host",
+    "commit": "2829b0d74797921493fd783ff0f38b08a72e1a54",
+    "contracts": "v0.14.0",
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "store": "clickhouse/clickhouse-server:24.8, one node, on the loopback of one host"
+  },
+  "recorded_at": "2026-09-30T15:57:08Z",
+  "replayed": {
+    "batches": [
+      {
+        "request": "events-original",
+        "batch_id": "0190f5d2-7c3e-7a41-9b6e-000000000001",
+        "accepted": true,
+        "durable": true,
+        "received": 3
+      },
+      {
+        "request": "events-replayed",
+        "batch_id": "0190f5d2-7c3e-7a41-9b6e-000000000002",
+        "accepted": true,
+        "durable": true,
+        "received": 3
+      }
+    ],
+    "backbone_records": 6,
+    "stored_events": 3,
+    "detections": {
+      "authentication.failed": {
+        "published": 6,
+        "distinct": 3,
+        "stored": 3
+      },
+      "authentication.repeated_failures": {
+        "published": 1,
+        "distinct": 1,
+        "stored": 1,
+        "counts": [
+          3
+        ]
+      }
+    }
+  }
+}
