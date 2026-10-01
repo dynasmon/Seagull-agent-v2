@@ -29,12 +29,16 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
+	systemjournal "github.com/dynasmon/Seagull-agent-v2/internal/platform/journal"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
 
-var packaged = flag.String("package", "", "the Debian package the gate installs on this host, as root")
+var (
+	packaged = flag.String("package", "", "the Debian package the gate installs on this host, as root")
+	evidence = flag.String("evidence", "", "a directory to write what sshd decided and what the agent delivered of it to")
+)
 
 const (
 	admitVariable  = "SEAGULL_NATIVE_ADMIT"
@@ -53,6 +57,7 @@ const (
 	agentID        = "web-01"
 	admittedEvents = 3
 	admittedItems  = 2
+	guesses        = 24
 )
 
 func TestMain(m *testing.M) {
@@ -84,6 +89,7 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "removing the package stops the service and keeps the installation", run: g.remove},
 		{name: "installing the package again runs the same installation", run: g.reinstall},
 		{name: "the service delivers its backlog once the platform takes it", run: g.deliver},
+		{name: "the service collects what sshd decides and nothing that only names sshd", run: g.collect},
 		{name: "purging deletes the installation, its settings and the service's", run: g.purge},
 		{name: "installing after a purge makes a new installation", run: g.fresh},
 	} {
@@ -105,6 +111,7 @@ type gate struct {
 	invocation   string
 	installation string
 	held         map[string]string
+	collects     bool
 }
 
 func open(t *testing.T) *gate {
@@ -201,6 +208,10 @@ func (g *gate) write(t *testing.T) {
 		t.Fatalf("the settings the package installs name %v", settings["server"])
 	}
 	server["ingest_url"], server["renewal_url"] = g.platform.ingest.URL, g.platform.renewal.URL
+	if collected, ok := settings["modules"].(map[string]any)["authentication"].(map[string]any); !ok || collected["enabled"] != true {
+		t.Fatalf("the settings the package installs collect with %v", settings["modules"])
+	}
+	settings["modules"] = map[string]any{"authentication": map[string]any{"enabled": g.collects}}
 	rewritten, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		t.Fatalf("write the settings: %v", err)
@@ -236,8 +247,15 @@ func (g *gate) start(t *testing.T) {
 		t.Errorf("the service started the agent as %v", agent)
 	}
 	held := await(t, g.invocation, "agent_privileges", time.Second)
+	reader, err := user.LookupGroup("systemd-journal")
+	if err != nil {
+		t.Fatalf("this host has no group that reads the system journal: %v", err)
+	}
+	journalGroup, _ := strconv.Atoi(reader.Gid)
+	groups := []float64{float64(g.gid), float64(journalGroup)}
+	slices.Sort(groups)
 	if held["level"] != "INFO" || held["user"] != float64(g.uid) || held["group"] != float64(g.gid) ||
-		!slices.Equal(numbers(held["groups"]), []float64{float64(g.gid)}) || fmt.Sprint(held["capabilities"]) != "[]" ||
+		!slices.Equal(numbers(held["groups"]), groups) || fmt.Sprint(held["capabilities"]) != "[]" ||
 		held["no_new_privs"] != true {
 		t.Errorf("the agent holds %v, and it runs as %d:%d with nothing more", held, g.uid, g.gid)
 	}
@@ -393,7 +411,7 @@ func (g *gate) deliver(t *testing.T) {
 	g.platform.taking.Store(true)
 	events, inventory := admittedIDs("events", admittedEvents), admittedIDs("inventory", admittedItems)
 	deadline := time.Now().Add(time.Minute)
-	for !slices.Equal(g.platform.holds("/v1/events"), events) || !slices.Equal(g.platform.holds("/v1/inventory"), inventory) {
+	for !slices.Equal(admittedHere(g.platform.holds("/v1/events")), events) || !slices.Equal(g.platform.holds("/v1/inventory"), inventory) {
 		if time.Now().After(deadline) {
 			t.Fatalf("the platform holds %v and %v:\n%s", g.platform.holds("/v1/events"), g.platform.holds("/v1/inventory"),
 				answer("journalctl", "--no-pager", "--output", "cat", "_SYSTEMD_INVOCATION_ID="+g.invocation))
@@ -423,6 +441,187 @@ func (g *gate) deliver(t *testing.T) {
 		if !strings.Contains(said, line) {
 			t.Errorf("after delivering, the status does not say %q:\n%s", line, said)
 		}
+	}
+}
+
+func admittedHere(held []string) []string {
+	return slices.DeleteFunc(held, func(id string) bool { return !strings.HasPrefix(id, "native-") })
+}
+
+func (g *gate) collect(t *testing.T) {
+	served := openSSH(t, g.scratch)
+	g.collecting(t, true)
+	await(t, g.invocation, "collection_started", 10*time.Second)
+	began := time.Now()
+	forge(t, g.scratch)
+	served.guess(t, "admin", guesses, 8)
+	for _, accepted := range []bool{false, true} {
+		if err := served.attempt(gateAccount, accepted); err != nil {
+			t.Fatal(err)
+		}
+	}
+	burst := g.delivered(t, guesses+2)
+	judged := map[string]int{}
+	for _, event := range burst {
+		body := event.GetAuthentication()
+		happened := event.GetTime().GetEventTime().AsTime()
+		if event.GetEventClass() != eventv1.EventClass_EVENT_CLASS_AUTHENTICATION || !slices.Contains([]string{"journal:sshd", "journal:sshd-session"}, event.GetCollection().GetSource()) ||
+			event.GetOrigin().GetHost().GetOs() != "linux" || body.GetActivity() != eventv1.Authentication_ACTIVITY_LOGON || body.GetMethod() != "password" ||
+			body.GetService().GetName() != "sshd" || body.GetService().GetProtocol() != "ssh" || body.GetNetwork().GetSource().GetIp() != outside ||
+			body.GetNetwork().GetSource().GetPort() == 0 || happened.Before(began.Add(-time.Second)) || happened.After(time.Now()) {
+			t.Errorf("the agent delivered %v", event)
+		}
+		judged[fmt.Sprintf("%s %s %s", body.GetUser().GetName(), body.GetOutcome(), body.GetOutcomeReason())]++
+	}
+	want := map[string]int{
+		"admin OUTCOME_FAILURE invalid user": guesses,
+		gateAccount + " OUTCOME_FAILURE ":    1,
+		gateAccount + " OUTCOME_SUCCESS ":    1,
+	}
+	if !maps.Equal(judged, want) {
+		t.Errorf("the agent delivered %v, and sshd decided %v", judged, want)
+	}
+	if *evidence != "" {
+		g.record(t, began)
+	}
+
+	run(t, "systemctl", "stop", unit)
+	g.attempts(t, served, "restarted", 3)
+	run(t, "systemctl", "start", unit)
+	g.invocation = started(t, g.invocation)
+	await(t, g.invocation, "collection_resumed", 10*time.Second)
+	g.delivered(t, guesses+5)
+
+	run(t, "journalctl", "--rotate")
+	g.attempts(t, served, "rotated", 2)
+	g.delivered(t, guesses+7)
+	for _, entry := range journal(t, g.invocation) {
+		if entry["msg"] == "collection_gap" {
+			t.Errorf("restarted and with its journal rotated, the agent reported %v", entry)
+		}
+	}
+
+	run(t, "systemctl", "stop", unit)
+	g.attempts(t, served, "vacuumed", 2)
+	run(t, "journalctl", "--rotate")
+	time.Sleep(2 * time.Second)
+	run(t, "journalctl", "--vacuum-time=1s")
+	run(t, "systemctl", "start", unit)
+	g.invocation = started(t, g.invocation)
+	if gap := await(t, g.invocation, "collection_gap", 10*time.Second); gap["level"] != "WARN" || gap["after"] == nil || gap["recovery"] == nil {
+		t.Errorf("the agent reported what the journal dropped as %v", gap)
+	}
+	g.attempts(t, served, "returned", 1)
+	delivered := g.delivered(t, guesses+8)
+	users := map[string]int{}
+	for _, event := range delivered {
+		users[event.GetAuthentication().GetUser().GetName()]++
+	}
+	if len(delivered) != guesses+8 || users["restarted"] != 3 || users["rotated"] != 2 || users["vacuumed"] != 0 || users["returned"] != 1 {
+		t.Errorf("the agent delivered %d events, by user %v", len(delivered), users)
+	}
+}
+
+func (g *gate) attempts(t *testing.T, served *sshd, account string, count int) {
+	t.Helper()
+	for range count {
+		if err := served.attempt(account, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func (g *gate) collecting(t *testing.T, enabled bool) {
+	t.Helper()
+	g.collects = enabled
+	g.write(t)
+	before := len(slices.DeleteFunc(journal(t, g.invocation), func(entry map[string]any) bool { return entry["msg"] != "configuration_reloaded" }))
+	run(t, "systemctl", "reload", unit)
+	deadline := time.Now().Add(10 * time.Second)
+	for len(slices.DeleteFunc(journal(t, g.invocation), func(entry map[string]any) bool { return entry["msg"] != "configuration_reloaded" })) == before {
+		if time.Now().After(deadline) {
+			t.Fatalf("the agent did not read its configuration again:\n%s", answer("journalctl", "--no-pager", "--output", "cat", "_SYSTEMD_INVOCATION_ID="+g.invocation))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+func (g *gate) delivered(t *testing.T, count int) []*eventv1.Event {
+	t.Helper()
+	deadline := time.Now().Add(time.Minute)
+	for {
+		events, _ := g.platform.authentications()
+		if len(events) >= count {
+			return events
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the platform took %d authentications, want %d:\n%s", len(events), count,
+				answer("journalctl", "--no-pager", "--output", "cat", "_SYSTEMD_INVOCATION_ID="+g.invocation))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// What sshd wrote to the journal of this host while the agent collected, and
+// the batches the agent delivered of it, byte for byte: the compatibility
+// evidence derives the events again from the first and has a platform take the
+// second.
+func (g *gate) record(t *testing.T, began time.Time) {
+	t.Helper()
+	if err := os.MkdirAll(*evidence, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	read, err := systemjournal.New(systemjournal.Query{
+		Matches: []systemjournal.Match{{Field: "_COMM", Value: "sshd"}, {Field: "_COMM", Value: "sshd-session"}, {Field: "_UID", Value: "0"}},
+		Fields:  []string{"MESSAGE", "_COMM", "_UID", "_HOSTNAME", "_SOURCE_REALTIME_TIMESTAMP"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := read.Open(t.Context(), systemjournal.Position{Since: began.Add(-time.Second)}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	var entries []systemjournal.Entry
+	for {
+		entry, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read what sshd wrote: %v", err)
+		}
+		entries = append(entries, entry)
+	}
+	_, batches := g.platform.authentications()
+	for i, batch := range batches {
+		if err := os.WriteFile(filepath.Join(*evidence, fmt.Sprintf("batch-%03d.pb", i)), batch, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	openssh, _ := exec.Command("ssh", "-V").CombinedOutput()
+	systemd := strings.SplitN(run(t, "systemctl", "--version"), "\n", 2)[0]
+	release := run(t, "sh", "-c", ". /etc/os-release && echo $PRETTY_NAME")
+	scenario := map[string]any{
+		"recorded_at":     time.Now().UTC(),
+		"began":           began.UTC(),
+		"build":           run(t, agentPath, "-version"),
+		"installation_id": g.installation,
+		"agent_id":        agentID,
+		"host":            map[string]string{"os": release, "openssh": strings.TrimSpace(string(openssh)), "systemd": systemd},
+		"outside":         outside,
+		"account":         gateAccount,
+		"guesses":         guesses,
+		"batches":         len(batches),
+		"journal":         entries,
+	}
+	written, err := json.MarshalIndent(scenario, "", "  ")
+	if err == nil {
+		err = os.WriteFile(filepath.Join(*evidence, "scenario.json"), append(written, '\n'), 0o644)
+	}
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
