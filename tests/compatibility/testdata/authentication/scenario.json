@@ -1,0 +1,1426 @@
+{
+  "account": "seagull-native-gate",
+  "agent_id": "web-01",
+  "batches": 5,
+  "began": "2026-10-01T16:57:18.394845404Z",
+  "build": "seagull-agent v0.0.0-20261001165015-3d2b701f62b4 go1.26.8 linux/amd64\nprotocol_version 1\nevent_schema_version 1\ninventory_schema_version 1",
+  "guesses": 24,
+  "host": {
+    "openssh": "OpenSSH_9.6p1 Ubuntu-3ubuntu13.19, OpenSSL 3.0.13 30 Jan 2024",
+    "os": "Ubuntu 24.04.4 LTS",
+    "systemd": "systemd 255 (255.4-1ubuntu8.17)"
+  },
+  "installation_id": "c8747ee2-c4e7-42b6-9d4e-bc59ed64b973",
+  "journal": [
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=105e;b=efa71f4d94c741ee98f551ce58071a4d;m=ed035e45;t=65cca4efa600c;x=69475912f84e783a",
+      "Realtime": "2026-10-01T16:57:18.444556Z",
+      "Fields": {
+        "MESSAGE": "Server listening on 0.0.0.0 port 22.",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838444489",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=105f;b=efa71f4d94c741ee98f551ce58071a4d;m=ed035fa3;t=65cca4efa616a;x=26119d9658c7b3b3",
+      "Realtime": "2026-10-01T16:57:18.444906Z",
+      "Fields": {
+        "MESSAGE": "Server listening on :: port 22.",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838444540",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1061;b=efa71f4d94c741ee98f551ce58071a4d;m=ed0574ba;t=65cca4efc7681;x=3498573df98e98b0",
+      "Realtime": "2026-10-01T16:57:18.581377Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 43239",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838580992",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1062;b=efa71f4d94c741ee98f551ce58071a4d;m=ed0580cf;t=65cca4efc8296;x=1e05458954053ee1",
+      "Realtime": "2026-10-01T16:57:18.58447Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838584403",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1063;b=efa71f4d94c741ee98f551ce58071a4d;m=ed058110;t=65cca4efc82d7;x=9fb06b628d1fe16a",
+      "Realtime": "2026-10-01T16:57:18.584535Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838584447",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1064;b=efa71f4d94c741ee98f551ce58071a4d;m=ed058b0d;t=65cca4efc8cd4;x=f72186d2e9f845aa",
+      "Realtime": "2026-10-01T16:57:18.587092Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 52269",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838587029",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1065;b=efa71f4d94c741ee98f551ce58071a4d;m=ed058fac;t=65cca4efc9172;x=62e7ebbeb8412eb",
+      "Realtime": "2026-10-01T16:57:18.588274Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 46907",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838588090",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1066;b=efa71f4d94c741ee98f551ce58071a4d;m=ed0597f6;t=65cca4efc99bd;x=3e9eb8e88f48659c",
+      "Realtime": "2026-10-01T16:57:18.590397Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838590338",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1067;b=efa71f4d94c741ee98f551ce58071a4d;m=ed059826;t=65cca4efc99ed;x=ee1783916f75e51e",
+      "Realtime": "2026-10-01T16:57:18.590445Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838590380",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1068;b=efa71f4d94c741ee98f551ce58071a4d;m=ed059849;t=65cca4efc9a0f;x=c89d7872f328fd32",
+      "Realtime": "2026-10-01T16:57:18.590479Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838590445",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1069;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05985e;t=65cca4efc9a25;x=604ea25ae5749a36",
+      "Realtime": "2026-10-01T16:57:18.590501Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838590458",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=106a;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05aadb;t=65cca4efcaca1;x=3d6997b53ea57a47",
+      "Realtime": "2026-10-01T16:57:18.595233Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 37377",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838595126",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=106b;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05ac34;t=65cca4efcadfb;x=2e07aac2c6994a78",
+      "Realtime": "2026-10-01T16:57:18.595579Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 40969",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838595506",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=106c;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05ad21;t=65cca4efcaee8;x=8bb962e3e6d7bfcf",
+      "Realtime": "2026-10-01T16:57:18.595816Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 58961",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838595645",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=106d;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05b670;t=65cca4efcb837;x=bf5c63a55265f1bf",
+      "Realtime": "2026-10-01T16:57:18.598199Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838598129",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=106e;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05b6a3;t=65cca4efcb86a;x=29b51d9dffe5a2d9",
+      "Realtime": "2026-10-01T16:57:18.59825Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838598177",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=106f;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05b97c;t=65cca4efcbb43;x=e22e97e838d4437c",
+      "Realtime": "2026-10-01T16:57:18.598979Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838598289",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1070;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05b9a8;t=65cca4efcbb6f;x=abf9231b2d4afdd7",
+      "Realtime": "2026-10-01T16:57:18.599023Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838598334",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1071;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05bb37;t=65cca4efcbcfe;x=3af135e86c635471",
+      "Realtime": "2026-10-01T16:57:18.599422Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838599357",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1072;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05bb5e;t=65cca4efcbd25;x=3e4d3bd69b41427d",
+      "Realtime": "2026-10-01T16:57:18.599461Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838599401",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1073;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05bd85;t=65cca4efcbf4c;x=e05ee3c62d6deec4",
+      "Realtime": "2026-10-01T16:57:18.600012Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 51533",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838599893",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1074;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05beb6;t=65cca4efcc07d;x=c98e1da120d7d65d",
+      "Realtime": "2026-10-01T16:57:18.600317Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 55021",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838600257",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1075;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05cc84;t=65cca4efcce4b;x=67d1bddb5acc3eb8",
+      "Realtime": "2026-10-01T16:57:18.603851Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838603772",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1076;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05ccda;t=65cca4efccea1;x=a25e4a24965faaff",
+      "Realtime": "2026-10-01T16:57:18.603937Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838603817",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1077;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05cfdb;t=65cca4efcd1a2;x=8b2dc39ec64f598d",
+      "Realtime": "2026-10-01T16:57:18.604706Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838604642",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1078;b=efa71f4d94c741ee98f551ce58071a4d;m=ed05d00e;t=65cca4efcd1d5;x=e65f1ba52109b58c",
+      "Realtime": "2026-10-01T16:57:18.604757Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873838604684",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1079;b=efa71f4d94c741ee98f551ce58071a4d;m=ed1d5699;t=65cca4f145860;x=53a075881d09a16d",
+      "Realtime": "2026-10-01T16:57:20.146528Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 43239 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873840146458",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=107a;b=efa71f4d94c741ee98f551ce58071a4d;m=ed1d6be3;t=65cca4f146daa;x=4f997fdfff794a5f",
+      "Realtime": "2026-10-01T16:57:20.151978Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 46907 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873840151826",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=107b;b=efa71f4d94c741ee98f551ce58071a4d;m=ed1d6da7;t=65cca4f146f6e;x=11fe62b294ef20eb",
+      "Realtime": "2026-10-01T16:57:20.15243Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 52269 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873840151902",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=107c;b=efa71f4d94c741ee98f551ce58071a4d;m=ed1d8b1c;t=65cca4f148ce2;x=445f3950c1cf847e",
+      "Realtime": "2026-10-01T16:57:20.15997Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 40969 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873840159940",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=107d;b=efa71f4d94c741ee98f551ce58071a4d;m=ed1d8c2c;t=65cca4f148df3;x=8c9b98cc9608474a",
+      "Realtime": "2026-10-01T16:57:20.160243Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 37377 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873840159960",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=107e;b=efa71f4d94c741ee98f551ce58071a4d;m=ed1d9124;t=65cca4f1492eb;x=32dfcd8a21f3866",
+      "Realtime": "2026-10-01T16:57:20.161515Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 58961 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873840161456",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=107f;b=efa71f4d94c741ee98f551ce58071a4d;m=ed1d9fda;t=65cca4f14a1a1;x=11a5b931f660d943",
+      "Realtime": "2026-10-01T16:57:20.165281Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 51533 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873840165258",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1080;b=efa71f4d94c741ee98f551ce58071a4d;m=ed1da48c;t=65cca4f14a653;x=67cb4a690aaafcfa",
+      "Realtime": "2026-10-01T16:57:20.166483Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 55021 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873840166412",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1081;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2cd487;t=65cca4f23d64e;x=e495d4cce595567c",
+      "Realtime": "2026-10-01T16:57:21.161806Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 43239 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841161715",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1082;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2ce9b4;t=65cca4f23eb7b;x=52f9461b1e1616b",
+      "Realtime": "2026-10-01T16:57:21.167227Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 46907 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841167215",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1083;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2cebdf;t=65cca4f23eda5;x=70db348fb382b974",
+      "Realtime": "2026-10-01T16:57:21.167781Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 52269 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841167762",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1084;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2d06de;t=65cca4f2408a5;x=3ef361fb49d450e5",
+      "Realtime": "2026-10-01T16:57:21.174693Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 37377 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841174636",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1085;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2d0c6d;t=65cca4f240e34;x=947e7e2328d07b66",
+      "Realtime": "2026-10-01T16:57:21.176116Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 40969 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841176028",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1086;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2d0e04;t=65cca4f240fca;x=8b16569775286d87",
+      "Realtime": "2026-10-01T16:57:21.176522Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 58961 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841176246",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1087;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2d2778;t=65cca4f24293e;x=87f28bf8d07cb9d2",
+      "Realtime": "2026-10-01T16:57:21.183038Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 55021 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841182774",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1088;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2d35c2;t=65cca4f243789;x=5e156df2b722adf7",
+      "Realtime": "2026-10-01T16:57:21.186697Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 51533 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841186093",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1089;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f363e;t=65cca4f263805;x=b2a4a13e2eb56cb",
+      "Realtime": "2026-10-01T16:57:21.317893Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 35363",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841317778",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=108a;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f3751;t=65cca4f263918;x=6886d85a52140921",
+      "Realtime": "2026-10-01T16:57:21.318168Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 49821",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841317816",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=108b;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f38d0;t=65cca4f263a97;x=10de18edf11fda9c",
+      "Realtime": "2026-10-01T16:57:21.318551Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 55431",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841318494",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=108c;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f403d;t=65cca4f264204;x=738242a38de396e5",
+      "Realtime": "2026-10-01T16:57:21.320452Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841320390",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=108d;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f4070;t=65cca4f264237;x=884e8899d333c664",
+      "Realtime": "2026-10-01T16:57:21.320503Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841320431",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=108e;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f41f7;t=65cca4f2643be;x=92381ba497b7c39d",
+      "Realtime": "2026-10-01T16:57:21.320894Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841320818",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=108f;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f4215;t=65cca4f2643dc;x=33e26a46282114de",
+      "Realtime": "2026-10-01T16:57:21.320924Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841320835",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1090;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f455b;t=65cca4f264722;x=b64354323bc01758",
+      "Realtime": "2026-10-01T16:57:21.321762Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841321703",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1091;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f4586;t=65cca4f26474d;x=8c620396098395fe",
+      "Realtime": "2026-10-01T16:57:21.321805Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841321743",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1092;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f472d;t=65cca4f2648f4;x=20cfab3891434e8",
+      "Realtime": "2026-10-01T16:57:21.322228Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 59041",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841322166",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1093;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f5423;t=65cca4f2655ea;x=d40296a8de4958b9",
+      "Realtime": "2026-10-01T16:57:21.325546Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841325477",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1094;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f5451;t=65cca4f265618;x=655d4269fc9a8d58",
+      "Realtime": "2026-10-01T16:57:21.325592Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841325524",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1095;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f56d3;t=65cca4f26589a;x=1914a5444374cd74",
+      "Realtime": "2026-10-01T16:57:21.326234Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 60697",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841326171",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1096;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f5f25;t=65cca4f2660ec;x=ccfe14a280c97bc3",
+      "Realtime": "2026-10-01T16:57:21.328364Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841328307",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1097;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f5f52;t=65cca4f266119;x=ee66ff135f10abb1",
+      "Realtime": "2026-10-01T16:57:21.328409Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841328347",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1098;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f6377;t=65cca4f26653d;x=5de628889b62a5e1",
+      "Realtime": "2026-10-01T16:57:21.329469Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 44585",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841329405",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=1099;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f6d63;t=65cca4f266f2a;x=7931b6932cf70d86",
+      "Realtime": "2026-10-01T16:57:21.33201Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841331814",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=109a;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f6d8b;t=65cca4f266f52;x=b842c7a3f14c6684",
+      "Realtime": "2026-10-01T16:57:21.33205Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841331853",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=109b;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f6ff8;t=65cca4f2671bf;x=cac74aa8d9bc2036",
+      "Realtime": "2026-10-01T16:57:21.332671Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 48415",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841332605",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=109c;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f794b;t=65cca4f267b12;x=63b554b4487f097",
+      "Realtime": "2026-10-01T16:57:21.335058Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841334930",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=109d;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2f7976;t=65cca4f267b3d;x=3bbbee4a26a283f7",
+      "Realtime": "2026-10-01T16:57:21.335101Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841335048",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=109e;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2fac1b;t=65cca4f26ade2;x=678f87e47f980dc7",
+      "Realtime": "2026-10-01T16:57:21.348066Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 37771",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841348007",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=109f;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2fb5f8;t=65cca4f26b7bf;x=b66f3d692a1a1b9e",
+      "Realtime": "2026-10-01T16:57:21.350591Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841350527",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10a0;b=efa71f4d94c741ee98f551ce58071a4d;m=ed2fb625;t=65cca4f26b7ec;x=7cbdc62455d8a480",
+      "Realtime": "2026-10-01T16:57:21.350636Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873841350565",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10a1;b=efa71f4d94c741ee98f551ce58071a4d;m=ed4d5f0c;t=65cca4f4460d3;x=dbb4ce760eabb138",
+      "Realtime": "2026-10-01T16:57:23.294419Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 35363 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843294252",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10a2;b=efa71f4d94c741ee98f551ce58071a4d;m=ed4d6075;t=65cca4f44623c;x=7360d6ae42029d93",
+      "Realtime": "2026-10-01T16:57:23.29478Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 49821 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843294266",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10a3;b=efa71f4d94c741ee98f551ce58071a4d;m=ed4d60f6;t=65cca4f4462bd;x=f0cb4889849c6453",
+      "Realtime": "2026-10-01T16:57:23.294909Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 55431 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843294269",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10a4;b=efa71f4d94c741ee98f551ce58071a4d;m=ed4d7130;t=65cca4f4472f7;x=acbcca412a7191f2",
+      "Realtime": "2026-10-01T16:57:23.299063Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 59041 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843299002",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10a5;b=efa71f4d94c741ee98f551ce58071a4d;m=ed4d7c1f;t=65cca4f447de6;x=471df095a7fe5c09",
+      "Realtime": "2026-10-01T16:57:23.301862Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 60697 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843301797",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10a6;b=efa71f4d94c741ee98f551ce58071a4d;m=ed4d8872;t=65cca4f448a39;x=da877df42a0c485d",
+      "Realtime": "2026-10-01T16:57:23.305017Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 44585 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843304964",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10a7;b=efa71f4d94c741ee98f551ce58071a4d;m=ed4d9672;t=65cca4f449839;x=f4a4612d9f1dd892",
+      "Realtime": "2026-10-01T16:57:23.308601Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 48415 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843308541",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10a8;b=efa71f4d94c741ee98f551ce58071a4d;m=ed4dd3b4;t=65cca4f44d57a;x=644189bbf87075e0",
+      "Realtime": "2026-10-01T16:57:23.324282Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 37771 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843324206",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10a9;b=efa71f4d94c741ee98f551ce58071a4d;m=ed5691df;t=65cca4f4d93a5;x=31ba095b989b1c48",
+      "Realtime": "2026-10-01T16:57:23.897253Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 35363 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843897228",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10aa;b=efa71f4d94c741ee98f551ce58071a4d;m=ed5694b2;t=65cca4f4d9679;x=12b6a0f048297f87",
+      "Realtime": "2026-10-01T16:57:23.897977Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 55431 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843897885",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10ab;b=efa71f4d94c741ee98f551ce58071a4d;m=ed5699a5;t=65cca4f4d9b6c;x=342f0d23b795c6bc",
+      "Realtime": "2026-10-01T16:57:23.899244Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 49821 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843898978",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10ac;b=efa71f4d94c741ee98f551ce58071a4d;m=ed56a3cf;t=65cca4f4da596;x=992bf28fb036feb2",
+      "Realtime": "2026-10-01T16:57:23.901846Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 59041 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843901830",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10ad;b=efa71f4d94c741ee98f551ce58071a4d;m=ed56b22a;t=65cca4f4db3f1;x=df450bebdab9c5be",
+      "Realtime": "2026-10-01T16:57:23.905521Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 60697 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843905509",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10ae;b=efa71f4d94c741ee98f551ce58071a4d;m=ed56c4af;t=65cca4f4dc676;x=2f2a2f6da6eb2c03",
+      "Realtime": "2026-10-01T16:57:23.910262Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 44585 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843910168",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10af;b=efa71f4d94c741ee98f551ce58071a4d;m=ed56d9ed;t=65cca4f4ddbb3;x=e07cb10361acb54a",
+      "Realtime": "2026-10-01T16:57:23.915699Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 48415 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843915683",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10b0;b=efa71f4d94c741ee98f551ce58071a4d;m=ed570fa0;t=65cca4f4e1167;x=7261c8a17958d523",
+      "Realtime": "2026-10-01T16:57:23.929447Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 37771 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873843929435",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10b1;b=efa71f4d94c741ee98f551ce58071a4d;m=ed589abe;t=65cca4f4f9c84;x=bcc33c912eb67a45",
+      "Realtime": "2026-10-01T16:57:24.030596Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 56145",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844030579",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10b2;b=efa71f4d94c741ee98f551ce58071a4d;m=ed58a671;t=65cca4f4fa837;x=29c9e5d62c17908c",
+      "Realtime": "2026-10-01T16:57:24.033591Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844033502",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10b3;b=efa71f4d94c741ee98f551ce58071a4d;m=ed58a6f7;t=65cca4f4fa8be;x=78da4049cd57be16",
+      "Realtime": "2026-10-01T16:57:24.033726Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844033520",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10b4;b=efa71f4d94c741ee98f551ce58071a4d;m=ed58d623;t=65cca4f4fd7ea;x=6add97cf2a42e9e1",
+      "Realtime": "2026-10-01T16:57:24.045802Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 52055",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844045711",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10b5;b=efa71f4d94c741ee98f551ce58071a4d;m=ed58e0e0;t=65cca4f4fe2a7;x=c4f6e342c5aea70a",
+      "Realtime": "2026-10-01T16:57:24.048551Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844048471",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10b6;b=efa71f4d94c741ee98f551ce58071a4d;m=ed58e1e3;t=65cca4f4fe3aa;x=d6c811f1c857f7e",
+      "Realtime": "2026-10-01T16:57:24.04881Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844048515",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10b7;b=efa71f4d94c741ee98f551ce58071a4d;m=ed58e212;t=65cca4f4fe3d9;x=4b63f27f77282dd7",
+      "Realtime": "2026-10-01T16:57:24.048857Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 45673",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844048627",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10b8;b=efa71f4d94c741ee98f551ce58071a4d;m=ed58eb2e;t=65cca4f4fecf5;x=eb254c0085735d41",
+      "Realtime": "2026-10-01T16:57:24.051189Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844051128",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10b9;b=efa71f4d94c741ee98f551ce58071a4d;m=ed58eb5d;t=65cca4f4fed24;x=617c92a094493857",
+      "Realtime": "2026-10-01T16:57:24.051236Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844051169",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10ba;b=efa71f4d94c741ee98f551ce58071a4d;m=ed58fd50;t=65cca4f4fff17;x=a9507e90e23541aa",
+      "Realtime": "2026-10-01T16:57:24.055831Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 51237",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844055772",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10bb;b=efa71f4d94c741ee98f551ce58071a4d;m=ed590879;t=65cca4f500a40;x=ac2d3bc893ce6566",
+      "Realtime": "2026-10-01T16:57:24.058688Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844058624",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10bc;b=efa71f4d94c741ee98f551ce58071a4d;m=ed59089e;t=65cca4f500a65;x=397ddbaef889d3b4",
+      "Realtime": "2026-10-01T16:57:24.058725Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844058665",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10bd;b=efa71f4d94c741ee98f551ce58071a4d;m=ed590d21;t=65cca4f500ee8;x=5c13ffaab25e7602",
+      "Realtime": "2026-10-01T16:57:24.05988Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 46589",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844059774",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10be;b=efa71f4d94c741ee98f551ce58071a4d;m=ed590e9b;t=65cca4f501062;x=ab15d901cba3f108",
+      "Realtime": "2026-10-01T16:57:24.060258Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 51441",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844060201",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10bf;b=efa71f4d94c741ee98f551ce58071a4d;m=ed591809;t=65cca4f5019cf;x=4a6bc54f44455df6",
+      "Realtime": "2026-10-01T16:57:24.062671Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 39765",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844062603",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10c0;b=efa71f4d94c741ee98f551ce58071a4d;m=ed591b3e;t=65cca4f501d05;x=53d3a69989fe737d",
+      "Realtime": "2026-10-01T16:57:24.063493Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844063442",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10c1;b=efa71f4d94c741ee98f551ce58071a4d;m=ed591b68;t=65cca4f501d2f;x=ff01624574268486",
+      "Realtime": "2026-10-01T16:57:24.063535Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844063456",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10c2;b=efa71f4d94c741ee98f551ce58071a4d;m=ed591b84;t=65cca4f501d4b;x=c2d1884bfa29cd84",
+      "Realtime": "2026-10-01T16:57:24.063563Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844063519",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10c3;b=efa71f4d94c741ee98f551ce58071a4d;m=ed591b99;t=65cca4f501d60;x=4ffbbd1fe0d494b2",
+      "Realtime": "2026-10-01T16:57:24.063584Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844063532",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10c4;b=efa71f4d94c741ee98f551ce58071a4d;m=ed59217a;t=65cca4f502341;x=10361a8b833161aa",
+      "Realtime": "2026-10-01T16:57:24.065089Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844065025",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10c5;b=efa71f4d94c741ee98f551ce58071a4d;m=ed5921a5;t=65cca4f50236b;x=70bea41818e769c0",
+      "Realtime": "2026-10-01T16:57:24.065131Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844065067",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10c6;b=efa71f4d94c741ee98f551ce58071a4d;m=ed5952f3;t=65cca4f5054ba;x=3761683e2ceb066f",
+      "Realtime": "2026-10-01T16:57:24.077754Z",
+      "Fields": {
+        "MESSAGE": "Invalid user admin from 203.0.113.10 port 45631",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844077694",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10c7;b=efa71f4d94c741ee98f551ce58071a4d;m=ed596148;t=65cca4f50630f;x=3ee215cf948467f0",
+      "Realtime": "2026-10-01T16:57:24.081423Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): check pass; user unknown",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844081366",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10c8;b=efa71f4d94c741ee98f551ce58071a4d;m=ed596170;t=65cca4f506337;x=c3320fa663f0f0f4",
+      "Realtime": "2026-10-01T16:57:24.081463Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873844081407",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10c9;b=efa71f4d94c741ee98f551ce58071a4d;m=ed72dce8;t=65cca4f69deaf;x=2fddceb206c8cf8e",
+      "Realtime": "2026-10-01T16:57:25.751471Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 56145 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873845751361",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10ca;b=efa71f4d94c741ee98f551ce58071a4d;m=ed7316b1;t=65cca4f6a1878;x=59d18db35855574d",
+      "Realtime": "2026-10-01T16:57:25.766264Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 52055 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873845766170",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10cb;b=efa71f4d94c741ee98f551ce58071a4d;m=ed731eb2;t=65cca4f6a2079;x=3bada2135a2c1b87",
+      "Realtime": "2026-10-01T16:57:25.768313Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 45673 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873845768253",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10cc;b=efa71f4d94c741ee98f551ce58071a4d;m=ed733c8c;t=65cca4f6a3e53;x=5f092ad193d54292",
+      "Realtime": "2026-10-01T16:57:25.775955Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 51237 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873845775839",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10cd;b=efa71f4d94c741ee98f551ce58071a4d;m=ed735210;t=65cca4f6a53d7;x=c4f033685d1e64df",
+      "Realtime": "2026-10-01T16:57:25.781463Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 46589 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873845781373",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10ce;b=efa71f4d94c741ee98f551ce58071a4d;m=ed7352f5;t=65cca4f6a54bc;x=2a0dfb82ace1a8b6",
+      "Realtime": "2026-10-01T16:57:25.781692Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 51441 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873845781374",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10cf;b=efa71f4d94c741ee98f551ce58071a4d;m=ed7353f7;t=65cca4f6a55be;x=bf56378a9552237",
+      "Realtime": "2026-10-01T16:57:25.78195Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 39765 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873845781378",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10d0;b=efa71f4d94c741ee98f551ce58071a4d;m=ed739740;t=65cca4f6a9907;x=da1dd20003eb5b6d",
+      "Realtime": "2026-10-01T16:57:25.799175Z",
+      "Fields": {
+        "MESSAGE": "Failed password for invalid user admin from 203.0.113.10 port 45631 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873845799107",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10d1;b=efa71f4d94c741ee98f551ce58071a4d;m=ed7ff968;t=65cca4f76fb2f;x=ebfca24a6452873b",
+      "Realtime": "2026-10-01T16:57:26.610735Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 56145 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873846610708",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10d2;b=efa71f4d94c741ee98f551ce58071a4d;m=ed8032e8;t=65cca4f7734af;x=d4a30863570d58c7",
+      "Realtime": "2026-10-01T16:57:26.625455Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 52055 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873846625380",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10d3;b=efa71f4d94c741ee98f551ce58071a4d;m=ed803b74;t=65cca4f773d3b;x=4c9b11a0385a9dbb",
+      "Realtime": "2026-10-01T16:57:26.627643Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 45673 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873846627587",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10d4;b=efa71f4d94c741ee98f551ce58071a4d;m=ed805966;t=65cca4f775b2d;x=9201ebfc54a1185c",
+      "Realtime": "2026-10-01T16:57:26.635309Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 51237 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873846635290",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10d5;b=efa71f4d94c741ee98f551ce58071a4d;m=ed806c7f;t=65cca4f776e46;x=cb77d98de9052ad0",
+      "Realtime": "2026-10-01T16:57:26.640198Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 51441 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873846640116",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10d6;b=efa71f4d94c741ee98f551ce58071a4d;m=ed806cbb;t=65cca4f776e82;x=2f3471d90d63e25",
+      "Realtime": "2026-10-01T16:57:26.640258Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 46589 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873846640185",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10d7;b=efa71f4d94c741ee98f551ce58071a4d;m=ed80721c;t=65cca4f7773e3;x=3759d75c1bdaa785",
+      "Realtime": "2026-10-01T16:57:26.641635Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 39765 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873846641573",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10d8;b=efa71f4d94c741ee98f551ce58071a4d;m=ed80b411;t=65cca4f77b5d8;x=d2d02e962c9b6267",
+      "Realtime": "2026-10-01T16:57:26.65852Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by invalid user admin 203.0.113.10 port 45631 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873846658005",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10d9;b=efa71f4d94c741ee98f551ce58071a4d;m=ed8358ef;t=65cca4f7a5ab5;x=b326743648e50e5b",
+      "Realtime": "2026-10-01T16:57:26.831797Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.10  user=seagull-native-gate",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873846831708",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10da;b=efa71f4d94c741ee98f551ce58071a4d;m=eda1c42b;t=65cca4f98c5f1;x=b07fd6aab6b5c2",
+      "Realtime": "2026-10-01T16:57:28.825329Z",
+      "Fields": {
+        "MESSAGE": "Failed password for seagull-native-gate from 203.0.113.10 port 43099 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873848825247",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10db;b=efa71f4d94c741ee98f551ce58071a4d;m=eda6e92e;t=65cca4f9deaf5;x=1fefb7f88b7636ec",
+      "Realtime": "2026-10-01T16:57:29.162485Z",
+      "Fields": {
+        "MESSAGE": "Connection closed by authenticating user seagull-native-gate 203.0.113.10 port 43099 [preauth]",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873849162312",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10dc;b=efa71f4d94c741ee98f551ce58071a4d;m=edaa20ae;t=65cca4fa12274;x=b3b7cf00e7c9e9c7",
+      "Realtime": "2026-10-01T16:57:29.3733Z",
+      "Fields": {
+        "MESSAGE": "Accepted password for seagull-native-gate from 203.0.113.10 port 35269 ssh2",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873849373273",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10dd;b=efa71f4d94c741ee98f551ce58071a4d;m=edaa25f9;t=65cca4fa127c0;x=c37145cd7c7abe0d",
+      "Realtime": "2026-10-01T16:57:29.374656Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:session): session opened for user seagull-native-gate(uid=1001) by seagull-native-gate(uid=0)",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873849374591",
+        "_UID": "0"
+      }
+    },
+    {
+      "Cursor": "s=a868943398cf4bbb8a588a8a55d8faee;i=10e0;b=efa71f4d94c741ee98f551ce58071a4d;m=edab34b4;t=65cca4fa2367b;x=3738dfc9e8debfad",
+      "Realtime": "2026-10-01T16:57:29.443963Z",
+      "Fields": {
+        "MESSAGE": "pam_unix(sshd:session): session closed for user seagull-native-gate",
+        "_COMM": "sshd",
+        "_HOSTNAME": "f8ef82343d3f",
+        "_SOURCE_REALTIME_TIMESTAMP": "1790873849436627",
+        "_UID": "0"
+      }
+    }
+  ],
+  "outside": "203.0.113.10",
+  "recorded_at": "2026-10-01T16:57:29.555241202Z"
+}

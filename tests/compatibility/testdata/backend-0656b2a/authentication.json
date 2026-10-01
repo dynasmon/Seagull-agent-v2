@@ -1,0 +1,185 @@
+{
+  "agent": {
+    "agent_id": "web-01",
+    "build": "seagull-agent v0.0.0-20261001165015-3d2b701f62b4 go1.26.8 linux/amd64\nprotocol_version 1\nevent_schema_version 1\ninventory_schema_version 1",
+    "installation_id": "c8747ee2-c4e7-42b6-9d4e-bc59ed64b973",
+    "recorded_at": "2026-10-01T16:57:29.555241202Z"
+  },
+  "alone": {
+    "backbone_records": 26,
+    "stored_events": 26,
+    "distinct_events": 26,
+    "detections": {
+      "ssh.failed_password_from_outside": {
+        "published": 25,
+        "distinct": 25,
+        "stored": 25
+      },
+      "ssh.password_guessing_that_succeeded": {
+        "published": 1,
+        "distinct": 1,
+        "stored": 1,
+        "stages": [
+          [
+            "7a5b28d9-b032-8fea-9001-a5887598c12a",
+            "a0d392be-622b-875f-9de4-17083057790f"
+          ]
+        ]
+      },
+      "ssh.repeated_failed_password": {
+        "published": 6,
+        "distinct": 6,
+        "stored": 6,
+        "counts": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25
+        ]
+      }
+    }
+  },
+  "exchanges": [
+    {
+      "phase": "original",
+      "batch": "batch-000.pb",
+      "batch_id": "78788aca-bbaa-4bf1-8e7e-78d7dd8dee3e",
+      "events": 8,
+      "accepted": true,
+      "durable": true,
+      "received": 8
+    },
+    {
+      "phase": "original",
+      "batch": "batch-001.pb",
+      "batch_id": "00d2b969-12c4-4ba7-aeaa-4277be318b29",
+      "events": 8,
+      "accepted": true,
+      "durable": true,
+      "received": 8
+    },
+    {
+      "phase": "original",
+      "batch": "batch-002.pb",
+      "batch_id": "5caab766-2d7c-439e-beca-2318ce7e7d08",
+      "events": 8,
+      "accepted": true,
+      "durable": true,
+      "received": 8
+    },
+    {
+      "phase": "original",
+      "batch": "batch-003.pb",
+      "batch_id": "545f22cd-e07a-4cfa-80d1-09fb4041c7f3",
+      "events": 1,
+      "accepted": true,
+      "durable": true,
+      "received": 1
+    },
+    {
+      "phase": "original",
+      "batch": "batch-004.pb",
+      "batch_id": "c32e1c94-b9d6-45c5-9ad3-7f5313ae2d9a",
+      "events": 1,
+      "accepted": true,
+      "durable": true,
+      "received": 1
+    },
+    {
+      "phase": "replayed",
+      "batch": "batch-000.pb",
+      "batch_id": "78788aca-bbaa-4bf1-8e7e-78d7dd8dee3e",
+      "events": 8,
+      "accepted": true,
+      "durable": true,
+      "received": 8
+    },
+    {
+      "phase": "replayed",
+      "batch": "batch-001.pb",
+      "batch_id": "00d2b969-12c4-4ba7-aeaa-4277be318b29",
+      "events": 8,
+      "accepted": true,
+      "durable": true,
+      "received": 8
+    },
+    {
+      "phase": "replayed",
+      "batch": "batch-002.pb",
+      "batch_id": "5caab766-2d7c-439e-beca-2318ce7e7d08",
+      "events": 8,
+      "accepted": true,
+      "durable": true,
+      "received": 8
+    },
+    {
+      "phase": "replayed",
+      "batch": "batch-003.pb",
+      "batch_id": "545f22cd-e07a-4cfa-80d1-09fb4041c7f3",
+      "events": 1,
+      "accepted": true,
+      "durable": true,
+      "received": 1
+    },
+    {
+      "phase": "replayed",
+      "batch": "batch-004.pb",
+      "batch_id": "c32e1c94-b9d6-45c5-9ad3-7f5313ae2d9a",
+      "events": 1,
+      "accepted": true,
+      "durable": true,
+      "received": 1
+    }
+  ],
+  "platform": {
+    "admission_clock": "2026-10-01T16:58:29.555241202Z",
+    "broker": "redpandadata/redpanda:v24.2.20",
+    "commit": "0656b2ab8ae334f30e1119411695a77f90984a61",
+    "contracts": "v0.14.0",
+    "repository": "dynasmon/Seagull-backend-v2",
+    "rules": [
+      "ssh.failed_password_from_outside",
+      "ssh.repeated_failed_password",
+      "ssh.password_guessing_that_succeeded"
+    ],
+    "store": "clickhouse/clickhouse-server:24.8"
+  },
+  "replayed": {
+    "backbone_records": 52,
+    "stored_events": 26,
+    "distinct_events": 26,
+    "detections": {
+      "ssh.failed_password_from_outside": {
+        "published": 50,
+        "distinct": 25,
+        "stored": 25
+      },
+      "ssh.password_guessing_that_succeeded": {
+        "published": 1,
+        "distinct": 1,
+        "stored": 1,
+        "stages": [
+          [
+            "7a5b28d9-b032-8fea-9001-a5887598c12a",
+            "a0d392be-622b-875f-9de4-17083057790f"
+          ]
+        ]
+      },
+      "ssh.repeated_failed_password": {
+        "published": 6,
+        "distinct": 6,
+        "stored": 6,
+        "counts": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25
+        ]
+      }
+    }
+  }
+}

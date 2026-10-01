@@ -532,7 +532,7 @@ func TestAnAgentThatIsNotEnrolledHasNothingToRenew(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("the agent exited with %d", code)
 	}
-	if !slices.Equal(components, []any{"configuration", "status"}) {
+	if !slices.Equal(components, []any{"configuration", "collection", "status"}) {
 		t.Fatalf("an agent that is not enrolled ran %v", components)
 	}
 }
@@ -600,7 +600,7 @@ func TestAnEnrolledAgentDeliversWhatItsSpoolHoldsAsItRuns(t *testing.T) {
 			components = append(components, entry["component"], entry["policy"])
 		}
 	}
-	if code != 0 || !slices.Equal(components, []any{"configuration", "essential", "renewal", "optional", "delivery", "essential", "status", "optional"}) {
+	if code != 0 || !slices.Equal(components, []any{"configuration", "essential", "collection", "optional", "renewal", "optional", "delivery", "essential", "status", "optional"}) {
 		t.Fatalf("the agent exited with %d after running %v", code, components)
 	}
 	mu.Lock()
@@ -1602,6 +1602,59 @@ func TestAHangupAsksTheAgentToReadItsConfigurationAgain(t *testing.T) {
 	}
 	if err := agent.Wait(); err != nil {
 		t.Fatalf("the agent exited with %v after a reload, want a clean exit", err)
+	}
+}
+
+func TestTheAgentCollectsAuthenticationWhileItsConfigurationNamesIt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows cannot deliver SIGHUP to another process")
+	}
+	state := stateDirectory(t)
+	path := configured(t, state, map[string]string{"modules": `{"authentication": {"enabled": true}}`})
+	agent := exec.CommandContext(t.Context(), os.Args[0])
+	agent.Env = append(os.Environ(), childArguments+"=-config "+path+" run")
+	logs, err := agent.StderrPipe()
+	if err != nil {
+		t.Fatalf("attach to the agent's log: %v", err)
+	}
+	if err := agent.Start(); err != nil {
+		t.Fatalf("start the agent: %v", err)
+	}
+	entries := follow(t, logs)
+	if started := await(t, entries, "module_started"); started["module"] != "authentication" || started["state"] != "running" {
+		t.Errorf("the agent started %v", started)
+	}
+	if listed, err := os.ReadDir(filepath.Join(state, "collection")); err != nil {
+		t.Errorf("the agent keeps no place of its collectors: %v %v", listed, err)
+	}
+
+	rewrite(t, path, state, map[string]string{"modules": `{"authentication": {"enabled": false}}`})
+	hangup(t, agent)
+	if stopped := await(t, entries, "module_stopped"); stopped["module"] != "authentication" {
+		t.Errorf("the agent stopped %v", stopped)
+	}
+	await(t, entries, "configuration_reloaded")
+
+	rewrite(t, path, state, map[string]string{"modules": `{"authentication": {"enabled": true}, "fim": {"enabled": true}}`})
+	hangup(t, agent)
+	if cause, _ := await(t, entries, "configuration_not_reloaded")["error"].(string); !strings.Contains(cause, "modules.fim is configured, and this build collects with authentication") {
+		t.Errorf("the agent refused the configuration with %q", cause)
+	}
+
+	rewrite(t, path, state, map[string]string{"modules": `{"authentication": {"enabled": true}}`})
+	hangup(t, agent)
+	if started := await(t, entries, "module_started"); started["module"] != "authentication" {
+		t.Errorf("the agent started %v", started)
+	}
+
+	if err := agent.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("send SIGTERM: %v", err)
+	}
+	await(t, entries, "agent_stopped")
+	for range entries {
+	}
+	if err := agent.Wait(); err != nil {
+		t.Fatalf("the agent exited with %v, want a clean exit", err)
 	}
 }
 

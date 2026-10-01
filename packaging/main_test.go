@@ -225,7 +225,7 @@ func TestTheServiceRunsTheAgentAsThePackageInstallsIt(t *testing.T) {
 		"User":                  account[1],
 		"Group":                 account[1],
 		"DynamicUser":           "",
-		"SupplementaryGroups":   "",
+		"SupplementaryGroups":   "systemd-journal",
 		"ExecStart":             "/" + agentPath + " -config " + configuration + " run",
 		"StateDirectory":        path.Base(state),
 		"StateDirectoryMode":    "0700",
@@ -250,6 +250,9 @@ func TestTheServiceRunsTheAgentAsThePackageInstallsIt(t *testing.T) {
 		t.Error("purging the package does not remove the link that enabling the service creates")
 	}
 
+	if !settings.Modules["authentication"].Enabled {
+		t.Errorf("the settings the package installs leave the authentication collector out: %v", settings.Modules)
+	}
 	if path.Dir(state) != "/var/lib" || !slices.Contains(directories, "d "+state+" 0700 "+account[1]+" "+account[1]+" -") {
 		t.Errorf("the installation is kept in %s, and the package creates %q", state, directories)
 	}
@@ -410,6 +413,7 @@ func template(t *testing.T) (config.Config, string) {
 		Format   int            `json:"format"`
 		Identity map[string]any `json:"identity"`
 		Server   map[string]any `json:"server"`
+		Modules  map[string]any `json:"modules"`
 	}
 	if err := json.Unmarshal([]byte(asset(t, "linux/agent.json")), &held); err != nil {
 		t.Fatalf("read the settings the package installs: %v", err)

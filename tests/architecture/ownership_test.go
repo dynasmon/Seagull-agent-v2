@@ -82,6 +82,18 @@ var dependencyRules = []dependencyRule{
 		reason:     "collectors observe the endpoint and never hold the keys the agent proves its identity with",
 	},
 	{
+		packages:  "internal/modules",
+		forbidden: []string{"os/exec", "syscall", "unsafe", "golang.org/x/sys"},
+		reason:    "a collector reaches the operating system through an adapter under internal/platform, which owns the commands it runs and the calls it makes",
+	},
+	{
+		packages:   "internal/platform",
+		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
+		allowed:    []string{modulePath + "/internal/platform", modulePath + "/internal/secrets"},
+		transitive: true,
+		reason:     "an adapter reaches the operating system for whoever asks it: what it reads means something to them alone, it reaches no host, and what it repeats of what it read is bounded by the secrets package",
+	},
+	{
 		packages:   "internal/secrets",
 		forbidden:  []string{modulePath, contractsPath, "os", "net"},
 		transitive: true,
@@ -222,6 +234,40 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				ImportPath: modulePath + "/internal/modules/auth",
 				Imports:    []string{modulePath + "/internal/telemetry"},
 				Deps:       []string{ingest, modulePath + "/internal/telemetry", "os"},
+			},
+		},
+		{
+			name: "a collector running a command of its own",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/modules/auth",
+				Imports:    []string{"os/exec", "syscall"},
+				Deps:       []string{"os/exec", "syscall"},
+			},
+			want: []string{"os/exec", "syscall"},
+		},
+		{
+			name: "a collector reading the journal through its adapter",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/modules/authentication",
+				Imports:    []string{modulePath + "/internal/platform/journal", modulePath + "/internal/spool"},
+				Deps:       []string{modulePath + "/internal/platform/journal", modulePath + "/internal/secrets", modulePath + "/internal/spool", "os/exec", "syscall"},
+			},
+		},
+		{
+			name: "an adapter knowing who reads what it reads",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/platform/journal",
+				Imports:    []string{contractsPath + "/gen/go/seagull/event/v1", modulePath + "/internal/modules/authentication", "os/exec"},
+				Deps:       []string{contractsPath + "/gen/go/seagull/event/v1", modulePath + "/internal/modules/authentication", modulePath + "/internal/spool", "os/exec"},
+			},
+			want: []string{contractsPath + "/gen/go/seagull/event/v1", modulePath + "/internal/modules/authentication", modulePath + "/internal/spool"},
+		},
+		{
+			name: "an adapter running a command and bounding what it repeats of it",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/platform/journal",
+				Imports:    []string{modulePath + "/internal/secrets", "os/exec", "syscall"},
+				Deps:       []string{modulePath + "/internal/platform/files", modulePath + "/internal/secrets", "os/exec", "syscall"},
 			},
 		},
 		{

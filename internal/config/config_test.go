@@ -363,19 +363,29 @@ func TestAConfigurationWrittenForAnotherReleaseIsRefusedRatherThanGuessed(t *tes
 	}
 }
 
-func TestThisBuildConfiguresNoCollectorAndInstallsNoUpdate(t *testing.T) {
+func TestThisBuildConfiguresTheCollectorItHasAndInstallsNoUpdate(t *testing.T) {
 	for name, sections := range map[string]map[string]string{
 		"a collector it does not have": {"modules": `{"auth": {"enabled": true}}`},
 		"an update it cannot install":  {"updates": `{"enabled": true}`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := config.Load(configured(t, sections)); !errors.Is(err, config.ErrInvalid) {
+			_, err := config.Load(configured(t, sections))
+			if !errors.Is(err, config.ErrInvalid) {
 				t.Fatalf("the agent promised %s: %v", name, err)
+			}
+			if name == "a collector it does not have" && !strings.Contains(err.Error(), "modules.auth is configured, and this build collects with authentication") {
+				t.Errorf("the refusal does not name the collector this build has: %v", err)
 			}
 		})
 	}
-	if _, err := config.Load(configured(t, map[string]string{"modules": `{}`, "updates": `{"enabled": false}`})); err != nil {
-		t.Fatalf("an agent that collects nothing and updates itself never: %v", err)
+	for _, modules := range []string{`{}`, `{"authentication": {"enabled": false}}`, `{"authentication": {"enabled": true}}`} {
+		settings, err := config.Load(configured(t, map[string]string{"modules": modules, "updates": `{"enabled": false}`}))
+		if err != nil {
+			t.Fatalf("an agent configured with modules %s: %v", modules, err)
+		}
+		if want := strings.Contains(modules, "true"); settings.Modules["authentication"].Enabled != want {
+			t.Errorf("modules %s were read as %v", modules, settings.Modules)
+		}
 	}
 }
 

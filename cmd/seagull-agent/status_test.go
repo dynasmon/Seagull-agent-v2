@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,6 +19,10 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
+	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/journal"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	"github.com/dynasmon/Seagull-agent-v2/internal/status"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
@@ -42,7 +48,8 @@ func TestTheAgentSaysHowItIsDoingBeforeItRunsWhileItRunsAndOnceItStops(t *testin
 		"the agent is degraded: its status was written ",
 		fmt.Sprintf("an installation that is not enrolled, installation %s, process %d started ", held.Agent.InstallationID, os.Getpid()),
 		"configuration: running since ",
-		"collection: disabled: this build has no collector",
+		"collection: disabled: no module is enabled",
+		"module authentication: disabled since ",
 		"spool: running",
 		"delivery: degraded: the installation is not enrolled, so nothing it admits is delivered",
 		"  what to do: enroll the installation first",
@@ -248,6 +255,108 @@ func TestASpoolThatHoldsAllItsBudgetAllowsSaysItLeavesAGap(t *testing.T) {
 		t.Fatalf("the events stream stands at %+v", events)
 	}
 }
+
+func TestTheCollectionStandsAtItsWorstEnabledModule(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "collection")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatalf("create %s: %v", directory, err)
+	}
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		t.Fatalf("open %s: %v", directory, err)
+	}
+	t.Cleanup(func() { root.Close() })
+	logger := slog.New(slog.DiscardHandler)
+	governed, err := governor.New(logger, "5d0f6c9e-6a4b-4f43-9a3f-2f5a8f8f7c11", governor.Budget{Scans: 1, ScanBytesPerSecond: 1 << 20, Uploads: 1, UploadBytesPerSecond: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	collector, err := authentication.New(authentication.Options{
+		Installation: "5d0f6c9e-6a4b-4f43-9a3f-2f5a8f8f7c11",
+		Spool:        unusedSpool{},
+		Governor:     governed,
+		Directory:    root,
+		Logger:       logger,
+		Open: func(context.Context, journal.Position, bool) (authentication.Entries, error) {
+			return nil, errors.New("the test reads no journal")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped := errors.New("journalctl stopped, exit status 1: No journal files were opened due to insufficient permissions.")
+	for _, held := range []struct {
+		name     string
+		enabled  bool
+		policy   modules.Policy
+		collect  func(context.Context) error
+		state    status.State
+		reason   string
+		recovery string
+	}{
+		{name: "nothing enabled", collect: func(ctx context.Context) error { <-ctx.Done(); return nil }, state: status.Disabled, reason: "no module is enabled"},
+		{name: "collecting", enabled: true, collect: func(ctx context.Context) error { <-ctx.Done(); return nil }, state: status.Running},
+		{name: "started again", enabled: true, policy: modules.Policy{Backoff: time.Hour, MaxBackoff: time.Hour}, collect: func(context.Context) error { return stopped },
+			state: status.Degraded, reason: "authentication: " + stopped.Error(), recovery: "none: the agent starts the module again"},
+		{name: "spent", enabled: true, policy: modules.Policy{Budget: 1}, collect: func(context.Context) error { return stopped },
+			state: status.Failed, reason: "authentication: " + stopped.Error(), recovery: "/etc/seagull-agent/agent.json"},
+	} {
+		t.Run(held.name, func(t *testing.T) {
+			collection, err := modules.New(logger, held.policy, modules.Module{Name: authentication.Name, Enabled: held.enabled, Collect: held.collect})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+			go func() { done <- collection.Run(ctx) }()
+			defer func() { cancel(); <-done }()
+			observed := &observing{path: "/etc/seagull-agent/agent.json", collection: collection, authentication: collector}
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				var snapshot status.Snapshot
+				component := observed.collected(&snapshot)
+				if component.State == held.state && (held.state == status.Disabled || snapshot.Modules[0].State == held.state) {
+					if string(component.Reason) != held.reason || !strings.Contains(string(component.Recovery), held.recovery) ||
+						len(snapshot.Modules) != 1 || snapshot.Modules[0].Name != authentication.Name {
+						t.Errorf("the collection stands at %+v with %+v", component, snapshot.Modules)
+					}
+					if held.state != status.Disabled && snapshot.Modules[0].State != held.state {
+						t.Errorf("the module stands at %+v and the collection at %s", snapshot.Modules[0], component.State)
+					}
+					return
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("the collection stands at %+v, want %s", component, held.state)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		})
+	}
+}
+
+func TestAModuleTheAgentHasNotStartedYetFailsNothing(t *testing.T) {
+	collection, err := modules.New(slog.New(slog.DiscardHandler), modules.Policy{}, modules.Module{
+		Name: authentication.Name, Enabled: true, Collect: func(ctx context.Context) error { <-ctx.Done(); return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := &observing{path: "/etc/seagull-agent/agent.json", collection: collection}
+	var snapshot status.Snapshot
+	component := observed.collected(&snapshot)
+	if component.State != status.Running || len(snapshot.Modules) != 1 || snapshot.Modules[0].State != status.Degraded ||
+		snapshot.Modules[0].Reason != "the agent has not started it yet" {
+		t.Errorf("before the agent started its module the collection stands at %+v with %+v", component, snapshot.Modules)
+	}
+}
+
+type unusedSpool struct{}
+
+func (unusedSpool) Admit(spool.Stream, ...spool.Record) (spool.Receipt, error) {
+	return spool.Receipt{}, errors.New("the test admits nothing")
+}
+
+func (unusedSpool) Room(spool.Stream) int64 { return 0 }
 
 // The log of a running agent read into a buffer as it is written, so an agent
 // the test is not listening to meanwhile is never held up writing its log.
