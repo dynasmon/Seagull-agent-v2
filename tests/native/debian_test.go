@@ -491,6 +491,9 @@ func (g *gate) collect(t *testing.T) {
 	g.invocation = started(t, g.invocation)
 	await(t, g.invocation, "collection_resumed", 10*time.Second)
 	g.delivered(t, guesses+5)
+	if said := g.reported(t, true); !strings.Contains(said, "\ncollection: running") || !strings.Contains(said, "\nmodule authentication: ") {
+		t.Errorf("the service account reads the status of the collecting agent as:\n%s", said)
+	}
 
 	run(t, "journalctl", "--rotate")
 	g.attempts(t, served, "rotated", 2)
