@@ -31,6 +31,7 @@ import (
 
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
+	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
@@ -49,6 +50,8 @@ type platform struct {
 	taking    atomic.Bool
 	mu        sync.Mutex
 	stored    map[string][]string
+	collected []*eventv1.Event
+	batches   [][]byte
 }
 
 func emulate(t *testing.T) *platform {
@@ -181,6 +184,7 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 	}
 	content, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
 	var ids []string
+	var collected []*eventv1.Event
 	switch {
 	case err != nil || r.Method != http.MethodPost:
 	case r.URL.Path == "/v1/events":
@@ -188,6 +192,9 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 		if err = proto.Unmarshal(content, &batch); err == nil {
 			for _, event := range batch.GetEvents() {
 				ids = append(ids, event.GetEventId())
+				if event.GetCollection().GetCollector() == "authentication" {
+					collected = append(collected, event)
+				}
 			}
 		}
 	case r.URL.Path == "/v1/inventory":
@@ -209,6 +216,10 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 	}
 	p.mu.Lock()
 	p.stored[r.URL.Path] = append(p.stored[r.URL.Path], ids...)
+	p.collected = append(p.collected, collected...)
+	if len(collected) > 0 {
+		p.batches = append(p.batches, content)
+	}
 	p.mu.Unlock()
 	answer(http.StatusOK, &ingestv1.BatchAck{Accepted: true, Durable: true, Received: uint32(len(ids))})
 }
@@ -217,6 +228,12 @@ func (p *platform) holds(path string) []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return slices.Sorted(slices.Values(p.stored[path]))
+}
+
+func (p *platform) authentications() ([]*eventv1.Event, [][]byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.collected), slices.Clone(p.batches)
 }
 
 // A renewal as the recorded platform answers one: to the agent the certificate
