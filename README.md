@@ -129,7 +129,7 @@ The service runs the agent as the account, with nothing more, and bounds it:
 
 | What | What the service sets |
 | --- | --- |
-| Account | `User=seagull-agent` and `Group=seagull-agent`, and no other group |
+| Account | `User=seagull-agent` and `Group=seagull-agent`, and `SupplementaryGroups=systemd-journal`, the group that reads the system journal, which the [authentication collector](#authentication) reads |
 | Privileges | no capability, bounding or ambient, and `NoNewPrivileges=yes`, so nothing the agent starts gains one |
 | Memory | `MemoryMax=512M`, above the default `resources.memory_limit` of 256 MiB, and `MemorySwapMax=0` |
 | Processor | `CPUQuota=50%` |
@@ -141,7 +141,7 @@ The service runs the agent as the account, with nothing more, and bounds it:
 | Reloading | `systemctl reload seagull-agent` sends SIGHUP, and the agent reads its configuration again |
 
 - the agent says what it was given as it starts: `agent_privileges` names the
-  account, no capability and `no_new_privs`, and `agent_resources` the
+  account, its two groups, no capability and `no_new_privs`, and `agent_resources` the
   ceilings, with nothing unenforced. A drop-in, `systemctl edit seagull-agent`,
   changes a ceiling for the next start, and the agent reports the new one, as a
   warning when `resources.memory_limit` is not below `MemoryMax`;
@@ -180,14 +180,19 @@ The evidence:
   enroll, start, renew a certificate valid for 30 seconds under the service's
   permissions, reload, stop, admit records to the spool as the account, start,
     kill the agent, upgrade to the next version, override a ceiling, remove,
-  reinstall, deliver the backlog once the emulated platform takes it, purge and
-  install again. Until then the platform answers every batch as the recorded
-  gateway does when its backbone does not take one. At each step it checks what
+  reinstall, deliver the backlog once the emulated platform takes it, collect
+  what the host's own sshd decides, purge and install again. Until it delivers
+  the platform answers every batch as the recorded gateway does when its
+  backbone does not take one. To collect, it installs openssh-server when the
+  host has none, lets it take passwords, gives an account of its own a
+  password and the loopback the address 203.0.113.10, and has the agent's
+  configuration name the authentication collector, as the package's does. At
+  each step it checks what
   the agent reported, the account and the modes and owners of what it keeps,
   and after the upgrade and the removal that the installation and its backlog
   are the same bytes. CI runs it on Ubuntu 24.04 with `make native-gate`,
-  which installs the package on the host it runs on, so it belongs on a
-  disposable one.
+  which installs the package on the host it runs on and rotates and vacuums that
+  host's journal, so it belongs on a disposable one.
 
 What it does not claim:
 
@@ -229,7 +234,8 @@ the enabled ones to `internal/runtime`, which owns their lifecycle.
   survive that just as it survives any other crash.
 
 The components composed are the configuration the agent holds, which reads the
-file again whenever the agent is asked to; once the installation is enrolled,
+file again whenever the agent is asked to; the [collection](#collection),
+optional, which runs the collectors `modules` names; once the installation is enrolled,
 the [renewal](#renewal) that keeps its credential current and the
 [delivery](#delivery) that sends the platform what the spool holds; and the
 [status](#status), optional, which writes down what the agent says of itself.
@@ -240,8 +246,7 @@ reason stops the agent, which its service starts again. The spool is not a
 component, since it starts no work of its own: the agent opens it with the
 installation, reads back what it holds before it starts, and closes it as it
 stops. Neither is the governor, which bounds the expensive work of whoever asks
-it and starts none of its own. Collection and local admission will each arrive
-as a component of their own.
+it and starts none of its own.
 
 ## Configuration
 
@@ -258,13 +263,15 @@ own in a build whose whole module graph is verified.
     "ingest_url": "https://gateway.example:8443",
     "renewal_url": "https://control.example:8446",
     "trust_bundle": "/etc/seagull-agent/platform-ca.pem"
-  }
+  },
+  "modules": {"authentication": {"enabled": true}}
 }
 ```
 
-That is a whole configuration: those settings are the deployment, so the agent
-has no default to offer for them, and every other setting has one it documents
-below. `seagull-agent -config FILE config print` prints what the agent would run
+That is a whole configuration: the `server` settings are the deployment, so the
+agent has no default to offer for them, and every other setting has one it
+documents below, `modules` included, which collects nothing unless it names a
+collector. `seagull-agent -config FILE config print` prints what the agent would run
 on, defaults and all, and `config check` reads the file and reports what it
 refuses without starting the agent. The package installs those settings, with
 example addresses, as `/usr/share/seagull-agent/agent.json`.
@@ -304,7 +311,7 @@ The agent reads the file whole, or refuses it whole:
 | `transport.max_upload_bytes_per_second` | `1MiB` | `64KiB` to `1GiB`, and enough to connect and send a whole batch within `transport.request_timeout` |
 | `spool.max_bytes` | `512MiB` | `16MiB` to `64GiB`, and at least four batches |
 | `spool.max_age` | `72h` | `1h` to `720h`; events are kept `168h` at most |
-| `modules` | `{}` | the collectors this build has, which are none |
+| `modules` | `{}` | `{"authentication": {"enabled": true}}`, to collect what sshd decides; `authentication` is the one collector this build has |
 | `resources.memory_limit` | `256MiB` | `64MiB` to `8GiB` |
 | `resources.max_concurrent_scans` | `2` | 1 to 64 |
 | `resources.max_scan_bytes_per_second` | `8MiB` | `1MiB` to `1GiB` |
@@ -359,17 +366,19 @@ validates the whole candidate before anything changes:
   holds as it starts, so a bundle rewritten in place takes a restart too.
 
 What a setting does today follows what the agent has. `identity`, `logging`,
-`spool`, `resources`, `server` and `transport` are in force: they decide where
+`spool`, `modules`, `resources`, `server` and `transport` are in force: they decide where
 the installation is opened, what the log says, how much the spool keeps and for
 how long, how large a record it takes, what the agent and its expensive work may
 spend, which platform `platform check` authenticates and how long it waits for
 it, which authorities a certificate the agent imports has to chain to, where,
-how long and how often the agent renews its credential, and where and in what
-batches it delivers what it collects. The governor keeps the budget for scans
-before anything spends it, since no collector scans yet. `modules` and
-`updates.enabled` are the settings this build refuses outright: an agent that
-accepted them would be promising collection it cannot do and updates it cannot
-install.
+how long and how often the agent renews its credential, which collectors run,
+and where and in what batches it delivers what they collect. A reload applies
+`modules` whole: a collector it no longer names is stopped and the agent waits
+for it, and one it names again starts where it stopped. The governor keeps the
+budget for scans before anything spends it, since no collector scans yet. A
+module this build does not have is refused, and so is `updates.enabled`: an
+agent that accepted either would be promising collection it cannot do or
+updates it cannot install.
 
 ## Collection
 
@@ -414,9 +423,134 @@ module, and the collection names the ones that did not return rather than wait
 for them. A panic inside a module is not recovered, as anywhere else in the
 agent.
 
-No collector exists yet, so the composition root composes no collection: the
-first one arrives with the authentication collector, and until then the
-configuration refuses every module named in `modules`.
+The composition root composes the collection with the collectors this build
+has, `authentication` alone, each enabled when `modules` names it, and the
+collection runs as an optional component: a collector that spent its budget
+leaves the agent delivering what the others admit.
+
+## Authentication
+
+`internal/modules/authentication` is the agent's first collector: it turns what
+sshd decides as it authenticates a connection into authentication events, read
+from the system journal, and runs as the module `authentication` while
+`modules.authentication.enabled` is true.
+
+It reads the journal through `journalctl`, which `internal/platform/journal`
+runs with fixed arguments, no shell and an empty environment, asking for JSON
+and for the fields the collector uses. It never reads `/var/log/auth.log` or
+`/var/log/secure`: any account on a host can hand syslog a line in sshd's name,
+and a file keeps no trace of who wrote it. journald does: it records who sent
+each entry from what the kernel says of the sending process, as `_UID` and
+`_COMM`, fields no sender writes. The collector takes an entry only when
+`sshd`, or `sshd-session` from OpenSSH 9.8 on, wrote it as the superuser, which
+is how sshd's monitor, the process that decides an authentication, writes. A
+program another account runs under that name, or one root runs under another,
+is not sshd to it.
+
+Of what sshd writes, an outcome is a line its monitor writes as it decides one:
+`Accepted METHOD for USER from ADDRESS port PORT ssh2`, or `Failed`, for the
+methods `password`, `publickey`, `keyboard-interactive`, `hostbased`,
+`gssapi-with-mic` and `none`. Every other line, PAM's included, is read past:
+an attempt is one event, not one per line that mentions it.
+
+| Field | What it holds |
+| --- | --- |
+| `event_id` | a UUID drawn from the installation and the entry's cursor, so an entry read again is the same event, byte for byte |
+| `time.event_time` | when sshd sent the line, or, when the entry does not say, when journald wrote it down |
+| `time.observed_time` | when journald wrote it down |
+| `origin.host` | the host name journald recorded, `linux` and the agent's architecture; the agent and the tenant are the platform's to write |
+| `collection` | collector `authentication`, source `journal:sshd` or `journal:sshd-session` |
+| `authentication.activity` | `LOGON` |
+| `authentication.outcome` | `SUCCESS` for `Accepted`, `FAILURE` for `Failed` |
+| `authentication.outcome_reason` | `invalid user` when the account does not exist |
+| `authentication.method` | the method as sshd names it, `keyboard-interactive/pam` included |
+| `authentication.user.name` | the user as sshd wrote it, with sshd's escaping of what is not printable, at most 256 bytes |
+| `authentication.service` | `sshd`, protocol `ssh` |
+| `authentication.network` | `TCP`, and the address and port the connection came from |
+| `authentication.raw_record` | the line sshd wrote |
+
+The user of an account that does not exist is whatever the client sent, and so
+is the identifier of a certificate it presents: either can hold text that looks
+like ` from 10.0.0.1 port 22 ssh2`. A user and an address are read only when
+exactly one place fits the line as sshd writes it: ending the line for a method
+that writes nothing after `ssh2`, and followed by a key's fingerprint or a
+certificate's description for `publickey`. Otherwise the event says the outcome
+and the method alone, so a client can neither choose the address its failure
+counts against nor hide the failure.
+
+Where the collector stopped is `collection/authentication.json` in the
+installation: the cursor of the last entry it read and when journald wrote it.
+It is written, synced and renamed over the last one, only once the spool made
+the events of the entries before it durable. A stop before then has the
+collector read those entries again and admit their events again under the same
+identifiers, which the platform keeps once.
+
+- The first time it runs, it reads from that moment on: what sshd decided before
+  is not sent.
+- Started again, it reads what the journal holds from where it stopped, through
+  every boot the journal kept, and then follows the boot that is running. It
+  reads to the end of the journal first because `journalctl` follows the boot
+  that is running alone.
+- When the journal no longer holds the entry it stopped at, because journald
+  rotated or vacuumed past it or the journal was reset, it reads on from the
+  first entry still held, and reports `collection_gap` with when it stopped and
+  when the next entry was written: what journald dropped meanwhile is lost.
+- An outcome older than the platform admits, seven days, is read past, counted
+  and reported as `collection_entries_too_old`, at the first and as the count
+  doubles, as is an entry it cannot read, `collection_entry_unreadable`.
+- A place it cannot read is reported as `collection_place_lost`, and the
+  collector reads again everything the platform still admits, whose events are
+  the same as before. A place written by a newer agent, or open to another
+  account, stops the collector.
+
+It admits up to 256 events, or 1 MiB, at once. When the spool has no room it
+keeps its place and waits for room through the governor, while `journalctl`
+waits behind it and journald keeps what sshd writes; the status says since when
+it waits, and what journald drops meanwhile is a gap it reports once it reads
+on. A journal it may not read, or a `journalctl` that stops, fails the module,
+which the collection starts again as it starts any other.
+
+What it does not collect:
+
+- a logoff. sshd writes `Disconnected from user` from the session's own process,
+  which runs as the user and fails the check above, and PAM's `session closed`
+  says nothing of where the session came from;
+- any other authentication: the console, display managers, `su` and `sudo`, and
+  what PAM writes for other services. `sudo` running a command is not an
+  authentication at all, and no contract carries one;
+- any platform but Linux, where it needs `journalctl`. On Windows it waits for
+  native development to begin, with the security event log;
+- the difference between a name an attacker tries and a password a person typed
+  where their name goes: both reach the platform as sshd logged them, since the
+  platform needs the names that are tried.
+
+The evidence:
+
+- `internal/modules/authentication` tests the lines sshd writes and forged ones,
+  places a client wrote, and what is not an outcome, and fuzzes them; reads a
+  journal that answers as `journalctl` does from its first run, after a restart,
+  past a vacuum, with a place damaged, insecure or newer, with old and
+  unreadable entries and into a full spool; and kills a child collector before
+  an admission, after one and before its place is written, and after that,
+  checking that every event is in the spool and that an event admitted twice is
+  the same bytes;
+- `internal/platform/journal` tests the arguments `journalctl` is given and the
+  entries it writes, binary, withheld and repeated values among them, against a
+  stand-in, and reads the journal of the host it runs on with that host's
+  `journalctl`;
+- the [native gate](#installing) has the host's own sshd take 24 wrong passwords
+  for an account that does not exist from 203.0.113.10, eight at a time, then a
+  wrong and a right one for the account it created, after a line `logger` wrote
+  in sshd's name as root and one a program named `sshd` wrote as `nobody`. The
+  platform takes 26 events and the two forged lines are not among them. It then
+  stops the agent across three more attempts, rotates the journal across two,
+  and vacuums it across two more: after the restart and the rotation the agent
+  delivers what sshd decided with no gap, and after the vacuum it reports the
+  gap and never delivers the attempts journald dropped;
+- `tests/compatibility` makes again, with the collector of the build under test,
+  the events the installed agent delivered of what that sshd wrote, byte for
+  byte, and holds what a [recorded platform](#compatibility-with-the-platform)
+  stored and decided of them, once and sent again.
 
 ## Privileges
 
@@ -430,12 +564,12 @@ is not one.
 | Keep its installation, its keys and its spool | a directory of its own, owned by the account it runs as |
 | Read its configuration and its trust bundle | files that account, or root, writes and it reads |
 | Reach the platform | an outgoing TLS connection, which needs no privilege |
-| Collect | nothing yet: this build has no collector |
+| Collect what sshd decides | read the system journal, as a member of `systemd-journal`, which the service grants |
 
 Nothing on that list needs the superuser, a Linux capability, or a helper of its
-own. A collector that needs more — the authentication log will be the first —
-names it there, and the packaging grants that much: a group where a group is
-enough, and a capability only where it is not.
+own. A collector that needs more names it there, and the packaging grants that
+much: a group where a group is enough, as for the journal, and a capability only
+where it is not.
 
 At start the agent reports what it actually may do as `agent_privileges`: the
 account, the groups it belongs to, the capabilities it holds and whether
@@ -1045,8 +1179,8 @@ lose.
 | One batch | `transport.max_batch_bytes`, `transport.max_events_per_batch` and `transport.max_inventory_records_per_batch` | delivery |
 | Uploads at once | `resources.max_concurrent_uploads` | the governor, for delivery |
 | Upload bandwidth | `transport.max_upload_bytes_per_second` | the governor, for delivery |
-| Scans | `resources.max_concurrent_scans`, `resources.max_scan_bytes_per_second` and the room left in the stream a scan admits to | the governor, for collectors when they arrive |
-| Reading a source as it is written | the room admission leaves | collectors, when they arrive |
+| Scans | `resources.max_concurrent_scans`, `resources.max_scan_bytes_per_second` and the room left in the stream a scan admits to | the governor, for collectors that scan |
+| Reading a source as it is written | the room admission leaves, and 256 events or 1 MiB admitted at once | the authentication collector |
 
 Priority is the agent's own, and never travels on the wire: events are what a
 host cannot produce again, and inventory is collected again on the next scan.
@@ -1068,7 +1202,7 @@ A spool that has no room for a record refuses it, and admission is paused:
   when it is paused and how many records it refused;
 - what a source loses while its collector waits, a journal rotated past the
   place the collector kept, is a gap in that source, and the collector reports
-  it: the first one arrives with the authentication log;
+  it as `collection_gap`;
 - before it refuses a record for room, the spool expires what outlived its age.
 
 A record older than its stream's maximum age expires: it settles as expired, is
@@ -1095,8 +1229,8 @@ delivered, in the ledger, in `spool_opened` and in the spool's stats.
 What the agent must still write is never refused for room: the spool keeps
 64 KiB of its budget for its ledgers, and refuses a record that would leave the
 filesystem it is on with less than 64 MiB free, so its acknowledgements, the
-installation beside it and, once collectors keep their place there, their
-checkpoints can still be written while records are refused. An acknowledgement
+installation beside it and the place each collector keeps in its source can
+still be written while records are refused. An acknowledgement
 or a quarantine is never refused for room.
 
 The evidence is in `internal/spool`: a test admits through a simulated outage of
@@ -1857,14 +1991,18 @@ does not run as it should, why and what to do about it, in the words of the log:
 | Part | Degraded, or failed, when |
 | --- | --- |
 | `configuration` | the last reload was refused, so the agent runs on a configuration the file no longer holds |
-| `collection` | a collector does not collect; this build has none, so it is disabled |
+| `collection` | a module enabled in `modules` fails and is started again; failed once it spent its budget; disabled when `modules` enables none |
 | `spool` | a stream holds all its budget allows and refuses what is admitted to it; failed when it can no longer make a record durable |
 | `delivery` | the installation is not enrolled, the ingest listener fails, or a route's batches fail |
 | `credential` | renewal fails, or the host's clock is behind the certificate; failed once the certificate expired |
 | `resources` | the agent holds more memory than `resources.memory_limit` |
 
 The agent is in the state of its worst part, and a part nothing asked for is
-disabled and weighs nothing. Then, for each stream, what waits and when the
+disabled and weighs nothing. Then, for each module this build has, its state,
+since when, how often it was started again and why it does not collect, or,
+for the authentication collector while it collects, since when it waits for
+room in the spool and how often the journal dropped what it had not read yet.
+Then, for each stream, what waits and when the
 oldest record waiting was admitted, when the route last delivered and, while it
 fails, since when, how often, why and when it tries next; what the spool settled
 otherwise, as expired, lost or quarantined; and apart, what it refused to admit.
@@ -1990,13 +2128,13 @@ What none of that claims:
 - redaction is a rule about what the agent copies, not a filter over what
   somebody else wrote. The agent bounds and escapes what it repeats and refuses
   the one setting where a credential could arrive; it does not search text for
-  what looks like a secret. When collection arrives, each collector drops what
-  its source holds before it is admitted, where the source is understood;
-- the spool keeps records as admission hands them and never looks inside one,
-    so what a record holds is decided before it is admitted: admission, which
-  arrives with the first collector, reads the same rule. What the agent writes
-  about a record is where it is in the spool and the identifier it was admitted
-  under, never what it holds.
+  what looks like a secret. A collector admits what it understood of its
+  source and nothing else: the authentication collector keeps what an outcome
+  of sshd says, and the line sshd wrote it in, which says nothing more;
+- the spool keeps records as they are handed to it and never looks inside one,
+  so what a record holds is decided by the collector that admits it. What the
+  agent writes about a record is where it is in the spool and the identifier it
+  was admitted under, never what it holds.
 
 ## Boundaries
 
@@ -2044,6 +2182,13 @@ conventions:
   its own settings name;
 - no collector reaches `internal/pki`, directly or through another package, so
   collectors never hold the keys the agent proves its identity with;
+- no collector imports `os/exec`, `syscall`, `unsafe` or `golang.org/x/sys`
+  itself: it reaches the operating system through an adapter under
+  `internal/platform`, which owns the commands it runs and the calls it makes;
+- an adapter under `internal/platform` imports nothing of the agent but the
+  other adapters and `internal/secrets`, nothing of the contracts and no network
+  package, directly or through another package: what it reads means something
+  to whoever asked for it alone;
 - no `.proto` file, generated binding or descriptor built at run time defines a
   message of the agent's own, so it has no handshake or envelope beside the
   published contracts;
@@ -2139,7 +2284,19 @@ what every other section means by the recorded backend commit. A later one,
 differently or where [Forgery, replay and copies](#forgery-replay-and-copies)
 needed it: its renewal handler, its gateway answering batches that claim another
 agent, a copied certificate and a copied credential, and its pipeline keeping
-and deciding a batch sent again. The suite fails when `go.mod`
+and deciding a batch sent again. The latest, 0656b2a, built from the same
+contracts, kept and decided what the [authentication collector](#authentication)
+delivered of a real sshd: the native gate recorded what the sshd of an Ubuntu
+24.04 host wrote to its journal and the batches the installed agent delivered of
+it, and that commit's own admitter, broker, event writer, analysis engine with
+the rules it deploys and detection writer took those batches, then took them all
+again. Each batch was acknowledged as durable; the 26 events were stored once
+both times; the 25 failures from outside the estate, the count of twenty failures
+in a minute and the guess that succeeded were each decided and stored, and
+sending the batches again stored and decided nothing more. The suite derives the
+same events from the recorded entries with the collector of the build under
+test, byte for byte, so a change to what the collector makes of sshd fails it
+until the scenario is recorded again. The suite fails when `go.mod`
 pins contracts no recorded platform was built with, when a recorded platform
 never durably accepted a version the agent speaks, or when a recorded refusal
 reads differently. Compatibility is claimed only with recorded platforms, for
