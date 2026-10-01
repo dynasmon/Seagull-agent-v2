@@ -54,7 +54,7 @@ var (
 	levels     = map[string]slog.Level{"debug": slog.LevelDebug, "info": slog.LevelInfo, "warn": slog.LevelWarn, "error": slog.LevelError}
 	logFormats = []string{JSONLogs, TextLogs}
 	providers  = []string{KeysInFiles}
-	collectors []string
+	collectors = []string{"authentication"}
 )
 
 type Config struct {
@@ -402,10 +402,7 @@ func (s *Spool) validate() []error {
 func (m Modules) validate() []error {
 	var found []error
 	for _, name := range slices.Sorted(maps.Keys(m)) {
-		switch {
-		case len(collectors) == 0:
-			found = append(found, fmt.Errorf("modules.%s is configured, and this build has no collector to configure", secrets.Bounded(name)))
-		case !slices.Contains(collectors, name):
+		if !slices.Contains(collectors, name) {
 			found = append(found, fmt.Errorf("modules.%s is configured, and this build collects with %s", secrets.Bounded(name), strings.Join(collectors, ", ")))
 		}
 	}
