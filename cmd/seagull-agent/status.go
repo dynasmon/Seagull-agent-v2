@@ -7,12 +7,15 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/metrics"
+	"strings"
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
 	"github.com/dynasmon/Seagull-agent-v2/internal/delivery"
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/renewal"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
@@ -24,15 +27,17 @@ import (
 // do about it, in the words the agent's log uses. Nothing here reads a key or
 // a certificate, only what the installation records about them.
 type observing struct {
-	began         time.Time
-	path          string
-	state         string
-	installation  *identity.Installation
-	spool         *spool.Spool
-	governor      *governor.Governor
-	configuration *configuration
-	renewer       *renewal.Renewer
-	delivery      *delivery.Delivery
+	began          time.Time
+	path           string
+	state          string
+	installation   *identity.Installation
+	spool          *spool.Spool
+	governor       *governor.Governor
+	configuration  *configuration
+	collection     *modules.Collection
+	authentication *authentication.Collector
+	renewer        *renewal.Renewer
+	delivery       *delivery.Delivery
 }
 
 func (o *observing) snapshot() status.Snapshot {
@@ -51,7 +56,7 @@ func (o *observing) snapshot() status.Snapshot {
 	delivering := o.delivered(&snapshot, enrolled)
 	snapshot.Components = []status.Component{
 		o.configuration.observed(),
-		{Name: "collection", State: status.Disabled, Reason: "this build has no collector"},
+		o.collected(&snapshot),
 		spooled,
 		delivering,
 		o.credential(&snapshot, active, enrolled, now),
@@ -73,6 +78,59 @@ func (c *configuration) observed() status.Component {
 		Reason:   status.Text(fmt.Sprintf("the agent runs on the configuration it applied at %s, and refused what %s holds now: %v", c.applied.UTC().Format(time.RFC3339), c.path, c.refused)),
 		Recovery: status.Text(c.hint),
 	}
+}
+
+func (o *observing) collected(snapshot *status.Snapshot) status.Component {
+	component := status.Component{Name: "collection", State: status.Disabled, Reason: "no module is enabled"}
+	for _, module := range o.collection.Health() {
+		held := status.Module{Name: status.Text(module.Name), State: kept(module.State), Since: module.Since.UTC(), Restarts: module.Restarts, Reason: status.Text(module.Reason)}
+		if module.Name == authentication.Name && module.State == modules.Running {
+			held.Reason = status.Text(o.reading())
+		}
+		snapshot.Modules = append(snapshot.Modules, held)
+		switch {
+		case held.State == status.Disabled:
+		case component.State == status.Disabled, component.State == status.Running && held.State != status.Running, component.State == status.Degraded && held.State == status.Failed:
+			component = status.Component{Name: "collection", State: held.State}
+			if held.State != status.Running {
+				component.Since, component.Reason = held.Since, status.Text(fmt.Sprintf("%s: %s", module.Name, module.Reason))
+			}
+			switch held.State {
+			case status.Degraded:
+				component.Recovery = "none: the agent starts the module again"
+			case status.Failed:
+				component.Recovery = status.Text("correct what the module reports, then name it again in modules of " + o.path + " and have the agent read its configuration again")
+			}
+		}
+	}
+	return component
+}
+
+func kept(held modules.State) status.State {
+	switch held {
+	case modules.Running:
+		return status.Running
+	case modules.Degraded:
+		return status.Degraded
+	case modules.Failed:
+		return status.Failed
+	}
+	return status.Disabled
+}
+
+func (o *observing) reading() string {
+	held := o.authentication.Stats()
+	var said []string
+	if !held.Waiting.IsZero() {
+		said = append(said, fmt.Sprintf("waiting since %s for room in the spool, while what sshd decides waits in the journal", held.Waiting.UTC().Format(time.RFC3339)))
+	}
+	if held.Gaps > 0 {
+		said = append(said, fmt.Sprintf("since the agent started, the journal dropped entries before the collector read them %d times, as collection_gap in its log says", held.Gaps))
+	}
+	if held.Aged > 0 {
+		said = append(said, fmt.Sprintf("%d outcomes were older than the platform admits when the collector read them", held.Aged))
+	}
+	return strings.Join(said, "; ")
 }
 
 func (o *observing) streams(snapshot *status.Snapshot) status.Component {

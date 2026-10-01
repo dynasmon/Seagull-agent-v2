@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -25,6 +26,8 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/enrollment"
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
 	"github.com/dynasmon/Seagull-agent-v2/internal/pki"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dumps"
@@ -44,6 +47,7 @@ const (
 	trustDirectory        = "trust"
 	spoolDirectory        = "spool"
 	statusDirectory       = "status"
+	collectionDirectory   = "collection"
 	statusEvery           = 30 * time.Second
 )
 
@@ -195,7 +199,13 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	}
 	held.governor = governed
 	observed := &observing{began: began, path: path, state: state, installation: installation, spool: spooled, governor: governed, configuration: held}
-	composed := append([]agentruntime.Component{held.component(asked)}, components...)
+	collection, collector, err := collect(installation, settings, spooled, governed, logger)
+	if err != nil {
+		return refused(err)
+	}
+	held.collection = collection
+	observed.collection, observed.authentication = collection, collector
+	composed := append([]agentruntime.Component{held.component(asked), {Name: "collection", Policy: agentruntime.Optional, Run: collection.Run}}, components...)
 	if isEnrolled {
 		client, err := platform(settings, chosen.authorities, credential)
 		if err != nil {
@@ -267,10 +277,10 @@ func unstarted(stderr io.Writer, path string, err error) int {
 	return 1
 }
 
-// What the agent needs of the machine beyond the account it runs as: nothing.
-// Its installation, its keys and its settings are files that account reaches,
-// and the platform is a network service like any other. A collector that needs
-// more names it here, and every module shares whatever the process holds.
+// The capabilities the agent needs beyond the account it runs as: none. Its
+// installation, its keys and its settings are files that account reaches, the
+// platform is a network service like any other, and the authentication
+// collector reads the system journal as a member of systemd-journal, a group.
 func needed() []string { return nil }
 
 func inventory(logger *slog.Logger, granted privileges.Privileges) {
@@ -322,12 +332,13 @@ func apply(settings config.Config, level *slog.LevelVar) {
 // it does when an operator asks it to read the file again. The agent keeps the
 // one it holds whenever it refuses the file.
 type configuration struct {
-	logger   *slog.Logger
-	path     string
-	active   *config.Active
-	level    *slog.LevelVar
-	spool    *spool.Spool
-	governor *governor.Governor
+	logger     *slog.Logger
+	path       string
+	active     *config.Active
+	level      *slog.LevelVar
+	spool      *spool.Spool
+	governor   *governor.Governor
+	collection *modules.Collection
 
 	mu        sync.Mutex
 	applied   time.Time
@@ -379,12 +390,53 @@ func (c *configuration) reload() error {
 			return fmt.Errorf("apply the configuration read from %s: %w", c.path, err)
 		}
 	}
+	if c.collection != nil {
+		if err := c.collection.Apply(enabled(candidate)); err != nil {
+			return fmt.Errorf("apply the configuration read from %s: %w", c.path, err)
+		}
+	}
 	c.mu.Lock()
 	c.refused, c.applied = nil, time.Now()
 	c.mu.Unlock()
 	c.logger.Info("configuration_reloaded", slog.String("config", c.path), slog.String("log_level", candidate.Logging.Level))
 	resources(c.logger, candidate)
 	return nil
+}
+
+func collect(installation *identity.Installation, settings config.Config, spooled *spool.Spool, governed *governor.Governor, logger *slog.Logger) (*modules.Collection, *authentication.Collector, error) {
+	directory, err := installation.Directory(collectionDirectory)
+	if err != nil {
+		return nil, nil, err
+	}
+	collector, err := authentication.New(authentication.Options{
+		Installation: installation.ID(),
+		Spool:        spooled,
+		Governor:     governed,
+		Directory:    directory,
+		Logger:       logger,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	collection, err := modules.New(logger, modules.Policy{}, modules.Module{
+		Name:    authentication.Name,
+		Enabled: slices.Contains(enabled(settings), authentication.Name),
+		Collect: collector.Collect,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return collection, collector, nil
+}
+
+func enabled(settings config.Config) []string {
+	var named []string
+	for _, name := range slices.Sorted(maps.Keys(settings.Modules)) {
+		if settings.Modules[name].Enabled {
+			named = append(named, name)
+		}
+	}
+	return named
 }
 
 func openKeys(installation *identity.Installation, provider string) (pki.KeyProvider, error) {
