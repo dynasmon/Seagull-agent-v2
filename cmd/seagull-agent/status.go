@@ -84,18 +84,22 @@ func (o *observing) collected(snapshot *status.Snapshot) status.Component {
 	component := status.Component{Name: "collection", State: status.Disabled, Reason: "no module is enabled"}
 	for _, module := range o.collection.Health() {
 		held := status.Module{Name: status.Text(module.Name), State: kept(module.State), Since: module.Since.UTC(), Restarts: module.Restarts, Reason: status.Text(module.Reason)}
-		if module.Name == authentication.Name && module.State == modules.Running {
+		state := held.State
+		switch {
+		case module.State == modules.Degraded && module.Reason == "":
+			held.Reason, state = "the agent has not started it yet", status.Running
+		case module.Name == authentication.Name && module.State == modules.Running:
 			held.Reason = status.Text(o.reading())
 		}
 		snapshot.Modules = append(snapshot.Modules, held)
 		switch {
-		case held.State == status.Disabled:
-		case component.State == status.Disabled, component.State == status.Running && held.State != status.Running, component.State == status.Degraded && held.State == status.Failed:
-			component = status.Component{Name: "collection", State: held.State}
-			if held.State != status.Running {
+		case state == status.Disabled:
+		case component.State == status.Disabled, component.State == status.Running && state != status.Running, component.State == status.Degraded && state == status.Failed:
+			component = status.Component{Name: "collection", State: state}
+			if state != status.Running {
 				component.Since, component.Reason = held.Since, status.Text(fmt.Sprintf("%s: %s", module.Name, module.Reason))
 			}
-			switch held.State {
+			switch state {
 			case status.Degraded:
 				component.Recovery = "none: the agent starts the module again"
 			case status.Failed:
