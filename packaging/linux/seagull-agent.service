@@ -7,6 +7,7 @@ After=network.target
 Type=exec
 User=seagull-agent
 Group=seagull-agent
+SupplementaryGroups=systemd-journal
 ExecStart=/usr/bin/seagull-agent -config /etc/seagull-agent/agent.json run
 ExecReload=kill -HUP $MAINPID
 StateDirectory=seagull-agent
