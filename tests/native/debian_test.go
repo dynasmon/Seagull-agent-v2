@@ -562,10 +562,6 @@ func (g *gate) delivered(t *testing.T, count int) []*eventv1.Event {
 	}
 }
 
-// What sshd wrote to the journal of this host while the agent collected, and
-// the batches the agent delivered of it, byte for byte: the compatibility
-// evidence derives the events again from the first and has a platform take the
-// second.
 func (g *gate) record(t *testing.T, began time.Time) {
 	t.Helper()
 	if err := os.MkdirAll(*evidence, 0o755); err != nil {
