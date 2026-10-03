@@ -222,19 +222,47 @@ func TestTheServiceRunsTheAgentAsThePackageInstallsIt(t *testing.T) {
 	purged := asset(t, "deb/postrm")
 
 	for name, want := range map[string]string{
-		"User":                  account[1],
-		"Group":                 account[1],
-		"DynamicUser":           "",
-		"SupplementaryGroups":   "systemd-journal",
-		"ExecStart":             "/" + agentPath + " -config " + configuration + " run",
-		"StateDirectory":        path.Base(state),
-		"StateDirectoryMode":    "0700",
-		"NoNewPrivileges":       "yes",
-		"CapabilityBoundingSet": "",
-		"AmbientCapabilities":   "",
-		"LimitCORE":             "0",
-		"MemorySwapMax":         "0",
-		"Restart":               "on-failure",
+		"User":                    account[1],
+		"Group":                   account[1],
+		"DynamicUser":             "",
+		"SupplementaryGroups":     "systemd-journal",
+		"ExecStart":               "/" + agentPath + " -config " + configuration + " run",
+		"StateDirectory":          path.Base(state),
+		"StateDirectoryMode":      "0700",
+		"NoNewPrivileges":         "yes",
+		"CapabilityBoundingSet":   "",
+		"AmbientCapabilities":     "",
+		"ProtectSystem":           "strict",
+		"ReadOnlyPaths":           "/run",
+		"BindReadOnlyPaths":       "/sys",
+		"ReadWritePaths":          "",
+		"ProtectHome":             "yes",
+		"PrivateTmp":              "yes",
+		"PrivateDevices":          "yes",
+		"PrivateIPC":              "yes",
+		"InaccessiblePaths":       "-/dev/shm -/dev/mqueue",
+		"ProtectKernelTunables":   "yes",
+		"ProtectKernelModules":    "yes",
+		"ProtectKernelLogs":       "yes",
+		"ProtectControlGroups":    "yes",
+		"ProtectClock":            "yes",
+		"ProtectHostname":         "yes",
+		"ProtectProc":             "invisible",
+		"ProcSubset":              "",
+		"PrivateUsers":            "",
+		"RestrictAddressFamilies": "AF_INET AF_INET6",
+		"RestrictNamespaces":      "yes",
+		"RestrictRealtime":        "yes",
+		"RestrictSUIDSGID":        "yes",
+		"LockPersonality":         "yes",
+		"MemoryDenyWriteExecute":  "yes",
+		"SystemCallArchitectures": "native",
+		"SystemCallFilter":        "@system-service\n~@privileged",
+		"SystemCallErrorNumber":   "EPERM",
+		"LimitCORE":               "0",
+		"MemorySwapMax":           "0",
+		"MemoryPressureWatch":     "off",
+		"Restart":                 "on-failure",
 	} {
 		if got := service[name]; got != want {
 			t.Errorf("the unit sets %s=%q, want %q", name, got, want)
@@ -395,7 +423,9 @@ func sections(t *testing.T, name string) map[string]map[string]string {
 			if !found || current == nil {
 				t.Fatalf("%s holds %q", name, line)
 			}
-			if _, set := current[key]; set {
+			if held, set := current[key]; set && key == "SystemCallFilter" {
+				value = held + "\n" + value
+			} else if set {
 				t.Fatalf("%s sets %s twice", name, key)
 			}
 			current[key] = value
