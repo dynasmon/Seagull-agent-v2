@@ -141,13 +141,48 @@ The service runs the agent as the account, with nothing more, and bounds it:
 | Reloading | `systemctl reload seagull-agent` sends SIGHUP, and the agent reads its configuration again |
 
 - the agent says what it was given as it starts: `agent_privileges` names the
-  account, its two groups, no capability and `no_new_privs`, and `agent_resources` the
-  ceilings, with nothing unenforced. A drop-in, `systemctl edit seagull-agent`,
-  changes a ceiling for the next start, and the agent reports the new one, as a
-  warning when `resources.memory_limit` is not below `MemoryMax`;
+  account, its two groups, no capability, `no_new_privs` and the `seccomp`
+  filter the service gives it, and `agent_resources` the ceilings, with nothing
+  unenforced. A drop-in, `systemctl edit seagull-agent`, changes a ceiling for
+  the next start, and the agent reports the new one, as a warning when
+  `resources.memory_limit` is not below `MemoryMax`;
 - `MemorySwapMax=0` keeps the agent's memory, and its key with it, off the swap
   device, on a kernel that accounts for swap;
 - the agent logs to the journal: `journalctl -u seagull-agent`.
+
+The service also confines the agent to what it uses of the host, which
+[Privileges](#privileges) lists:
+
+| What | What the service sets | What it leaves the agent |
+| --- | --- | --- |
+| Files | `ProtectSystem=strict`, `ReadOnlyPaths=/run`, `BindReadOnlyPaths=/sys`, `ProtectHome=yes`, `PrivateTmp=yes` and `MemoryPressureWatch=off` | its installation, the one directory `StateDirectory=` names, and a `/tmp` and a `/var/tmp` of its own to write; every other filesystem read-only, and the home directories, `/root` and `/run/user` out of reach |
+| Devices | `PrivateDevices=yes` | `null`, `zero`, `full`, `random`, `urandom` and `tty` |
+| Shared memory | `PrivateIPC=yes` and `InaccessiblePaths=-/dev/shm -/dev/mqueue` | no IPC object, shared memory or message queue that another process holds |
+| The kernel | `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`, `ProtectControlGroups=yes`, `ProtectClock=yes` and `ProtectHostname=yes` | `/proc/sys`, `/sys` and the control groups to read; no module, kernel log, clock or host name |
+| Processes | `ProtectProc=invisible` | the processes of its own account, alone, in `/proc` |
+| The network | `RestrictAddressFamilies=AF_INET AF_INET6` | IPv4 and IPv6 sockets alone: no local socket of its own, so no D-Bus or other local service to reach, and no netlink socket |
+| System calls | `SystemCallFilter=@system-service` and `SystemCallFilter=~@privileged`, `SystemCallArchitectures=native` and `SystemCallErrorNumber=EPERM` | the calls a system service makes, less those that need the superuser; any other fails with `EPERM`, and a call through the 32-bit entry ends the process |
+| Within those calls | `MemoryDenyWriteExecute=yes`, `LockPersonality=yes`, `RestrictNamespaces=yes`, `RestrictRealtime=yes` and `RestrictSUIDSGID=yes` | no memory both writable and executable, no other execution domain, no namespace, no real-time scheduling, no setuid or setgid file |
+
+- systemd 255, which Ubuntu 24.04 ships, leaves `/run` and `/sys` writable
+  despite `ProtectSystem=strict` and `ProtectKernelTunables=yes`:
+  `ProtectKernelTunables=`, `ProtectControlGroups=` and `ProtectProc=` have it
+  mount the API filesystems, and the entries it makes for `/run` and `/sys`
+  displace the read-only ones, which leaves `/run/lock` writable to every
+  account. `ReadOnlyPaths=/run` and `BindReadOnlyPaths=/sys` make both
+  read-only again, and the native gate checks that they are;
+- several settings take away what the account may not do on Ubuntu 24.04
+  anyway, such as loading a module, reading the kernel's log, setting the clock
+  or the host name and scheduling in real time, so they hold on a host whose
+  defaults differ;
+- the confinement is the service's. The commands an operator runs as the
+  account, `enrollment import` among them, run as that account runs anywhere;
+- a state directory other than `/var/lib/seagull-agent` takes a drop-in that
+  names it in `ReadWritePaths=`. Without one the agent refuses to start, and
+  where it finds the directory read-only its recovery says what to do;
+- a drop-in that loosens a setting loosens it for every module, since they share
+  the process. A collector that needs more of the host than this names it under
+  [Privileges](#privileges), and the unit grants that alone.
 
 Upgrading, removing and purging:
 
@@ -171,36 +206,71 @@ The evidence:
 - `packaging` tests that the package installs the agent, its service, the
   account, the directories and the settings and nothing else, root's and at the
   modes given, with the checksums `dpkg --verify` reads; that dpkg orders the
-  versions as Go does; that the same commit gives the same bytes; and that the
+  versions as Go does; that the same commit gives the same bytes; that the
   service, the account, the directories and the settings agree with one another
-  and with the agent's defaults;
+  and with the agent's defaults; and that the unit confines the agent with every
+  setting the table names, so loosening one changes that test too;
 - `tests/native` is the native gate. On a host systemd runs, as root, it
   installs the package and takes it through its life against an emulated
   platform: install, check the settings and the platform as the account,
-  enroll, start, renew a certificate valid for 30 seconds under the service's
-  permissions, reload, stop, admit records to the spool as the account, start,
-    kill the agent, upgrade to the next version, override a ceiling, remove,
-  reinstall, deliver the backlog once the emulated platform takes it, collect
-  what the host's own sshd decides, purge and install again. Until it delivers
-  the platform answers every batch as the recorded gateway does when its
-  backbone does not take one. To collect, it installs openssh-server when the
-  host has none, lets it take passwords, gives an account of its own a
-  password and the loopback the address 203.0.113.10, and has the agent's
-  configuration name the authentication collector, as the package's does. At
-  each step it checks what
-  the agent reported, the account and the modes and owners of what it keeps,
-  and after the upgrade and the removal that the installation and its backlog
-  are the same bytes. CI runs it on Ubuntu 24.04 with `make native-gate`,
-  which installs the package on the host it runs on and rotates and vacuums that
-  host's journal, so it belongs on a disposable one.
+  enroll, start, check the confinement, renew a certificate valid for 30
+  seconds under the service's permissions, reload, stop, admit records to the
+  spool as the account, start, kill the agent, upgrade to the next version,
+  override a ceiling, remove, reinstall, deliver the backlog once the emulated
+  platform takes it, collect what the host's own sshd decides, purge and
+  install again. Until it delivers the platform answers every batch as the
+  recorded gateway does when its backbone does not take one. To collect, it
+  installs openssh-server when the host has none, lets it take passwords, gives
+  an account of its own a password and the loopback the address 203.0.113.10,
+  and has the agent's configuration name the authentication collector, as the
+  package's does. At each step it checks what the agent reported, the account
+  and the modes and owners of what it keeps, and after the upgrade and the
+  removal that the installation and its backlog are the same bytes. CI runs it
+  on Ubuntu 24.04 with `make native-gate`, which installs the package on the
+  host it runs on and rotates and vacuums that host's journal, so it belongs
+  on a disposable one;
+- to check the confinement, the gate has the service run a copy of the gate
+  before the agent, through a drop-in's `ExecStartPre=`, confined as the agent
+  is, and runs the same copy as the account outside the service. Each copy
+  writes to `/run/lock`, `/dev/shm`, `/dev/mqueue`, `/tmp` and `/var/tmp`, lists
+  `/home`, `/run/user` and the kernel's modules, looks for PID 1, opens local,
+  netlink and Internet sockets, makes a user namespace, takes the 32-bit
+  personality, maps memory both writable and executable, makes a setuid file,
+  schedules in real time, reads the clock's discipline and the kernel's log,
+  calls `pidfd_getfd` on itself and `setuid` to its own account, and runs a
+  32-bit program, and it walks every filesystem that is not read-only for what
+  the account may write. In the service the account may write its
+  installation, its `/tmp` and its `/var/tmp` and nothing else, finds no device
+  but the six the table names, and is refused everything else it tries but
+  Internet sockets. Outside the service it is allowed each of those, unless
+  Ubuntu already refuses it, as it does the kernel's log and real-time
+  scheduling, and what it wrote to `/tmp` and `/var/tmp` in the service is not
+  in the host's. The gate then reads the agent's own process: no capability,
+  `no_new_privs`, a seccomp filter, and mount, UTS and IPC namespaces apart
+  from the host's. Every later step runs under that confinement, collection,
+  renewal and the spool included;
+- `systemd-analyze security` rates the unit 1.4, OK, on Ubuntu 24.04's systemd
+  255, where it rated the unit before this confinement 6.6, medium. The gate
+  does not depend on that rating.
 
 What it does not claim:
 
 - another distribution, an RPM, arm64, Windows or macOS. `make package
   ARCH=arm64` builds an arm64 package, and none of them is supported until its
   own native gate passes;
-- confinement beyond the account: the service leaves the filesystem, the
-  kernel's interfaces and the system calls as that account finds them;
+- more confinement than the table: the agent may connect to any address,
+  since the platform's are not the package's to know; `ProcSubset=pid` is left
+  out because `journalctl` reads the boot it follows from
+  `/proc/sys/kernel/random/boot_id`, and `PrivateUsers=yes` because the
+  journal's group would be unmapped in the agent's user namespace, and the
+  agent could not say which groups it holds;
+- that the confinement holds against the kernel itself: what the filter lets
+  through is still the kernel's to get right. It is tested on an Ubuntu 24.04
+  host and in a privileged container, not where systemd cannot make the
+  namespaces it needs;
+- confinement on Windows or macOS, where no service exists to confine. Service
+  ACLs and account privileges there, and launchd, the hardened runtime and
+  entitlements, are weighed when native development for them begins;
 - that a package is reproduced anywhere else: the same commit gives the same
   bytes with the same toolchain, dpkg and tar, which is what CI compares;
 - that a package installed without its attestation verified came from this
@@ -569,11 +639,16 @@ is not one.
 Nothing on that list needs the superuser, a Linux capability, or a helper of its
 own. A collector that needs more names it there, and the packaging grants that
 much: a group where a group is enough, as for the journal, and a capability only
-where it is not.
+where it is not. The same holds for what the service confines: a collector that
+needs another kind of socket, a path to write or a group of system calls has the
+unit grant that one, and the packaging test pins every setting, so loosening any
+of them changes that test too.
 
 At start the agent reports what it actually may do as `agent_privileges`: the
-account, the groups it belongs to, the capabilities it holds and whether
-`no_new_privs` is set. A capability counts as held when it is permitted or
+account, the groups it belongs to, the capabilities it holds, whether
+`no_new_privs` is set, and how the kernel filters its system calls, as
+`seccomp`: `filter` under its service, `disabled` when nothing filters them,
+as when it runs by hand. A capability counts as held when it is permitted or
 effective, since a permitted one can be raised into use. When the agent holds
 anything the table above does not need, that line is a warning that names it: a
 claim about privileges is about the process that is running, not about the one
@@ -584,7 +659,8 @@ Linux keeps a capability set for each of them, so a program that drops what it
 holds part way through its life promises it for the thread that made the call
 and no other. Bounding the process belongs to the service manager, before the
 agent starts, and the service the package installs does it: it runs the agent
-as an account of its own, with no capability and with `no_new_privs` set, as
+as an account of its own, with no capability and with `no_new_privs` set, and
+confines it to the files, devices, sockets and system calls it uses, as
 [Installing](#installing) lists.
 
 It refuses to start as more than one account. A real and an effective identity
