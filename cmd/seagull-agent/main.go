@@ -290,6 +290,7 @@ func inventory(logger *slog.Logger, granted privileges.Privileges) {
 		slog.Any("groups", granted.Groups),
 		slog.Any("capabilities", granted.Capabilities),
 		slog.Bool("no_new_privs", granted.NoNewPrivs),
+		slog.String("seccomp", granted.Seccomp),
 	}
 	beyond := granted.Beyond(needed())
 	if len(beyond) == 0 {
