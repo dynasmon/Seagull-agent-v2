@@ -13,37 +13,49 @@ func TestTheCapabilitiesTheProcessHoldsAreTheOnesItsStatusReports(t *testing.T) 
 		status     string
 		held       []string
 		noNewPrivs bool
+		seccomp    string
 	}{
 		"a process holding nothing": {
-			status: "Uid:\t987\t987\t987\t987\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nNoNewPrivs:\t1\n",
+			status: "Uid:\t987\t987\t987\t987\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nNoNewPrivs:\t1\nSeccomp:\t0\n",
 			// a bounding set it cannot use is not a capability it holds
 			noNewPrivs: true,
+			seccomp:    "disabled",
+		},
+		"a process its service confines": {
+			status:     "CapPrm:\t0000000000000000\nCapEff:\t0000000000000000\nCapBnd:\t0000000000000000\nNoNewPrivs:\t1\nSeccomp:\t2\nSeccomp_filters:\t31\n",
+			noNewPrivs: true,
+			seccomp:    "filter",
 		},
 		"a process that may read any file": {
-			status: "CapPrm:\t0000000000000004\nCapEff:\t0000000000000004\nCapBnd:\t000001ffffffffff\nNoNewPrivs:\t0\n",
-			held:   []string{"CAP_DAC_READ_SEARCH"},
+			status:  "CapPrm:\t0000000000000004\nCapEff:\t0000000000000004\nCapBnd:\t000001ffffffffff\nNoNewPrivs:\t0\nSeccomp:\t0\n",
+			held:    []string{"CAP_DAC_READ_SEARCH"},
+			seccomp: "disabled",
 		},
 		"a process holding what it does not use yet": {
-			status: "CapPrm:\t0000000000002000\nCapEff:\t0000000000000000\nNoNewPrivs:\t0\n",
-			held:   []string{"CAP_NET_RAW"},
+			status:  "CapPrm:\t0000000000002000\nCapEff:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t1\n",
+			held:    []string{"CAP_NET_RAW"},
+			seccomp: "strict",
 		},
-		"the superuser": {
-			status: "CapPrm:\t000001ffffffffff\nCapEff:\t000001ffffffffff\nNoNewPrivs:\t0\n",
-			held:   names(0x1ffffffffff),
+		"the superuser on a kernel that filters no system call": {
+			status:  "CapPrm:\t000001ffffffffff\nCapEff:\t000001ffffffffff\nNoNewPrivs:\t0\n",
+			held:    names(0x1ffffffffff),
+			seccomp: "unsupported",
 		},
-		"a capability this build does not name": {
-			status: "CapPrm:\t8000000000000000\nCapEff:\t0000000000000000\nNoNewPrivs:\t0\n",
-			held:   []string{"cap(63)"},
+		"a capability and a mode this build does not name": {
+			status:  "CapPrm:\t8000000000000000\nCapEff:\t0000000000000000\nNoNewPrivs:\t0\nSeccomp:\t3\n",
+			held:    []string{"cap(63)"},
+			seccomp: "mode 3",
 		},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			held, bounded, err := described(c.status)
+			held, err := described(c.status)
 			if err != nil {
 				t.Fatalf("read the status of %s: %v", name, err)
 			}
-			if !slices.Equal(held, c.held) || bounded != c.noNewPrivs {
-				t.Fatalf("%s holds %v with no_new_privs %t, want %v and %t", name, held, bounded, c.held, c.noNewPrivs)
+			if !slices.Equal(held.Capabilities, c.held) || held.NoNewPrivs != c.noNewPrivs || held.Seccomp != c.seccomp {
+				t.Fatalf("%s holds %v with no_new_privs %t and seccomp %q, want %v, %t and %q",
+					name, held.Capabilities, held.NoNewPrivs, held.Seccomp, c.held, c.noNewPrivs, c.seccomp)
 			}
 		})
 	}
@@ -59,14 +71,15 @@ func TestAStatusThatDoesNotSayWhatTheProcessMayDoIsRefused(t *testing.T) {
 		"a status missing its bound":         "CapPrm:\t0000000000000000\nCapEff:\t0000000000000000\n",
 		"a capability set that is not one":   "CapPrm:\tnone\nCapEff:\t0000000000000000\nNoNewPrivs:\t0\n",
 		"a capability set beyond 64 bits":    "CapPrm:\tffffffffffffffffff\nCapEff:\t0\nNoNewPrivs:\t0\n",
+		"a filter that is not a mode":        "CapPrm:\t0\nCapEff:\t0\nNoNewPrivs:\t1\nSeccomp:\tfilter\n",
 	}
 	for name, status := range cases {
 		t.Run(name, func(t *testing.T) {
-			held, bounded, err := described(status)
+			held, err := described(status)
 			if err == nil {
-				t.Fatalf("%s described a process holding %v with no_new_privs %t", name, held, bounded)
+				t.Fatalf("%s described a process holding %v with no_new_privs %t and seccomp %q", name, held.Capabilities, held.NoNewPrivs, held.Seccomp)
 			}
-			if !strings.Contains(err.Error(), "Cap") && !strings.Contains(err.Error(), "NoNewPrivs") {
+			if !strings.Contains(err.Error(), "Cap") && !strings.Contains(err.Error(), "NoNewPrivs") && !strings.Contains(err.Error(), "Seccomp") {
 				t.Errorf("%s was refused with %v", name, err)
 			}
 		})
