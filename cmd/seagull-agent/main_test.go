@@ -853,7 +853,7 @@ func TestTheAgentSaysWhatItMayDoAsItStarts(t *testing.T) {
 	if reported["user"] != float64(os.Geteuid()) || reported["group"] != float64(os.Getegid()) {
 		t.Errorf("the agent runs as uid %d in gid %d, and reported %v", os.Geteuid(), os.Getegid(), reported)
 	}
-	if _, said := reported["no_new_privs"]; !said || reported["groups"] == nil {
+	if _, said := reported["no_new_privs"]; !said || reported["groups"] == nil || reported["seccomp"] == "" || reported["seccomp"] == nil {
 		t.Errorf("the agent left out part of what it may do: %v", reported)
 	}
 	beyond, _ := reported["beyond"].([]any)
