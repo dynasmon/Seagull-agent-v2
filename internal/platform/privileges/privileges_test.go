@@ -32,6 +32,9 @@ func TestWhatTheProcessMayDoIsWhatTheAccountRunningItMayDo(t *testing.T) {
 	if runtime.GOOS == "linux" && os.Geteuid() == 0 && len(held.Capabilities) == 0 {
 		t.Error("the superuser reports no capability at all")
 	}
+	if held.Seccomp == "" {
+		t.Error("the process says nothing of how the kernel filters its system calls")
+	}
 }
 
 func TestWhatTheAgentMayDoBeyondWhatItNeeds(t *testing.T) {

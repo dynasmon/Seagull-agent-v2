@@ -2,4 +2,6 @@
 
 package privileges
 
-func capabilities() ([]string, bool, error) { return []string{}, false, nil }
+func granted() (Privileges, error) {
+	return Privileges{Capabilities: []string{}, Seccomp: "unsupported"}, nil
+}

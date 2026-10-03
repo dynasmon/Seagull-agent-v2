@@ -30,30 +30,34 @@ var named = []string{
 	"CAP_CHECKPOINT_RESTORE",
 }
 
-func capabilities() ([]string, bool, error) {
+// The modes the kernel writes as Seccomp. A kernel built without seccomp
+// writes no Seccomp line at all, and filters no system call.
+var modes = map[uint64]string{0: "disabled", 1: "strict", 2: "filter"}
+
+func granted() (Privileges, error) {
 	file, err := os.Open(status)
 	if err != nil {
-		return nil, false, fmt.Errorf("read what the agent may do: %w", err)
+		return Privileges{}, fmt.Errorf("read what the agent may do: %w", err)
 	}
 	defer file.Close()
 	content, err := io.ReadAll(io.LimitReader(file, maxStatusBytes))
 	if err != nil {
-		return nil, false, fmt.Errorf("read %s: %w", status, err)
+		return Privileges{}, fmt.Errorf("read %s: %w", status, err)
 	}
-	held, bounded, err := described(string(content))
+	held, err := described(string(content))
 	if err != nil {
-		return nil, false, fmt.Errorf("read %s: %v", status, err)
+		return Privileges{}, fmt.Errorf("read %s: %v", status, err)
 	}
-	return held, bounded, nil
+	return held, nil
 }
 
-func described(content string) ([]string, bool, error) {
+func described(content string) (Privileges, error) {
 	var granted uint64
-	var bounded bool
+	held := Privileges{Seccomp: "unsupported"}
 	read := map[string]bool{}
 	for line := range strings.Lines(content) {
-		name, written, held := strings.Cut(line, ":")
-		if !held {
+		name, written, found := strings.Cut(line, ":")
+		if !found {
 			continue
 		}
 		written = strings.TrimSpace(written)
@@ -61,19 +65,29 @@ func described(content string) ([]string, bool, error) {
 		case "CapPrm", "CapEff":
 			mask, err := strconv.ParseUint(written, 16, 64)
 			if err != nil {
-				return nil, false, fmt.Errorf("%s is %q, and a capability set is 64 bits in hexadecimal", name, written)
+				return Privileges{}, fmt.Errorf("%s is %q, and a capability set is 64 bits in hexadecimal", name, written)
 			}
 			granted, read[name] = granted|mask, true
 		case "NoNewPrivs":
-			bounded, read[name] = written == "1", true
+			held.NoNewPrivs, read[name] = written == "1", true
+		case "Seccomp":
+			mode, err := strconv.ParseUint(written, 10, 8)
+			if err != nil {
+				return Privileges{}, fmt.Errorf("Seccomp is %q, and a mode is a number", written)
+			}
+			held.Seccomp = modes[mode]
+			if held.Seccomp == "" {
+				held.Seccomp = fmt.Sprintf("mode %d", mode)
+			}
 		}
 	}
 	for _, name := range []string{"CapPrm", "CapEff", "NoNewPrivs"} {
 		if !read[name] {
-			return nil, false, fmt.Errorf("it does not say %s, so what the agent may do is unknown", name)
+			return Privileges{}, fmt.Errorf("it does not say %s, so what the agent may do is unknown", name)
 		}
 	}
-	return names(granted), bounded, nil
+	held.Capabilities = names(granted)
+	return held, nil
 }
 
 func names(granted uint64) []string {

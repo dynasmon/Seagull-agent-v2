@@ -853,7 +853,7 @@ func TestTheAgentSaysWhatItMayDoAsItStarts(t *testing.T) {
 	if reported["user"] != float64(os.Geteuid()) || reported["group"] != float64(os.Getegid()) {
 		t.Errorf("the agent runs as uid %d in gid %d, and reported %v", os.Geteuid(), os.Getegid(), reported)
 	}
-	if _, said := reported["no_new_privs"]; !said || reported["groups"] == nil {
+	if _, said := reported["no_new_privs"]; !said || reported["groups"] == nil || reported["seccomp"] == "" || reported["seccomp"] == nil {
 		t.Errorf("the agent left out part of what it may do: %v", reported)
 	}
 	beyond, _ := reported["beyond"].([]any)
@@ -918,6 +918,14 @@ func TestAnAgentHoldingMoreThanAnythingItDoesNeedsSaysSo(t *testing.T) {
 	}
 	if hint, _ := reported["recovery"].(string); !strings.Contains(hint, "account of its own") {
 		t.Errorf("the agent suggested %q", hint)
+	}
+}
+
+func TestAnAgentItsServiceKeepsFromItsStateDirectoryIsToldWhereItMayWrite(t *testing.T) {
+	path := configured(t, stateDirectory(t), nil)
+	unwritten := fmt.Errorf("create the installation state directory: %w", &fs.PathError{Op: "mkdir", Path: "/srv/seagull-agent", Err: syscall.EROFS})
+	if hint := recovery(path, "/srv/seagull-agent", unwritten); !strings.Contains(hint, "/srv/seagull-agent") || !strings.Contains(hint, "ReadWritePaths=") {
+		t.Fatalf("the agent suggested %q", hint)
 	}
 }
 
