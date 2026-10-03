@@ -156,7 +156,7 @@ The service also confines the agent to what it uses of the host, which
 | What | What the service sets | What it leaves the agent |
 | --- | --- | --- |
 | Files | `ProtectSystem=strict`, `ReadOnlyPaths=/run`, `BindReadOnlyPaths=/sys`, `ProtectHome=yes`, `PrivateTmp=yes` and `MemoryPressureWatch=off` | its installation, the one directory `StateDirectory=` names, and a `/tmp` and a `/var/tmp` of its own to write; every other filesystem read-only, and the home directories, `/root` and `/run/user` out of reach |
-| Devices | `PrivateDevices=yes` | `null`, `zero`, `full`, `random`, `urandom` and `tty` |
+| Devices | `PrivateDevices=yes` | `null`, `zero`, `full`, `random`, `urandom`, `tty`, and `ptmx`, which opens pseudo-terminals |
 | Shared memory | `PrivateIPC=yes` and `InaccessiblePaths=-/dev/shm -/dev/mqueue` | no IPC object, shared memory or message queue that another process holds |
 | The kernel | `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`, `ProtectControlGroups=yes`, `ProtectClock=yes` and `ProtectHostname=yes` | `/proc/sys`, `/sys` and the control groups to read; no module, kernel log, clock or host name |
 | Processes | `ProtectProc=invisible` | the processes of its own account, alone, in `/proc` |
@@ -241,7 +241,7 @@ The evidence:
   32-bit program, and it walks every filesystem that is not read-only for what
   the account may write. In the service the account may write its
   installation, its `/tmp` and its `/var/tmp` and nothing else, finds no device
-  but the six the table names, and is refused everything else it tries but
+  but the seven the table names, and is refused everything else it tries but
   Internet sockets. Outside the service it is allowed each of those, unless
   Ubuntu already refuses it, as it does the kernel's log and real-time
   scheduling, and what it wrote to `/tmp` and `/var/tmp` in the service is not
