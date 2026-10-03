@@ -10,15 +10,16 @@ import (
 var ErrInconsistent = errors.New("the agent runs as more than one account")
 
 // What the process the agent runs in may do: the account it runs as, the
-// groups that account belongs to, and the Linux capabilities it holds. Every
-// module runs in that process and may do all of it; a goroutine bounds a
-// lifecycle and never a privilege.
+// groups that account belongs to, the Linux capabilities it holds, and how the
+// kernel filters the system calls it makes. Every module runs in that process
+// and may do all of it; a goroutine bounds a lifecycle and never a privilege.
 type Privileges struct {
 	User         int
 	Group        int
 	Groups       []int
 	Capabilities []string
 	NoNewPrivs   bool
+	Seccomp      string
 }
 
 // Held describes the running process, and refuses to describe one whose real
@@ -38,11 +39,12 @@ func Held() (Privileges, error) {
 		return Privileges{}, fmt.Errorf("read the groups the agent belongs to: %w", err)
 	}
 	slices.Sort(groups)
-	capabilities, bounded, err := capabilities()
+	held, err := granted()
 	if err != nil {
 		return Privileges{}, err
 	}
-	return Privileges{User: user, Group: group, Groups: groups, Capabilities: capabilities, NoNewPrivs: bounded}, nil
+	held.User, held.Group, held.Groups = user, group, groups
+	return held, nil
 }
 
 // Beyond names what the process may do that nothing the agent does needs:

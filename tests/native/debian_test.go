@@ -64,6 +64,9 @@ func TestMain(m *testing.M) {
 	if directory, ok := os.LookupEnv(admitVariable); ok {
 		os.Exit(admit(directory))
 	}
+	if marker, ok := os.LookupEnv(probeVariable); ok {
+		os.Exit(probe(marker))
+	}
 	os.Exit(m.Run())
 }
 
@@ -80,6 +83,7 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "the service account reads the settings and authenticates the platform", run: g.configure},
 		{name: "an operator enrolls the installation as the service account", run: g.enroll},
 		{name: "the service runs the agent with no privilege and within its ceilings", run: g.start},
+		{name: "the service confines the agent to its installation, the network and the system calls it makes", run: g.confine},
 		{name: "the running service renews the credential under the installed permissions", run: g.renew},
 		{name: "a reload has the agent read its configuration again", run: g.reload},
 		{name: "a stop ends the agent cleanly and a start reads back its backlog", run: g.backlog},
@@ -256,7 +260,7 @@ func (g *gate) start(t *testing.T) {
 	slices.Sort(groups)
 	if held["level"] != "INFO" || held["user"] != float64(g.uid) || held["group"] != float64(g.gid) ||
 		!slices.Equal(numbers(held["groups"]), groups) || fmt.Sprint(held["capabilities"]) != "[]" ||
-		held["no_new_privs"] != true {
+		held["no_new_privs"] != true || held["seccomp"] != "filter" {
 		t.Errorf("the agent holds %v, and it runs as %d:%d with nothing more", held, g.uid, g.gid)
 	}
 	if dumps := await(t, g.invocation, "agent_core_dumps", time.Second); dumps["withheld"] != true {
@@ -697,6 +701,19 @@ func (g *gate) same(t *testing.T, generation int) {
 // service runs as, in a copy of this test the account can run.
 func (g *gate) admit(t *testing.T) string {
 	t.Helper()
+	copied := filepath.Join(g.scratch, "native.test")
+	copySelf(t, copied)
+	command := exec.Command("runuser", "-u", account, "--", copied)
+	command.Env = append(os.Environ(), admitVariable+"="+state)
+	said, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("admit records as %s: %v\n%s", account, err, said)
+	}
+	return strings.TrimSpace(string(said))
+}
+
+func copySelf(t *testing.T, destination string) {
+	t.Helper()
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatalf("find this test: %v", err)
@@ -705,17 +722,9 @@ func (g *gate) admit(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("read this test: %v", err)
 	}
-	copied := filepath.Join(g.scratch, "native.test")
-	if err := os.WriteFile(copied, content, 0o755); err != nil {
+	if err := os.WriteFile(destination, content, 0o755); err != nil {
 		t.Fatalf("copy this test: %v", err)
 	}
-	command := exec.Command("runuser", "-u", account, "--", copied)
-	command.Env = append(os.Environ(), admitVariable+"="+state)
-	said, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("admit records as %s: %v\n%s", account, err, said)
-	}
-	return strings.TrimSpace(string(said))
 }
 
 func admit(directory string) int {
