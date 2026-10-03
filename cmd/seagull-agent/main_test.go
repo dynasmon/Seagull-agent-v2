@@ -921,6 +921,14 @@ func TestAnAgentHoldingMoreThanAnythingItDoesNeedsSaysSo(t *testing.T) {
 	}
 }
 
+func TestAnAgentItsServiceKeepsFromItsStateDirectoryIsToldWhereItMayWrite(t *testing.T) {
+	path := configured(t, stateDirectory(t), nil)
+	unwritten := fmt.Errorf("create the installation state directory: %w", &fs.PathError{Op: "mkdir", Path: "/srv/seagull-agent", Err: syscall.EROFS})
+	if hint := recovery(path, "/srv/seagull-agent", unwritten); !strings.Contains(hint, "/srv/seagull-agent") || !strings.Contains(hint, "ReadWritePaths=") {
+		t.Fatalf("the agent suggested %q", hint)
+	}
+}
+
 func TestAnAgentThatCannotSayWhichAccountItRunsAsIsToldWhatToDo(t *testing.T) {
 	path := configured(t, stateDirectory(t), nil)
 	started := fmt.Errorf("%w: uid 0 started it and it runs as uid 987", privileges.ErrInconsistent)
