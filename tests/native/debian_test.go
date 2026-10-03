@@ -64,6 +64,9 @@ func TestMain(m *testing.M) {
 	if directory, ok := os.LookupEnv(admitVariable); ok {
 		os.Exit(admit(directory))
 	}
+	if marker, ok := os.LookupEnv(probeVariable); ok {
+		os.Exit(probe(marker))
+	}
 	os.Exit(m.Run())
 }
 
@@ -80,6 +83,7 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "the service account reads the settings and authenticates the platform", run: g.configure},
 		{name: "an operator enrolls the installation as the service account", run: g.enroll},
 		{name: "the service runs the agent with no privilege and within its ceilings", run: g.start},
+		{name: "the service confines the agent to its installation, the network and the system calls it makes", run: g.confine},
 		{name: "the running service renews the credential under the installed permissions", run: g.renew},
 		{name: "a reload has the agent read its configuration again", run: g.reload},
 		{name: "a stop ends the agent cleanly and a start reads back its backlog", run: g.backlog},
@@ -256,7 +260,7 @@ func (g *gate) start(t *testing.T) {
 	slices.Sort(groups)
 	if held["level"] != "INFO" || held["user"] != float64(g.uid) || held["group"] != float64(g.gid) ||
 		!slices.Equal(numbers(held["groups"]), groups) || fmt.Sprint(held["capabilities"]) != "[]" ||
-		held["no_new_privs"] != true {
+		held["no_new_privs"] != true || held["seccomp"] != "filter" {
 		t.Errorf("the agent holds %v, and it runs as %d:%d with nothing more", held, g.uid, g.gid)
 	}
 	if dumps := await(t, g.invocation, "agent_core_dumps", time.Second); dumps["withheld"] != true {
