@@ -1079,6 +1079,8 @@ func recovery(path, state string, err error) string {
 		return "nothing: the agent asks again; if the platform keeps taking requests it does not answer, check that it answers within transport.request_timeout in " + path
 	case errors.Is(err, transport.ErrUnreachable):
 		return "check that the host the address names resolves and can be reached from this machine over the network"
+	case errors.Is(err, syscall.EROFS):
+		return "let the agent write " + state + ": its filesystem is read-only to the agent, and the service the package installs leaves it writable in /var/lib/seagull-agent alone, so keep the installation there or name its directory in ReadWritePaths= with a drop-in"
 	case errors.Is(err, fs.ErrNotExist):
 		return "write the agent's configuration at " + path
 	}
