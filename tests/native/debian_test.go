@@ -697,6 +697,19 @@ func (g *gate) same(t *testing.T, generation int) {
 // service runs as, in a copy of this test the account can run.
 func (g *gate) admit(t *testing.T) string {
 	t.Helper()
+	copied := filepath.Join(g.scratch, "native.test")
+	copySelf(t, copied)
+	command := exec.Command("runuser", "-u", account, "--", copied)
+	command.Env = append(os.Environ(), admitVariable+"="+state)
+	said, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("admit records as %s: %v\n%s", account, err, said)
+	}
+	return strings.TrimSpace(string(said))
+}
+
+func copySelf(t *testing.T, destination string) {
+	t.Helper()
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatalf("find this test: %v", err)
@@ -705,17 +718,9 @@ func (g *gate) admit(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("read this test: %v", err)
 	}
-	copied := filepath.Join(g.scratch, "native.test")
-	if err := os.WriteFile(copied, content, 0o755); err != nil {
+	if err := os.WriteFile(destination, content, 0o755); err != nil {
 		t.Fatalf("copy this test: %v", err)
 	}
-	command := exec.Command("runuser", "-u", account, "--", copied)
-	command.Env = append(os.Environ(), admitVariable+"="+state)
-	said, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("admit records as %s: %v\n%s", account, err, said)
-	}
-	return strings.TrimSpace(string(said))
 }
 
 func admit(directory string) int {
