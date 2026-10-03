@@ -430,7 +430,7 @@ func (g *gate) confine(t *testing.T) {
 		t.Errorf("in the service the agent's account may write %q, and outside it %q; its installation and its own temporary directories alone are wanted", confined.Writable, free.Writable)
 	}
 	for _, device := range confined.Devices {
-		if !slices.Contains([]string{"full", "null", "random", "tty", "urandom", "zero"}, device) {
+		if !slices.Contains([]string{"full", "null", "ptmx", "random", "tty", "urandom", "zero"}, device) {
 			t.Errorf("in the service the agent's account finds the device %s, among %q", device, confined.Devices)
 		}
 	}
