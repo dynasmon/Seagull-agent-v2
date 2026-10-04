@@ -299,6 +299,29 @@ func TestTheLeftoversOfAnInterruptedStoreAreDiscarded(t *testing.T) {
 	}
 }
 
+func TestAChainIsReadWithoutChangingItsDirectory(t *testing.T) {
+	directory := certificatesDirectory(t)
+	chain := issuedChain(t, create(t, openKeys(t, keysDirectory(t))))
+	fingerprint, err := openCertificates(t, directory).Store(chain)
+	if err != nil {
+		t.Fatalf("store the chain: %v", err)
+	}
+	writing := filepath.Join(directory, "."+strings.Repeat("ab", 32)+".pem.tmp")
+	if err := os.WriteFile(writing, []byte("being written"), 0o600); err != nil {
+		t.Fatalf("leave a write in progress: %v", err)
+	}
+	read, err := pki.ReadCertificates(root(t, directory), fingerprint)
+	if err != nil || !slices.EqualFunc(read, chain, bytes.Equal) {
+		t.Fatalf("read the chain as %d certificates: %v", len(read), err)
+	}
+	if _, err := os.Lstat(writing); err != nil {
+		t.Fatalf("reading the chain discarded a write in progress: %v", err)
+	}
+	if _, err := pki.ReadCertificates(root(t, directory), strings.Repeat("cd", 32)); !errors.Is(err, pki.ErrCertificateMissing) {
+		t.Fatalf("reading a chain that was never kept returned %v", err)
+	}
+}
+
 func TestChainsSurviveAnAgentKilledWhileStoringThem(t *testing.T) {
 	directory := certificatesDirectory(t)
 	child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^$")
