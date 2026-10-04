@@ -33,7 +33,7 @@ func TestMain(m *testing.M) {
 }
 
 func writeUntilKilled(directory string) int {
-	bundle := diagnostics.Bundle{Status: diagnostics.Took("status", strings.Repeat("x", 6<<20))}
+	bundle := diagnostics.Bundle{Status: diagnostics.Took("status", strings.Repeat("x", 1<<20))}
 	for n := 0; ; n++ {
 		if _, err := diagnostics.Write(filepath.Join(directory, fmt.Sprintf("bundle-%04d.json", n)), bundle); err != nil {
 			fmt.Println("failed", err)
@@ -205,7 +205,7 @@ func TestABundleThatCannotBeWrittenLeavesNothingBehind(t *testing.T) {
 // process killed at any moment leaves at its destination a whole bundle or
 // nothing, and at most what it was writing, which no other account reads.
 func TestABundleKilledAsItIsWrittenIsWholeOrAbsent(t *testing.T) {
-	for round := range 12 {
+	for round := range 24 {
 		directory := shared(t)
 		writer := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^$")
 		writer.Env = append(os.Environ(), childDirectory+"="+directory)
@@ -220,7 +220,7 @@ func TestABundleKilledAsItIsWrittenIsWholeOrAbsent(t *testing.T) {
 		if !lines.Scan() || !strings.HasPrefix(lines.Text(), "written") {
 			t.Fatalf("round %d: the writer said %q", round, lines.Text())
 		}
-		time.Sleep(time.Duration(rand.IntN(300)) * time.Millisecond)
+		time.Sleep(time.Duration(rand.IntN(60)) * time.Millisecond)
 		if err := writer.Process.Kill(); err != nil {
 			t.Fatal(err)
 		}
@@ -239,7 +239,7 @@ func TestABundleKilledAsItIsWrittenIsWholeOrAbsent(t *testing.T) {
 			if err == nil {
 				err = json.Unmarshal(content, &bundle)
 			}
-			if err != nil || bundle.Format != diagnostics.Format || len(bundle.Status.Held) < 6<<20 {
+			if err != nil || bundle.Format != diagnostics.Format || len(bundle.Status.Held) < 1<<20 {
 				t.Errorf("round %d: %s holds %d bytes that are no whole bundle: %v", round, name, len(content), err)
 			}
 		}
