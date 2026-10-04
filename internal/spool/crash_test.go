@@ -33,6 +33,8 @@ func TestMain(m *testing.M) {
 // A child admits records as fast as the spool takes them and acknowledges some
 // of what it holds, and says so on its standard output only once the spool
 // returned, so whatever it said before it was killed is what the spool promised.
+// It also says which records it is about to acknowledge before it asks, since a
+// kill can land once an acknowledgement is durable and before it is said.
 func child(arguments string) int {
 	directory, round, _ := strings.Cut(arguments, " ")
 	root, err := os.OpenRoot(directory)
@@ -82,6 +84,7 @@ func settle(held *spool.Spool, most int) bool {
 		settled = append(settled, entry.Sequence)
 		sequences = append(sequences, strconv.FormatUint(entry.Sequence, 10))
 	}
+	fmt.Printf("acknowledging %s\n", strings.Join(sequences, " "))
 	if err := held.Acknowledge(spool.Events, settled...); err != nil {
 		fmt.Println("failed", err)
 		return false
@@ -107,9 +110,9 @@ func TestAKilledProcessKeepsEverythingItsSpoolAdmitted(t *testing.T) {
 	}
 	directory := spoolDirectory(t)
 	admitted := map[uint64]string{}
-	acknowledged := map[uint64]bool{}
+	acknowledged, acknowledging := map[uint64]bool{}, map[uint64]bool{}
 	for round := range 8 {
-		kill(t, directory, round, 10+rand.IntN(120), admitted, acknowledged)
+		kill(t, directory, round, 10+rand.IntN(120), admitted, acknowledged, acknowledging)
 
 		held, logs := open(t, directory, crashBudget)
 		if lost, found := logged(t, logs, "spool_records_lost"); found {
@@ -133,7 +136,7 @@ func TestAKilledProcessKeepsEverythingItsSpoolAdmitted(t *testing.T) {
 			outstanding[entry.Sequence] = true
 		}
 		for sequence, id := range admitted {
-			if !acknowledged[sequence] && !outstanding[sequence] {
+			if !acknowledged[sequence] && !acknowledging[sequence] && !outstanding[sequence] {
 				t.Fatalf("round %d: record %d, %s, was admitted and is gone without an acknowledgement", round, sequence, id)
 			}
 		}
@@ -144,7 +147,7 @@ func TestAKilledProcessKeepsEverythingItsSpoolAdmitted(t *testing.T) {
 	}
 }
 
-func kill(t *testing.T, directory string, round, after int, admitted map[uint64]string, acknowledged map[uint64]bool) {
+func kill(t *testing.T, directory string, round, after int, admitted map[uint64]string, acknowledged, acknowledging map[uint64]bool) {
 	t.Helper()
 	process := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^$")
 	process.Env = append(os.Environ(), fmt.Sprintf("%s=%s %d", childSpool, directory, round))
@@ -170,13 +173,17 @@ func kill(t *testing.T, directory string, round, after int, admitted map[uint64]
 				admitted[first+uint64(i)] = id
 			}
 			count++
-		case len(fields) > 0 && fields[0] == "acknowledged":
+		case len(fields) > 0 && (fields[0] == "acknowledged" || fields[0] == "acknowledging"):
 			for _, field := range fields[1:] {
 				sequence, err := strconv.ParseUint(field, 10, 64)
 				if err != nil {
 					t.Fatalf("the child said %q", lines.Text())
 				}
-				acknowledged[sequence] = true
+				if fields[0] == "acknowledged" {
+					acknowledged[sequence] = true
+				} else {
+					acknowledging[sequence] = true
+				}
 			}
 		default:
 			t.Fatalf("the child said %q", lines.Text())
