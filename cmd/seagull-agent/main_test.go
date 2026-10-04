@@ -1710,6 +1710,9 @@ func TestAnythingButACommandIsAUsageError(t *testing.T) {
 		{"-config", path, "enrollment", "import"},
 		{"-config", path, "enrollment", "renew", "web-01"},
 		{"-version", "enrollment", "request", "web-01"},
+		{"-config", path, "diagnostics"},
+		{"-config", path, "diagnostics", "bundle.json", "extra"},
+		{"-version", "diagnostics", "bundle.json"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 2 {
