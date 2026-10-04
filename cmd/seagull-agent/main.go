@@ -23,6 +23,7 @@ import (
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
 	"github.com/dynasmon/Seagull-agent-v2/internal/delivery"
+	"github.com/dynasmon/Seagull-agent-v2/internal/diagnostics"
 	"github.com/dynasmon/Seagull-agent-v2/internal/enrollment"
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
@@ -61,6 +62,7 @@ const usage = `Usage:
   seagull-agent -config FILE enrollment renew             ask the platform for the next certificate now, as the enrolled agent
   seagull-agent -config FILE installation replace         replace the installation with a new one that is not enrolled
   seagull-agent -config FILE status                       print what the agent last said of itself, and exit with 0 only while it runs as it should
+  seagull-agent -config FILE diagnostics BUNDLE           write what helps troubleshoot the agent, and nothing that authenticates it, into the new file BUNDLE
   seagull-agent -version                                  print the build identity and the wire versions it speaks, and exit
 
 A running agent reads its configuration again when it receives SIGHUP, and
@@ -115,6 +117,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return replace(*path, stdout, stderr)
 	case configured && slices.Equal(flags.Args(), []string{"status"}):
 		return report(*path, stdout, stderr)
+	case configured && flags.NArg() == 2 && flags.Arg(0) == "diagnostics":
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return diagnose(ctx, *path, flags.Arg(1), stdout, stderr)
 	}
 	flags.Usage()
 	return 2
@@ -1103,6 +1109,10 @@ func recovery(path, state string, err error) string {
 		return "nothing: the agent asks again; if the platform keeps taking requests it does not answer, check that it answers within transport.request_timeout in " + path
 	case errors.Is(err, transport.ErrUnreachable):
 		return "check that the host the address names resolves and can be reached from this machine over the network"
+	case errors.Is(err, diagnostics.ErrExists):
+		return "name a file that is not there yet: a bundle never replaces one, so whatever is there stays as it was"
+	case errors.Is(err, diagnostics.ErrInstallation):
+		return "write the bundle outside the directories the agent keeps as its own, its installation among them, such as in /var/tmp, and read it there as root"
 	case errors.Is(err, syscall.EROFS):
 		return "let the agent write " + state + ": its filesystem is read-only to the agent, and the service the package installs leaves it writable in /var/lib/seagull-agent alone, so keep the installation there or name its directory in ReadWritePaths= with a drop-in"
 	case errors.Is(err, fs.ErrNotExist):
