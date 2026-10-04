@@ -82,3 +82,11 @@ func Trusted(info fs.FileInfo) error {
 	}
 	return nil
 }
+
+func Owner(info fs.FileInfo) (int, error) {
+	described, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, errors.New("does not say who owns it")
+	}
+	return int(described.Uid), nil
+}
