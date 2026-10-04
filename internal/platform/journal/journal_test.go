@@ -1,10 +1,14 @@
 package journal
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -361,5 +365,114 @@ func TestTheJournalOfThisHostReadsAsItsJournalctlWritesIt(t *testing.T) {
 	}
 	if read == 0 {
 		t.Skip("the system journal of this host holds nothing systemd wrote in a month")
+	}
+}
+
+func listened(t *testing.T) *net.UnixConn {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("the agent writes to the system journal on linux alone")
+	}
+	path := filepath.Join(t.TempDir(), "socket")
+	listener, err := net.ListenUnixgram("unixgram", &net.UnixAddr{Name: path, Net: "unixgram"})
+	if err != nil {
+		t.Fatalf("listen as journald does: %v", err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	held := socket
+	socket = path
+	t.Cleanup(func() { socket = held })
+	return listener
+}
+
+func received(t *testing.T, listener *net.UnixConn) map[string]string {
+	t.Helper()
+	if err := listener.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	datagram := make([]byte, 2*maxNote)
+	size, err := listener.Read(datagram)
+	if err != nil {
+		t.Fatalf("journald received no note: %v", err)
+	}
+	held, payload := map[string]string{}, datagram[:size]
+	for len(payload) > 0 {
+		line, rest, found := bytes.Cut(payload, []byte("\n"))
+		if !found {
+			t.Fatalf("the note ends in the middle of a field: %q", payload)
+		}
+		if name, value, written := strings.Cut(string(line), "="); written {
+			held[name], payload = value, rest
+			continue
+		}
+		if len(rest) < 8 {
+			t.Fatalf("the field %s says no length: %q", line, rest)
+		}
+		length := binary.LittleEndian.Uint64(rest)
+		if uint64(len(rest)) < 9+length || rest[8+length] != '\n' {
+			t.Fatalf("the field %s is not %d bytes and a new line: %q", line, length, rest)
+		}
+		held[string(line)], payload = string(rest[8:8+length]), rest[9+length:]
+	}
+	return held
+}
+
+func TestANoteReachesJournaldAsItWasWritten(t *testing.T) {
+	listener := listened(t)
+	note := Note{Identifier: "seagull-agent", Priority: 4, Message: "{\"msg\":\"installation_replaced\"}\nsecond line", Fields: map[string]string{"SEAGULL_EVENT": "installation_replaced"}}
+	if err := Send(note); err != nil {
+		t.Fatalf("send the note: %v", err)
+	}
+	want := map[string]string{
+		"MESSAGE":           note.Message,
+		"PRIORITY":          "4",
+		"SYSLOG_IDENTIFIER": "seagull-agent",
+		"SEAGULL_EVENT":     "installation_replaced",
+	}
+	if held := received(t, listener); !maps.Equal(held, want) {
+		t.Errorf("journald received %q, want %q", held, want)
+	}
+}
+
+// journald writes down who sent a note from what the kernel says of the
+// sender, in fields whose names begin with an underscore, so a note claiming
+// one of them, or anything journald writes itself, is no note the agent sends.
+func TestANoteJournaldWouldReadOtherwiseIsNeverSent(t *testing.T) {
+	listener := listened(t)
+	written := Note{Identifier: "seagull-agent", Priority: 6, Message: "diagnostics_written"}
+	for name, change := range map[string]func(*Note){
+		"no identifier":           func(n *Note) { n.Identifier = "" },
+		"an identifier of a path": func(n *Note) { n.Identifier = "../sshd" },
+		"another priority":        func(n *Note) { n.Priority = 8 },
+		"nothing to say":          func(n *Note) { n.Message = "" },
+		"the account it claims":   func(n *Note) { n.Fields = map[string]string{"_UID": "0"} },
+		"a second message":        func(n *Note) { n.Fields = map[string]string{"MESSAGE": "forged"} },
+		"another identifier":      func(n *Note) { n.Fields = map[string]string{"SYSLOG_IDENTIFIER": "sshd"} },
+		"a field of a lowercase":  func(n *Note) { n.Fields = map[string]string{"seagull_event": "forged"} },
+		"more than journald gets": func(n *Note) { n.Message = strings.Repeat("x", maxNote) },
+	} {
+		note := written
+		change(&note)
+		if err := Send(note); err == nil {
+			t.Errorf("%s: the note was sent", name)
+		}
+	}
+	if err := Send(written); err != nil {
+		t.Fatalf("send the note: %v", err)
+	}
+	if held := received(t, listener); held["MESSAGE"] != "diagnostics_written" {
+		t.Errorf("journald received %q before the note that was sent", held)
+	}
+}
+
+func TestANoteWithNoJournaldToReachIsNotSent(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the agent writes to the system journal on linux alone")
+	}
+	held := socket
+	socket = filepath.Join(t.TempDir(), "absent")
+	t.Cleanup(func() { socket = held })
+	if err := Send(Note{Identifier: "seagull-agent", Priority: 6, Message: "diagnostics_written"}); err == nil || !strings.Contains(err.Error(), "reach journald") {
+		t.Errorf("a note to no journald was sent as %v", err)
 	}
 }
