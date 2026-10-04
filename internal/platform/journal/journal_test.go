@@ -109,13 +109,19 @@ func TestAQueryNamesFieldsAndValuesJournalctlReads(t *testing.T) {
 		"a value of two lines":  {Matches: []Match{{Field: "_COMM", Value: "sshd\n_UID=0"}}, Fields: []string{"MESSAGE"}},
 		"a field read as a key": {Matches: []Match{{Field: "_UID", Value: "0"}}, Fields: []string{"MESSAGE=sshd"}},
 		"too many fields":       {Matches: []Match{{Field: "_UID", Value: "0"}}, Fields: slices.Repeat([]string{"MESSAGE"}, maxFields+1)},
+		"a unit that is a flag": {Unit: "--merge", Fields: []string{"MESSAGE"}},
+		"a unit with a space":   {Unit: "seagull agent.service", Fields: []string{"MESSAGE"}},
+		"a unit of a path":      {Unit: "../seagull-agent.service", Fields: []string{"MESSAGE"}},
+		"a socket":              {Unit: "seagull-agent.socket", Fields: []string{"MESSAGE"}},
 	} {
 		if _, err := New(query); err == nil {
 			t.Errorf("%s: the query was taken", name)
 		}
 	}
-	if _, err := New(sshd); err != nil {
-		t.Fatalf("the query of the authentication collector was refused: %v", err)
+	for _, query := range []Query{sshd, {Unit: "seagull-agent.service", Fields: []string{"MESSAGE"}}, {Unit: "getty@tty1.service", Fields: []string{"MESSAGE"}}} {
+		if _, err := New(query); err != nil {
+			t.Errorf("the query %+v was refused: %v", query, err)
+		}
 	}
 }
 
@@ -130,6 +136,7 @@ func TestJournalctlIsAskedForTheSystemJournalFromAPosition(t *testing.T) {
 		{from: Position{Cursor: first}, start: "--cursor=" + first},
 		{from: Position{Since: since}, start: "--since=@1790869871.388814"},
 		{from: Position{Since: since}, follow: true, start: "--since=@1790869871.388814"},
+		{from: Position{Last: 1000}, start: "--lines=1000"},
 	} {
 		reader := open(t, reading.from, reading.follow)
 		if _, err := reader.Next(); !errors.Is(err, io.EOF) {
@@ -146,17 +153,44 @@ func TestJournalctlIsAskedForTheSystemJournalFromAPosition(t *testing.T) {
 	}
 }
 
+// What journalctl reads for a unit is what the service's processes wrote and
+// what the service manager wrote about it, which matching on fields cannot
+// say in one reading.
+func TestAUnitIsReadAsJournalctlReadsOne(t *testing.T) {
+	journal := faked(t, "")
+	held, err := New(Query{Unit: "seagull-agent.service", Matches: []Match{{Field: "PRIORITY", Value: "3"}}, Fields: []string{"MESSAGE", "_PID"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := held.Open(t.Context(), Position{Last: 25}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	if _, err := reader.Next(); !errors.Is(err, io.EOF) {
+		t.Fatalf("a journal with nothing to read said %v", err)
+	}
+	want := []string{"--system", "--no-pager", "--output=json", "--output-fields=MESSAGE,_PID", "--lines=25", "--unit=seagull-agent.service", "PRIORITY=3"}
+	if got := journal.arguments(t); !slices.Equal(got, want) {
+		t.Errorf("journalctl was run with\n%q, want\n%q", got, want)
+	}
+}
+
 func TestAReadingStartsAtOneCursorOrMoment(t *testing.T) {
 	held, err := New(sshd)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, from := range map[string]Position{
-		"nowhere":             {},
-		"both":                {Cursor: first, Since: time.Now()},
-		"a damaged cursor":    {Cursor: strings.Replace(first, "i=", "j=", 1)},
-		"a cursor and a flag": {Cursor: first + " --merge"},
-		"before 1970":         {Since: time.Date(1969, 12, 31, 0, 0, 0, 0, time.UTC)},
+		"nowhere":                    {},
+		"both":                       {Cursor: first, Since: time.Now()},
+		"a cursor and its last ones": {Cursor: first, Last: 10},
+		"a moment and its last ones": {Since: time.Now(), Last: 10},
+		"fewer than none":            {Last: -1},
+		"more than it reads":         {Last: MaxLast + 1},
+		"a damaged cursor":           {Cursor: strings.Replace(first, "i=", "j=", 1)},
+		"a cursor and a flag":        {Cursor: first + " --merge"},
+		"before 1970":                {Since: time.Date(1969, 12, 31, 0, 0, 0, 0, time.UTC)},
 	} {
 		if reader, err := held.Open(t.Context(), from, false); err == nil {
 			reader.Close()
