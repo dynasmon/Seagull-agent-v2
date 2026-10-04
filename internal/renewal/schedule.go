@@ -168,7 +168,7 @@ func (r *Renewer) Run(ctx context.Context) error {
 			continue
 		}
 		renewed, err := r.Renew(ctx)
-		if ctx.Err() != nil {
+		if err != nil && ctx.Err() != nil {
 			return nil
 		}
 		if err != nil {
