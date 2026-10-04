@@ -2266,7 +2266,7 @@ The evidence:
   included, in a directory only the account may enter when no installation is
   named, in a directory the account may not write and when too large, each
   leaving nothing behind. A process writing
-  bundles of 6 MiB is killed at random moments, over and over, and every
+  bundles of 1 MiB is killed at random moments, over and over, and every
   bundle it leaves is whole and every temporary file private;
 - `cmd/seagull-agent` writes bundles of an enrolled agent, of one running,
   whose status and installation it reads while the agent holds them and
