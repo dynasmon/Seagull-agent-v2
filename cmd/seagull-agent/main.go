@@ -744,27 +744,33 @@ func platform(settings config.Config, authorities []*x509.Certificate, credentia
 }
 
 func ask(path, agentID string, stdout, stderr io.Writer) int {
+	refused := func(state string, err error) int {
+		audit(stderr, slog.LevelWarn, "enrollment_not_requested", slog.String("config", path), slog.String("agent_id", secrets.Bounded(agentID)), slog.Any("error", err))
+		return refuse(path, state, err, stderr)
+	}
 	settings, err := config.Load(path)
 	if err != nil {
-		return refuse(path, "", err, stderr)
+		return refused("", err)
 	}
 	state := settings.Identity.StateDirectory
 	installation, err := identity.Open(state)
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	defer installation.Close()
 	keys, err := openKeys(installation, settings.Identity.KeyProvider)
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	asked, err := enrollment.Request(installation, keys, agentID, time.Now())
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	if _, err := stdout.Write(asked.Request); err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
+	audit(stderr, slog.LevelInfo, "enrollment_requested", slog.String("config", path), slog.String("installation_id", installation.ID()),
+		slog.String("agent_id", asked.AgentID), slog.String("key_id", asked.KeyID), slog.Bool("again", asked.Again), slog.String("abandoned", asked.Abandoned))
 	switch {
 	case asked.Again:
 		fmt.Fprintf(stderr, "seagull-agent: installation %s asks again to be agent %s, with the key it asked with before, %s\n", installation.ID(), asked.AgentID, asked.KeyID)
@@ -780,35 +786,39 @@ func ask(path, agentID string, stdout, stderr io.Writer) int {
 }
 
 func accept(path, answer string, stdout, stderr io.Writer) int {
+	refused := func(state string, err error) int {
+		audit(stderr, slog.LevelWarn, "credential_not_imported", slog.String("config", path), slog.String("issued", secrets.Bounded(answer)), slog.Any("error", err))
+		return refuse(path, state, err, stderr)
+	}
 	settings, err := config.Load(path)
 	if err != nil {
-		return refuse(path, "", err, stderr)
+		return refused("", err)
 	}
 	issued, err := answered(answer)
 	if err != nil {
-		return refuse(path, "", err, stderr)
+		return refused("", err)
 	}
 	state := settings.Identity.StateDirectory
 	installation, err := identity.Open(state)
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	defer installation.Close()
 	keys, err := openKeys(installation, settings.Identity.KeyProvider)
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	certificates, err := openCertificates(installation)
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	held, err := openAuthorities(installation)
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	chosen, unread := trusted(settings, holding(installation), held.Open)
 	if errors.Is(unread, config.ErrInvalid) {
-		return refuse(path, state, unread, stderr)
+		return refused(state, unread)
 	}
 	if unread != nil {
 		fmt.Fprintf(stderr, "seagull-agent: the authorities the installation adopted cannot be read, so the certificate is verified against server.trust_bundle: %v\n", unread)
@@ -816,9 +826,12 @@ func accept(path, answer string, stdout, stderr io.Writer) int {
 	authorities := chosen.authorities
 	imported, err := enrollment.Import(installation, keys, certificates, authorities, issued, time.Now())
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	active := imported.Enrollment
+	audit(stderr, slog.LevelInfo, "credential_imported", slog.String("config", path), slog.String("issued", secrets.Bounded(answer)),
+		slog.String("installation_id", installation.ID()), slog.String("agent_id", active.AgentID), slog.Uint64("credential_generation", active.Generation),
+		slog.String("key_id", active.KeyID), slog.String("serial", active.Certificate.Serial), slog.Time("not_after", active.Certificate.NotAfter), slog.Bool("already", imported.Already))
 	already := ""
 	if imported.Already {
 		already = ", already"
@@ -833,45 +846,49 @@ func accept(path, answer string, stdout, stderr io.Writer) int {
 }
 
 func renew(ctx context.Context, path string, stdout, stderr io.Writer) int {
+	refused := func(state string, err error) int {
+		audit(stderr, slog.LevelWarn, "credential_not_renewed", slog.String("config", path), slog.Any("error", err))
+		return refuse(path, state, err, stderr)
+	}
 	settings, err := config.Load(path)
 	if err != nil {
-		return refuse(path, "", err, stderr)
+		return refused("", err)
 	}
 	state := settings.Identity.StateDirectory
 	installation, err := identity.Open(state)
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	defer installation.Close()
 	keys, err := openKeys(installation, settings.Identity.KeyProvider)
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	certificates, err := openCertificates(installation)
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	authorities, err := openAuthorities(installation)
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	if _, enrolled := installation.Enrollment(); !enrolled {
-		return refuse(path, state, renewal.ErrNotEnrolled, stderr)
+		return refused(state, renewal.ErrNotEnrolled)
 	}
 	chosen, unread := trusted(settings, holding(installation), authorities.Open)
 	if errors.Is(unread, config.ErrInvalid) {
-		return refuse(path, state, unread, stderr)
+		return refused(state, unread)
 	}
 	if unread != nil {
 		fmt.Fprintf(stderr, "seagull-agent: the authorities the installation adopted cannot be read, so the platform is authenticated against server.trust_bundle: %v\n", unread)
 	}
 	credential := &credentials{installation: installation, keys: keys, certificates: certificates}
 	if _, err := credential.Credential(); err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	client, err := platform(settings, chosen.authorities, credential)
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	defer client.Close()
 	renewer, err := renewal.New(renewal.Options{
@@ -887,16 +904,19 @@ func renew(ctx context.Context, path string, stdout, stderr io.Writer) int {
 		Logger:       slog.New(slog.DiscardHandler),
 	})
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
 	renewed, err := renewer.Renew(ctx)
 	if err != nil {
-		return refuse(path, state, err, stderr)
+		return refused(state, err)
 	}
-	next, key := renewed.Enrollment, "with the key it held"
+	next, key, kept := renewed.Enrollment, "with the key it held", "kept"
 	if renewed.Rotated {
-		key = "with a new key, " + next.KeyID
+		key, kept = "with a new key, "+next.KeyID, "rotated"
 	}
+	audit(stderr, slog.LevelInfo, "credential_renewed", slog.String("config", path), slog.String("installation_id", installation.ID()),
+		slog.String("agent_id", next.AgentID), slog.Uint64("credential_generation", next.Generation), slog.String("key", kept), slog.String("key_id", next.KeyID),
+		slog.String("serial", next.Certificate.Serial), slog.Time("not_after", next.Certificate.NotAfter), slog.Bool("adopted", renewed.Adopted))
 	fmt.Fprintf(stdout, "installation %s renewed agent %s to credential generation %d, %s: certificate %s issued by %s and valid until %s\n",
 		installation.ID(), next.AgentID, next.Generation, key, next.Certificate.Serial, secrets.Shown(renewed.Issuer), next.Certificate.NotAfter.Format(time.RFC3339))
 	switch {
@@ -942,14 +962,18 @@ func counted(count int) string {
 func replace(path string, stdout, stderr io.Writer) int {
 	settings, err := config.Load(path)
 	if err != nil {
+		audit(stderr, slog.LevelWarn, "installation_not_replaced", slog.String("config", path), slog.Any("error", err))
 		return refuse(path, "", err, stderr)
 	}
 	state := settings.Identity.StateDirectory
 	installation, err := identity.Replace(state)
 	if err != nil {
+		audit(stderr, slog.LevelWarn, "installation_not_replaced", slog.String("config", path), slog.String("state", state), slog.Any("error", err))
 		return refuse(path, state, err, stderr)
 	}
 	defer installation.Close()
+	audit(stderr, slog.LevelInfo, "installation_replaced", slog.String("config", path), slog.String("state", state),
+		slog.String("installation_id", installation.ID()), slog.String("replaces", installation.Replaces()))
 	fmt.Fprintf(stdout, "installation_id %s\n", installation.ID())
 	if replaced := installation.Replaces(); replaced != "" {
 		fmt.Fprintf(stdout, "replaces %s\n", replaced)
