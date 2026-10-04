@@ -48,6 +48,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/journal"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/renewal"
@@ -63,6 +64,7 @@ import (
 const childArguments = "SEAGULL_AGENT_TEST_ARGUMENTS"
 
 func TestMain(m *testing.M) {
+	noted = func(journal.Note) error { return nil }
 	if arguments, ok := os.LookupEnv(childArguments); ok {
 		os.Exit(run(strings.Fields(arguments), os.Stdout, os.Stderr))
 	}
