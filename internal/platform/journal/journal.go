@@ -1,17 +1,22 @@
 // Package journal reads the system journal through journalctl, whose export
 // format systemd documents: the entries a query matches, in the order the
 // journal holds them, each named by its cursor and carrying the moment
-// journald wrote it down and the fields asked for.
+// journald wrote it down and the fields asked for. It writes a note to the
+// journal through journald's own socket, and journald writes down beside the
+// note who sent it as the kernel tells, which no sender chooses: the account,
+// the process, its executable and command line, and the login it runs in.
 package journal
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os/exec"
 	"regexp"
 	"slices"
@@ -28,11 +33,15 @@ const (
 	MaxLast      = 10000
 	maxComplaint = 1 << 10
 	maxFields    = 32
+	maxNote      = 64 << 10
 	stopping     = time.Second
 	denied       = "insufficient permissions"
 )
 
-var program = "/usr/bin/journalctl"
+var (
+	program = "/usr/bin/journalctl"
+	socket  = "/run/systemd/journal/socket"
+)
 
 var (
 	ErrUnreadable = errors.New("journalctl wrote an entry that cannot be read")
@@ -40,6 +49,7 @@ var (
 	cursorPattern = regexp.MustCompile(`^s=[0-9a-f]{32};i=[0-9a-f]{1,16};b=[0-9a-f]{32};m=[0-9a-f]{1,16};t=[0-9a-f]{1,16};x=[0-9a-f]{1,16}$`)
 	fieldPattern  = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
 	unitPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:_.@-]{0,240}\.service$`)
+	namePattern   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 )
 
 type Match struct {
@@ -67,6 +77,13 @@ type Entry struct {
 	Cursor   string
 	Realtime time.Time
 	Fields   map[string]string
+}
+
+type Note struct {
+	Identifier string
+	Priority   int
+	Message    string
+	Fields     map[string]string
 }
 
 type Journal struct {
@@ -101,6 +118,52 @@ func New(query Query) (*Journal, error) {
 }
 
 func Cursor(cursor string) bool { return cursorPattern.MatchString(cursor) }
+
+func Send(note Note) error {
+	payload, err := note.encode()
+	if err != nil {
+		return err
+	}
+	return send(payload)
+}
+
+func (n Note) encode() ([]byte, error) {
+	var problems []error
+	if !namePattern.MatchString(n.Identifier) {
+		problems = append(problems, fmt.Errorf("%s is not an identifier a note is written under", secrets.Shown(n.Identifier)))
+	}
+	if n.Priority < 0 || n.Priority > 7 {
+		problems = append(problems, fmt.Errorf("priority %d is not one of syslog's, 0 to 7", n.Priority))
+	}
+	if n.Message == "" {
+		problems = append(problems, errors.New("a note says something"))
+	}
+	written := []Match{{Field: "MESSAGE", Value: n.Message}, {Field: "PRIORITY", Value: strconv.Itoa(n.Priority)}, {Field: "SYSLOG_IDENTIFIER", Value: n.Identifier}}
+	for _, name := range slices.Sorted(maps.Keys(n.Fields)) {
+		if !fieldPattern.MatchString(name) || strings.HasPrefix(name, "_") || slices.ContainsFunc(written, func(held Match) bool { return held.Field == name }) {
+			problems = append(problems, fmt.Errorf("%s is not a field a note may carry", secrets.Bounded(name)))
+			continue
+		}
+		written = append(written, Match{Field: name, Value: n.Fields[name]})
+	}
+	if len(problems) > 0 {
+		return nil, fmt.Errorf("compose the note: %w", errors.Join(problems...))
+	}
+	var payload bytes.Buffer
+	for _, field := range written {
+		if !strings.Contains(field.Value, "\n") {
+			payload.WriteString(field.Field + "=" + field.Value + "\n")
+			continue
+		}
+		payload.WriteString(field.Field + "\n")
+		payload.Write(binary.LittleEndian.AppendUint64(nil, uint64(len(field.Value))))
+		payload.WriteString(field.Value + "\n")
+	}
+	if payload.Len() > maxNote {
+		return nil, fmt.Errorf("compose the note: it holds %d bytes, and journald is sent %d at most", payload.Len(), maxNote)
+	}
+	return payload.Bytes(), nil
+}
 
 // Open starts journalctl at from: at the entry its cursor names while the
 // journal holds it, and otherwise where that entry was, at the first entry
