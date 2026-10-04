@@ -96,8 +96,10 @@ func TestAListingCostsNoMoreThanItsBoundsWhateverTheDirectoryHolds(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	if listed := listing(t, wide); len(listed.Entries) != diagnostics.MaxFiles || listed.Complete || listed.Entries[0].Path != "stray-00000" {
-		t.Errorf("a directory of %d files was listed as %d entries, complete %t", diagnostics.MaxFiles+500, len(listed.Entries), listed.Complete)
+	listed := listing(t, wide)
+	sorted := slices.IsSortedFunc(listed.Entries, func(a, b diagnostics.File) int { return strings.Compare(string(a.Path), string(b.Path)) })
+	if len(listed.Entries) != diagnostics.MaxFiles || listed.Complete || !sorted {
+		t.Errorf("a directory of %d files was listed as %d entries, complete %t, in order %t", diagnostics.MaxFiles+500, len(listed.Entries), listed.Complete, sorted)
 	}
 
 	deep := t.TempDir()
@@ -108,7 +110,7 @@ func TestAListingCostsNoMoreThanItsBoundsWhateverTheDirectoryHolds(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	listed := listing(t, deep)
+	listed = listing(t, deep)
 	if len(listed.Entries) != 8 || listed.Complete || strings.Count(string(listed.Entries[7].Path), "d") != 8 {
 		t.Errorf("a directory 12 levels deep was listed as %d entries, complete %t", len(listed.Entries), listed.Complete)
 	}
