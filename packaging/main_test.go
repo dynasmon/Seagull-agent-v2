@@ -211,9 +211,13 @@ func TestTheSameCommitIsPackagedIntoTheSameBytes(t *testing.T) {
 func TestTheServiceRunsTheAgentAsThePackageInstallsIt(t *testing.T) {
 	unit := sections(t, "linux/seagull-agent.service")
 	service := unit["Service"]
-	account := strings.Fields(asset(t, "linux/sysusers.conf"))
+	declared := strings.Split(strings.TrimSpace(asset(t, "linux/sysusers.conf")), "\n")
+	account := strings.Fields(declared[0])
 	if len(account) < 3 || account[0] != "u" || account[2] != "-" {
 		t.Fatalf("the package declares its account as %q", account)
+	}
+	if want := []string{"m", account[1], "systemd-journal"}; len(declared) != 2 || !slices.Equal(strings.Fields(declared[1]), want) {
+		t.Errorf("the package declares %q, and the account reads the system journal, as a member of %s, outside its service too", declared, want[2])
 	}
 	settings, bundle := template(t)
 	state := settings.Identity.StateDirectory
