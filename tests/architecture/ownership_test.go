@@ -162,6 +162,13 @@ var dependencyRules = []dependencyRule{
 		reason:     "the status writes down what the agent is handed to say of itself and reads back only what it wrote: it holds no key, reads no contract and reaches no network, so nothing it keeps authenticates the agent or asks the platform anything",
 	},
 	{
+		packages:   "internal/diagnostics",
+		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
+		allowed:    []string{modulePath + "/internal/secrets", modulePath + "/internal/platform/files"},
+		transitive: true,
+		reason:     "diagnostics writes down what it is handed and lists what a directory holds without opening it: it opens no key, no record and no installation, reads no contract and reaches no network, so a bundle holds nothing the composition root did not choose to hand it",
+	},
+	{
 		packages:   "internal/governor",
 		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
 		transitive: true,
@@ -598,6 +605,41 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				ImportPath: modulePath + "/internal/status",
 				Imports:    []string{"encoding/json", "os", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
 				Deps:       []string{"encoding/json", "os", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
+			},
+		},
+		{
+			name: "the diagnostics opening the keys it lists",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/diagnostics",
+				Imports:    []string{"encoding/json", modulePath + "/internal/pki"},
+				Deps:       []string{"encoding/json", modulePath + "/internal/pki", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
+			},
+			want: []string{modulePath + "/internal/pki"},
+		},
+		{
+			name: "the diagnostics reading the records the spool keeps",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/diagnostics",
+				Imports:    []string{modulePath + "/internal/spool", contractsPath + "/gen/go/seagull/event/v1"},
+				Deps:       []string{contractsPath + "/gen/go/seagull/event/v1", modulePath + "/internal/platform/files", modulePath + "/internal/spool"},
+			},
+			want: []string{contractsPath + "/gen/go/seagull/event/v1", modulePath + "/internal/spool"},
+		},
+		{
+			name: "the diagnostics sending the bundle away",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/diagnostics",
+				Imports:    []string{"net/http"},
+				Deps:       []string{"crypto/tls", "net/http"},
+			},
+			want: []string{"crypto/tls", "net/http"},
+		},
+		{
+			name: "the diagnostics writing down what it is handed",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/diagnostics",
+				Imports:    []string{"crypto/x509", "encoding/json", "os", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
+				Deps:       []string{"crypto/x509", "encoding/json", "net", "os", modulePath + "/internal/platform/files", modulePath + "/internal/secrets"},
 			},
 		},
 		{
