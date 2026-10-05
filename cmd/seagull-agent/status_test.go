@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -22,7 +23,13 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/accounts"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dpkg"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/interfaces"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/journal"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/machine"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/services"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	"github.com/dynasmon/Seagull-agent-v2/internal/status"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
@@ -347,6 +354,102 @@ func TestAModuleTheAgentHasNotStartedYetFailsNothing(t *testing.T) {
 	if component.State != status.Running || len(snapshot.Modules) != 1 || snapshot.Modules[0].State != status.Degraded ||
 		snapshot.Modules[0].Reason != "the agent has not started it yet" {
 		t.Errorf("before the agent started its module the collection stands at %+v with %+v", component, snapshot.Modules)
+	}
+}
+
+type describedHost struct {
+	accounts accounts.Database
+	failures map[string]error
+}
+
+func (describedHost) Hostname() (string, error) { return "web-01", nil }
+func (describedHost) Distribution() (machine.Release, error) {
+	return machine.Release{ID: "ubuntu", Name: "Ubuntu", Version: "24.04"}, nil
+}
+func (describedHost) Kernel() (machine.Kernel, error) {
+	return machine.Kernel{Name: "Linux", Release: "6.8.0-45-generic"}, nil
+}
+func (describedHost) Hardware() (machine.Hardware, error) {
+	return machine.Hardware{Memory: 1 << 30}, nil
+}
+func (h describedHost) Packages(context.Context) ([]dpkg.Package, error) {
+	return nil, h.failures["package"]
+}
+func (describedHost) Services(context.Context) ([]services.Service, error) { return nil, nil }
+func (describedHost) Interfaces() ([]interfaces.Interface, error)          { return nil, nil }
+func (h describedHost) Accounts() (accounts.Database, error)               { return h.accounts, h.failures["user"] }
+
+func TestTheStatusSaysWhatTheInventoryCannotAdmitAndWhatToDo(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("the inventory keeps its baseline where it can tell who owns it")
+	}
+	root := func(name string) *os.Root {
+		directory := filepath.Join(t.TempDir(), name)
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		opened, err := os.OpenRoot(directory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { opened.Close() })
+		return opened
+	}
+	logger := slog.New(slog.DiscardHandler)
+	kept, err := spool.Open(root("spool"), spool.Limits{MaxBytes: 64 << 20}, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { kept.Close() })
+	governed, err := governor.New(logger, "5d0f6c9e-6a4b-4f43-9a3f-2f5a8f8f7c11", governor.Budget{Scans: 1, ScanBytesPerSecond: 1 << 20, Uploads: 1, UploadBytesPerSecond: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := accounts.Database{Accounts: []accounts.Account{{Name: "root"}, {Name: "toor"}}}
+	for name, held := range map[string]struct {
+		host     describedHost
+		state    status.State
+		reason   string
+		recovery string
+	}{
+		"a host without dpkg": {host: describedHost{failures: map[string]error{"package": dpkg.ErrAbsent}}, state: status.Running,
+			reason: "package is not taken on this host"},
+		"account files it cannot read": {host: describedHost{failures: map[string]error{"user": accounts.ErrUnreadable}}, state: status.Degraded,
+			reason: "inventory: user is not admitted: " + accounts.ErrUnreadable.Error(), recovery: "none: the agent takes the kind again at its next round"},
+		"accounts sharing a uid": {host: describedHost{accounts: shared}, state: status.Running,
+			reason: `the platform holds as one user "0": "root", "toor"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			collector, err := inventory.New(inventory.Options{
+				Installation: "5d0f6c9e-6a4b-4f43-9a3f-2f5a8f8f7c11", Spool: kept, Governor: governed, Directory: root("collection"), Logger: logger, Host: held.host,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 2)
+			go func() { done <- collector.Collect(ctx) }()
+			collection, err := modules.New(logger, modules.Policy{}, modules.Module{Name: inventory.Name, Enabled: true, Collect: func(ctx context.Context) error { <-ctx.Done(); return nil }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			go func() { done <- collection.Run(ctx) }()
+			defer func() { cancel(); <-done; <-done }()
+			observed := &observing{path: "/etc/seagull-agent/agent.json", collection: collection, inventory: collector}
+			deadline := time.Now().Add(5 * time.Second)
+			for collector.Stats().Round.IsZero() || collection.Health()[0].State != modules.Running {
+				if time.Now().After(deadline) {
+					t.Fatalf("the inventory took no stock: %+v", collector.Stats())
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			var snapshot status.Snapshot
+			component := observed.collected(&snapshot)
+			if component.State != held.state || len(snapshot.Modules) != 1 || snapshot.Modules[0].State != held.state ||
+				!strings.Contains(string(snapshot.Modules[0].Reason), held.reason) && !strings.Contains(string(component.Reason), held.reason) || string(component.Recovery) != held.recovery {
+				t.Errorf("the collection stands at %+v with %+v", component, snapshot.Modules)
+			}
+		})
 	}
 }
 
