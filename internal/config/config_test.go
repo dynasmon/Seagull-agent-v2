@@ -389,6 +389,53 @@ func TestThisBuildConfiguresTheCollectorItHasAndInstallsNoUpdate(t *testing.T) {
 	}
 }
 
+func TestTheInventoryIsTakenEveryIntervalWithinBoundsAndTheAuthenticationOnNone(t *testing.T) {
+	for modules, want := range map[string]time.Duration{
+		`{"inventory": {"enabled": true}}`:                    time.Hour,
+		`{"inventory": {"enabled": false}}`:                   time.Hour,
+		`{"inventory": {"enabled": true, "interval": "1m"}}`:  time.Minute,
+		`{"inventory": {"enabled": true, "interval": "15m"}}`: 15 * time.Minute,
+		`{"inventory": {"enabled": true, "interval": "24h"}}`: 24 * time.Hour,
+	} {
+		settings, err := config.Load(configured(t, map[string]string{"modules": modules}))
+		if err != nil {
+			t.Fatalf("modules %s: %v", modules, err)
+		}
+		if got := time.Duration(settings.Modules["inventory"].Interval); got != want {
+			t.Errorf("modules %s take stock every %s, want %s", modules, got, want)
+		}
+	}
+	for modules, refusal := range map[string]string{
+		`{"inventory": {"enabled": true, "interval": "30s"}}`:     "modules.inventory.interval is 30s, and this agent takes between 1m and 24h",
+		`{"inventory": {"enabled": true, "interval": "25h"}}`:     "modules.inventory.interval is 25h, and this agent takes between 1m and 24h",
+		`{"inventory": {"enabled": true, "interval": "-1h"}}`:     "modules.inventory.interval is -1h",
+		`{"authentication": {"enabled": true, "interval": "1h"}}`: "modules.authentication.interval is 1h, and the authentication collector follows its source",
+		`{"inventory": {"enabled": true, "interval": 60}}`:        "modules.inventory.interval is 60, and it takes a time with a unit",
+	} {
+		_, err := config.Load(configured(t, map[string]string{"modules": modules}))
+		if !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), refusal) {
+			t.Errorf("modules %s were judged %v, want a refusal saying %q", modules, err, refusal)
+		}
+	}
+	path := configured(t, map[string]string{"modules": `{"inventory": {"enabled": true}, "authentication": {"enabled": true}}`})
+	settings, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	printed, err := settings.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(printed), `"interval": "1h"`) || strings.Count(string(printed), `"interval"`) != 1 {
+		t.Errorf("the printed configuration shows the intervals as:\n%s", printed)
+	}
+	active := config.Activate(settings)
+	settings.Modules["inventory"] = config.Module{Enabled: true, Interval: config.Duration(10 * time.Minute)}
+	if err := active.Reload(settings); err != nil || active.Settings().Modules["inventory"].Interval != config.Duration(10*time.Minute) {
+		t.Errorf("a reload that takes stock every 10 minutes was %v", err)
+	}
+}
+
 func TestThePrintedConfigurationIsTheOneTheAgentRunsOn(t *testing.T) {
 	path := configured(t, map[string]string{"logging": `{"level": "debug"}`, "spool": `{"max_age": "90m"}`})
 	settings, err := config.Load(path)
