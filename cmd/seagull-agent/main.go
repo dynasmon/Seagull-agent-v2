@@ -140,7 +140,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	level := new(slog.LevelVar)
 	logger := logging(stderr, settings, level)
 	apply(settings, level)
-	inventory(logger, granted)
+	privileged(logger, granted)
 	memory(logger, withheld)
 	resources(logger, settings)
 	state := settings.Identity.StateDirectory
@@ -289,7 +289,7 @@ func unstarted(stderr io.Writer, path string, err error) int {
 // collector reads the system journal as a member of systemd-journal, a group.
 func needed() []string { return nil }
 
-func inventory(logger *slog.Logger, granted privileges.Privileges) {
+func privileged(logger *slog.Logger, granted privileges.Privileges) {
 	reported := []any{
 		slog.Int("user", granted.User),
 		slog.Int("group", granted.Group),

@@ -904,7 +904,7 @@ func TestAnAgentTheKernelStillDumpsSaysWhatToDo(t *testing.T) {
 
 func TestAnAgentHoldingMoreThanAnythingItDoesNeedsSaysSo(t *testing.T) {
 	var logs bytes.Buffer
-	inventory(slog.New(slog.NewJSONHandler(&logs, nil)), privileges.Privileges{
+	privileged(slog.New(slog.NewJSONHandler(&logs, nil)), privileges.Privileges{
 		User:         0,
 		Group:        0,
 		Groups:       []int{0},
