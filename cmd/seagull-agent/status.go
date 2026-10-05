@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/renewal"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
@@ -36,6 +38,7 @@ type observing struct {
 	configuration  *configuration
 	collection     *modules.Collection
 	authentication *authentication.Collector
+	inventory      *inventory.Collector
 	renewer        *renewal.Renewer
 	delivery       *delivery.Delivery
 }
@@ -84,12 +87,18 @@ func (o *observing) collected(snapshot *status.Snapshot) status.Component {
 	component := status.Component{Name: "collection", State: status.Disabled, Reason: "no module is enabled"}
 	for _, module := range o.collection.Health() {
 		held := status.Module{Name: status.Text(module.Name), State: kept(module.State), Since: module.Since.UTC(), Restarts: module.Restarts, Reason: status.Text(module.Reason)}
-		state := held.State
+		state, recovery := held.State, ""
 		switch {
 		case module.State == modules.Degraded && module.Reason == "":
 			held.Reason, state = "the agent has not started it yet", status.Running
 		case module.Name == authentication.Name && module.State == modules.Running:
 			held.Reason = status.Text(o.reading())
+		case module.Name == inventory.Name && module.State == modules.Running:
+			reason, failing := o.inventoried()
+			held.Reason = status.Text(reason)
+			if failing != nil {
+				held.State, state, recovery = status.Degraded, status.Degraded, inventory.Recovery(failing)
+			}
 		}
 		snapshot.Modules = append(snapshot.Modules, held)
 		switch {
@@ -97,12 +106,14 @@ func (o *observing) collected(snapshot *status.Snapshot) status.Component {
 		case component.State == status.Disabled, component.State == status.Running && state != status.Running, component.State == status.Degraded && state == status.Failed:
 			component = status.Component{Name: "collection", State: state}
 			if state != status.Running {
-				component.Since, component.Reason = held.Since, status.Text(fmt.Sprintf("%s: %s", module.Name, module.Reason))
+				component.Since, component.Reason = held.Since, status.Text(fmt.Sprintf("%s: %s", module.Name, held.Reason))
 			}
-			switch state {
-			case status.Degraded:
+			switch {
+			case recovery != "":
+				component.Recovery = status.Text(recovery)
+			case state == status.Degraded:
 				component.Recovery = "none: the agent starts the module again"
-			case status.Failed:
+			case state == status.Failed:
 				component.Recovery = status.Text("correct what the module reports, then name it again in modules of " + o.path + " and have the agent read its configuration again")
 			}
 		}
@@ -135,6 +146,34 @@ func (o *observing) reading() string {
 		said = append(said, fmt.Sprintf("%d outcomes were older than the platform admits when the collector read them", held.Aged))
 	}
 	return strings.Join(said, "; ")
+}
+
+// What the inventory says of the kinds it takes: those this host does not
+// have, those it cannot admit and why, and items the platform holds as one.
+// It is failing when a kind the host has is not admitted.
+func (o *observing) inventoried() (string, error) {
+	held := o.inventory.Stats()
+	var said []string
+	var failing error
+	if !held.Waiting.IsZero() {
+		said = append(said, fmt.Sprintf("waiting since %s for room in the spool", held.Waiting.UTC().Format(time.RFC3339)))
+	}
+	for _, kind := range held.Kinds {
+		switch {
+		case kind.Failure == nil:
+			if len(kind.Merged) > 0 {
+				said = append(said, fmt.Sprintf("the platform holds as one %s", strings.Join(kind.Merged, "; ")))
+			}
+		case errors.Is(kind.Failure, inventory.ErrUnsupported):
+			said = append(said, fmt.Sprintf("%s is not taken on this host", kind.Kind))
+		default:
+			said = append(said, fmt.Sprintf("%s is not admitted: %v", kind.Kind, kind.Failure))
+			if failing == nil {
+				failing = kind.Failure
+			}
+		}
+	}
+	return strings.Join(said, "; "), failing
 }
 
 func (o *observing) streams(snapshot *status.Snapshot) status.Component {
