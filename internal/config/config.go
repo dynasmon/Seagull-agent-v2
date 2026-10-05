@@ -105,6 +105,32 @@ type Module struct {
 	Enabled bool `json:"enabled"`
 }
 
+// The decoder names a setting by its path through the groups it is in, and a
+// module's name is the key of a group rather than one of its settings, so a
+// module's settings are decoded here, each refusal named with its module.
+func (m *Modules) UnmarshalJSON(content []byte) error {
+	var written map[string]json.RawMessage
+	if err := json.Unmarshal(content, &written); err != nil {
+		return err
+	}
+	held := make(Modules, len(written))
+	for name, settings := range written {
+		decoder := json.NewDecoder(bytes.NewReader(settings))
+		decoder.DisallowUnknownFields()
+		var module Module
+		if err := decoder.Decode(&module); err != nil {
+			var mistyped *json.UnmarshalTypeError
+			if errors.As(err, &mistyped) {
+				mistyped.Field = join(name, mistyped.Field)
+			}
+			return err
+		}
+		held[name] = module
+	}
+	*m = held
+	return nil
+}
+
 type Resources struct {
 	MemoryLimit           Size     `json:"memory_limit"`
 	MaxConcurrentScans    int      `json:"max_concurrent_scans"`
