@@ -32,6 +32,8 @@ var (
 // keys, each as the PEM certificates of one chain, leaf first, in a file named
 // after the fingerprint of its leaf. A certificate is public: the directory is
 // private so that no other account decides what the agent presents.
+// ReadCertificates opens one chain and changes nothing, so it reads beside an
+// agent that holds the directory without waiting for it.
 type CertificateFiles struct {
 	files pemFiles
 }
@@ -46,6 +48,10 @@ func OpenCertificateFiles(directory *os.Root) (*CertificateFiles, error) {
 		return nil, err
 	}
 	return &CertificateFiles{files: pemFiles{directory: directory, most: MaxChain}}, nil
+}
+
+func ReadCertificates(directory *os.Root, fingerprint string) ([][]byte, error) {
+	return (&CertificateFiles{files: pemFiles{directory: directory, most: MaxChain}}).Open(fingerprint)
 }
 
 // Store keeps chain, leaf first, under the fingerprint of its leaf and returns

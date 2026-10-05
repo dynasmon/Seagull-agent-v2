@@ -25,3 +25,7 @@ func Private(fs.FileInfo) error {
 func Trusted(fs.FileInfo) error {
 	return fmt.Errorf("cannot tell who may change it on %s: %w", runtime.GOOS, errors.ErrUnsupported)
 }
+
+func Owner(fs.FileInfo) (int, error) {
+	return 0, fmt.Errorf("cannot tell who owns it on %s: %w", runtime.GOOS, errors.ErrUnsupported)
+}

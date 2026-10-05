@@ -55,12 +55,23 @@ type Certificate struct {
 	NotAfter          time.Time `json:"not_after"`
 }
 
-// The credential generation the installation authenticates with: the agent the
-// platform issued it for, the key that proves it, when that key was drawn and
-// what the certificate says. A Request is the certificate it asked for and was
-// not issued yet, and a Trust the authorities the platform published to it over
-// its own credential. None holds a key or a secret, so a copy of them
-// authenticates nothing.
+// A Record is what an installation says of itself, which Recorded reads beside
+// an agent that holds the installation, without its lock and changing nothing:
+// which installation it is and which one it replaced, the credential
+// generation it authenticates with, which names the agent the platform issued
+// it for, the key that proves it, when that key was drawn and what the
+// certificate says, the certificate it asked for and was not issued yet, and
+// the authorities the platform published to it over its own credential. None
+// holds a key or a secret, so a copy of them authenticates nothing.
+type Record struct {
+	InstallationID string      `json:"installation_id"`
+	CreatedAt      time.Time   `json:"created_at"`
+	Replaces       string      `json:"replaces,omitempty"`
+	Enrollment     *Enrollment `json:"enrollment,omitempty"`
+	Request        *Request    `json:"request,omitempty"`
+	Trust          *Trust      `json:"trust,omitempty"`
+}
+
 type Enrollment struct {
 	AgentID     string      `json:"agent_id"`
 	Generation  uint64      `json:"generation"`
@@ -82,13 +93,8 @@ type Trust struct {
 }
 
 type state struct {
-	Format         int         `json:"format"`
-	InstallationID string      `json:"installation_id"`
-	CreatedAt      time.Time   `json:"created_at"`
-	Replaces       string      `json:"replaces,omitempty"`
-	Enrollment     *Enrollment `json:"enrollment,omitempty"`
-	Request        *Request    `json:"request,omitempty"`
-	Trust          *Trust      `json:"trust,omitempty"`
+	Format int `json:"format"`
+	Record
 }
 
 type Installation struct {
@@ -345,25 +351,33 @@ func (i *Installation) read() (state, bool, error) {
 	return readState(i.root, i.path(stateFile))
 }
 
-func Adopted(directory string) (Trust, bool, error) {
+func Recorded(directory string) (Record, bool, error) {
 	described, err := os.Lstat(directory)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return Trust{}, false, nil
+		return Record{}, false, nil
 	case err != nil:
-		return Trust{}, false, fmt.Errorf("inspect the installation state directory: %w", err)
+		return Record{}, false, fmt.Errorf("inspect the installation state directory: %w", err)
 	case !described.IsDir():
-		return Trust{}, false, fmt.Errorf("%w: %s is not a directory", ErrInsecure, directory)
+		return Record{}, false, fmt.Errorf("%w: %s is not a directory", ErrInsecure, directory)
 	}
 	if err := private(directory, described); err != nil {
-		return Trust{}, false, err
+		return Record{}, false, err
 	}
 	root, err := os.OpenRoot(directory)
 	if err != nil {
-		return Trust{}, false, fmt.Errorf("open the installation state directory: %w", err)
+		return Record{}, false, fmt.Errorf("open the installation state directory: %w", err)
 	}
 	defer root.Close()
 	held, found, err := readState(root, filepath.Join(directory, stateFile))
+	if err != nil || !found {
+		return Record{}, false, err
+	}
+	return held.Record, true, nil
+}
+
+func Adopted(directory string) (Trust, bool, error) {
+	held, found, err := Recorded(directory)
 	if err != nil || !found || held.Trust == nil {
 		return Trust{}, false, err
 	}
@@ -421,7 +435,7 @@ func (i *Installation) start() error {
 }
 
 func (i *Installation) create(replaces string) error {
-	fresh := state{Format: format, InstallationID: newInstallationID(), CreatedAt: time.Now().UTC(), Replaces: replaces}
+	fresh := state{Format: format, Record: Record{InstallationID: newInstallationID(), CreatedAt: time.Now().UTC(), Replaces: replaces}}
 	if err := i.write(fresh); err != nil {
 		return err
 	}

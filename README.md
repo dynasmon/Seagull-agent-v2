@@ -88,7 +88,9 @@ sudo apt install ./seagull-agent_0.1.0-1_amd64.deb
 ```
 
 - creates `seagull-agent`, a system account and group of its own, with no shell,
-  through `systemd-sysusers`;
+  through `systemd-sysusers`, and makes the account a member of
+  `systemd-journal`, so that the commands an operator runs as the account read
+  the agent's log as the service does;
 - creates `/var/lib/seagull-agent`, where the installation is kept, as the
   account's and 0700, and `/etc/seagull-agent`, where its settings go, as root's
   and 0755, through `systemd-tmpfiles`;
@@ -217,8 +219,8 @@ The evidence:
   seconds under the service's permissions, reload, stop, admit records to the
   spool as the account, start, kill the agent, upgrade to the next version,
   override a ceiling, remove, reinstall, deliver the backlog once the emulated
-  platform takes it, collect what the host's own sshd decides, purge and
-  install again. Until it delivers the platform answers every batch as the
+  platform takes it, collect what the host's own sshd decides, write a
+  diagnostics bundle beside the running agent, purge and install again. Until it delivers the platform answers every batch as the
   recorded gateway does when its backbone does not take one. To collect, it
   installs openssh-server when the host has none, lets it take passwords, gives
   an account of its own a password and the loopback the address 203.0.113.10,
@@ -634,7 +636,7 @@ is not one.
 | Keep its installation, its keys and its spool | a directory of its own, owned by the account it runs as |
 | Read its configuration and its trust bundle | files that account, or root, writes and it reads |
 | Reach the platform | an outgoing TLS connection, which needs no privilege |
-| Collect what sshd decides | read the system journal, as a member of `systemd-journal`, which the service grants |
+| Collect what sshd decides | read the system journal, as a member of `systemd-journal`, which the package makes the account and the service grants again |
 
 Nothing on that list needs the superuser, a Linux capability, or a helper of its
 own. A collector that needs more names it there, and the packaging grants that
@@ -2148,6 +2150,164 @@ What it does not claim:
   them, and their age is read by the delivery that waits on them;
 - remote reporting, or a heartbeat.
 
+## Diagnostics
+
+`seagull-agent -config FILE diagnostics BUNDLE` writes what helps troubleshoot
+the agent into a new file, a bundle an operator reads before handing it over,
+and nothing that authenticates the agent. It runs as the account the agent runs
+as, as the other commands do, and the account writes where it may, such as
+`/var/tmp`, where root reads the bundle:
+
+    sudo -u seagull-agent seagull-agent -config /etc/seagull-agent/agent.json diagnostics /var/tmp/seagull-diagnostics.json
+    sudo cat /var/tmp/seagull-diagnostics.json > seagull-diagnostics.json
+
+The bundle is one JSON document, `format` 1:
+
+| Part | What it holds |
+| --- | --- |
+| `build` | the build identity `-version` prints, the wire versions, and what Go stamped on the binary: its module and version, the toolchain, the build settings and every dependency with its checksum |
+| `writer` | the account, group and groups the command ran as |
+| `configuration` | the configuration the agent would run on, defaults and all, as `config print` prints it, or why the agent refuses the file |
+| `status` | what the agent last said of itself, as `status` reads it |
+| `installation` | what `installation.json` records: the installation and the one it replaced, the credential generation, the request still pending and the authorities it adopted |
+| `credential` | each certificate of the chain the installation presents, as it says in public: subject, issuer, serial, fingerprint, the `key_id` of the key it certifies, the key and signature algorithms, validity, usages and names; and whether the chain authenticates the agent, as a client, to whoever trusts the authorities the agent trusts, at the moment the bundle is written |
+| `authorities` | the authorities `server.trust_bundle` holds and those the installation adopted, described the same way and named by their digest, and which of the two the agent trusts |
+| `files` | every file and directory of the installation by its path, mode, size, owner and when it last changed |
+| `logs` | the latest entries the system journal holds for the service the package installs, what the agent wrote and what systemd wrote of the service, and the records the commands run as the account wrote, as the end of this section describes |
+| `limits` | the bounds below |
+
+A part the command cannot read says why and what to do about it, the command
+names it as it writes the bundle, and the rest of the bundle is written all the
+same: a bundle is most useful when the agent does not start.
+
+What a bundle never holds:
+
+- a key. The files of the installation are listed by their names and never
+  opened, and nothing asks the key provider for a key;
+- a certificate, a request or the configuration file as they are encoded: the
+  certificates are described by what they say in public, and the configuration
+  as the agent read it, so a file the agent refuses, such as one whose address
+  carries a password, is described by the refusal, which holds what every
+  refusal holds;
+- a record the spool keeps. The spool is listed as files and never opened, so
+  nothing a collector admitted reaches a bundle, and no option includes it;
+- the log of another service, or what the account writes to the journal
+  through anything but the agent's commands.
+
+What a bundle costs:
+
+- at most 8 MiB, 1024 files of the installation listed eight levels deep, and
+  2000 log entries holding 4 MiB of messages, the latest, each message cut to
+  4 KiB and every other text to a kilobyte;
+- a minute to gather, after which the command writes what it gathered and says
+  what it could not;
+- nothing of the running agent's. The command is a process of its own, outside
+  the service and its bounds, that reads beside the agent without the
+  installation's lock and changes nothing in the installation: it never opens
+  the spool, so it neither recovers nor waits on it, never discards what an
+  interrupted write left behind, and while it lists follows no link and opens
+  nothing but directories, without waiting on a pipe put in a directory's
+  place. The agent runs on as it was.
+
+Where a bundle is written:
+
+- `BUNDLE` is a new file. A file, a link or anything else already there is
+  refused and left as it was, and a bundle is never written into the
+  installation it describes, whatever path leads there, nor into any directory
+  only the account may enter, which is where the agent keeps what is its own:
+  that holds when the configuration cannot be read and nothing names the
+  installation;
+- it is written 0600 as the account the agent runs as, under a temporary name
+  beside `BUNDLE`, synced, and linked into place only once it is whole and
+  then checked to be what was written, so `BUNDLE` holds the whole bundle or
+  nothing, whatever stops the command. A command killed as it writes leaves at
+  most its temporary file, which only the account reads;
+- text nobody chose for the agent, a name in the installation or a message in
+  the journal, is written as a JSON string, so it cannot carry a terminal's own
+  escape sequences.
+
+Every command that changes the installation, and every bundle, is recorded in
+the system journal, which makes the record attributable:
+
+- `enrollment request`, `enrollment import`, `enrollment renew`,
+  `installation replace` and `diagnostics` each write one entry once they are
+  done, under the identifier `seagull-agent`, its message a JSON line as the
+  agent's log writes one and `SEAGULL_EVENT` naming what happened:
+  `enrollment_requested`, `credential_imported`, `credential_renewed`,
+  `installation_replaced` or `diagnostics_written`, or what was refused, such
+  as `credential_not_imported`, with the error;
+- journald writes down beside each entry who sent it as the kernel tells, which
+  no command chooses: the account in `_UID`, the process and its command line,
+  and, on a host that keeps login sessions, the login the command was run from
+  in `_AUDIT_LOGINUID`, however many accounts `sudo` went through on the way.
+  `journalctl SYSLOG_IDENTIFIER=seagull-agent _TRANSPORT=journal` lists them;
+- what the running agent does to the installation, a renewal, a reload or
+  authorities it adopted, is in its own log, attributed to its service;
+- a command whose record journald does not take still does what it was asked
+  and says so, and a platform without a journal records nothing.
+
+The account is a member of `systemd-journal`, so the commands an operator runs
+as it read the agent's log as the service does. A bundle written without that
+group says that its log was left out, and why.
+
+The evidence:
+
+- `internal/diagnostics` is tested listing an installation that holds a key no
+  account may read, a pipe and a link to a directory outside it, which it
+  lists without opening, waiting on or following; a directory the account may
+  not list, past which it lists the rest; a directory of 1524 files, one twelve
+  levels deep and a listing out of time, which stop at their bounds;
+  names that hold a terminal's escape sequences, written down escaped;
+  certificates described as they say in public, verified against the right
+  authority, another one, none, after they expired and for a server; log
+  entries cut, ordered, kept once each and bounded; and bundles refused over a
+  file, a link, a pipe and a directory already there, inside the directory
+  they list however the path leads there, deeper than the listing reached
+  included, in a directory only the account may enter when no installation is
+  named, in a directory the account may not write and when too large, each
+  leaving nothing behind. A process writing
+  bundles of 1 MiB is killed at random moments, over and over, and every
+  bundle it leaves is whole and every temporary file private;
+- `cmd/seagull-agent` writes bundles of an enrolled agent, of one running,
+  whose status and installation it reads while the agent holds them and
+  changes nothing of, and of agents that cannot run, for an address carrying a
+  password, damaged state, a damaged key and a spool holding secrets, none of
+  which reaches a bundle; refuses destinations over a file, a link to the key,
+  the key itself, the installation, a directory only the account may enter, the
+  installation of a configuration the agent refuses and a missing directory,
+  leaving the key and the installation as they were; keeps a bundle within its bounds over an
+  installation of thousands of files and a journal of oversized entries, and
+  within its time when the journal never answers; and records what each
+  command that changes the installation did, refusals included, and nothing for
+  the commands that change nothing;
+- `internal/platform/journal` sends notes to a journald that listens as journald
+  does, refuses those journald would read otherwise, such as one claiming the
+  account that sent it, and reads a unit and its last entries with the
+  arguments journalctl takes;
+- the [native gate](#installing) checks that the package makes the account a
+  member of `systemd-journal`, that enrolling records the request and the
+  import, attributed to the account, and, beside the running agent, has the
+  account write a bundle after refusing one into the installation and one over
+  its settings: the bundle is the account's and 0600, holds the running
+  agent's status, its installation, its credential verified, its files, its
+  start and systemd's lines from the journal, and none of the key's bytes,
+  certificate material or what sshd wrote, and the service ran on as it was.
+
+What it does not claim:
+
+- that a bundle holds nothing about the host: it names its paths, the
+  platform's addresses, the agent and the installation, and holds the agent's
+  log, which names records by their identifiers. It is the operator's to read
+  before it leaves the host;
+- a whole log: the journal keeps what its configuration says, and a bundle the
+  latest of that;
+- that every entry it holds is this agent's: another service named
+  `seagull-agent.service`, such as an earlier agent, is read the same way, and
+  each entry says which account, process and command wrote it;
+- a record of what an operator does to the installation by hand, or one beyond
+  the reach of root, who controls the journal as the rest of the host;
+- delivering a bundle anywhere: it stays where it was written.
+
 ## What the agent writes down
 
 The agent holds one secret, the private key of its installation, and it reads
@@ -2155,7 +2315,8 @@ text it did not write: its configuration, its installation state, its trust
 bundle, its key files, the certificates the platform issued it and what it finds
 in its spool. `internal/secrets` is the
 one place that decides what any of that may become in a log line, a refusal or a
-message on the terminal.
+message on the terminal. A [diagnostics bundle](#diagnostics) holds no more
+than those, what the installation records and what certificates say in public.
 
 - No message carries a key. A `Key` is a `crypto.Signer` with an identifier, so
   no caller holds a private half to print; the buffers a key file is read and
@@ -2279,6 +2440,11 @@ conventions:
 - `internal/governor` imports nothing of the agent and nothing of the contracts,
   and reaches no network: it bounds work and knows none of it, so what a scan
   reads, what an upload carries and how it travels stay with the work;
+- `internal/diagnostics` imports nothing of the agent but `internal/secrets` and
+  `internal/platform/files`, nothing of the contracts and no network package,
+  directly or through another package: it writes down what the composition
+  root hands it and lists what a directory holds without opening it, so a
+  bundle holds no key, no record and nothing else the root did not choose;
 - `internal/transport` imports nothing of the agent but `internal/secrets`, and
   nothing of the contracts: it authenticates connections and moves bytes, while
   what they carry, whose records they are and where the credential it presents

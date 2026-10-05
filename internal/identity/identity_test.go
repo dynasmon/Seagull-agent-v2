@@ -605,6 +605,58 @@ func TestTheAuthoritiesAnInstallationAdoptedAreReadWithoutHoldingIt(t *testing.T
 	}
 }
 
+func TestWhatAnInstallationRecordsIsReadWithoutHoldingOrChangingIt(t *testing.T) {
+	directory := stateDirectory(t)
+	if held, found, err := identity.Recorded(directory); err != nil || found {
+		t.Fatalf("an installation that does not exist records %+v (%t): %v", held, found, err)
+	}
+	if _, err := os.Lstat(directory); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("reading what an installation records created it: %v", err)
+	}
+
+	writeState(t, directory, requestingState)
+	installation := open(t, directory)
+	leftover := filepath.Join(directory, ".installation.json.0123456789abcdef.tmp")
+	if err := os.WriteFile(leftover, []byte("an interrupted write"), 0o600); err != nil {
+		t.Fatalf("write %s: %v", leftover, err)
+	}
+	held, found, err := identity.Recorded(directory)
+	if err != nil || !found {
+		t.Fatalf("while the installation is held, it reads as %+v (%t): %v", held, found, err)
+	}
+	active, _ := installation.Enrollment()
+	pending, _ := installation.Pending()
+	if held.InstallationID != installation.ID() || !held.CreatedAt.Equal(time.Date(2026, 9, 16, 17, 0, 0, 0, time.UTC)) || held.Replaces != "" ||
+		held.Enrollment == nil || !equal(*held.Enrollment, active) || held.Request == nil || *held.Request != pending || held.Trust != nil {
+		t.Errorf("the installation reads as %+v, and holds generation %+v asking %+v", held, active, pending)
+	}
+	if _, err := os.Lstat(leftover); err != nil {
+		t.Errorf("reading what the installation records discarded what it did not write: %v", err)
+	}
+	if kept := readState(t, directory); kept != requestingState {
+		t.Errorf("reading the installation rewrote it as %q", kept)
+	}
+
+	for name, written := range map[string]struct {
+		content string
+		refused error
+	}{
+		"damaged":                  {content: enrolledState[:len(enrolledState)/2], refused: identity.ErrDamaged},
+		"written by a newer agent": {content: strings.Replace(enrolledState, `"format": 1,`, `"format": 2,`, 1), refused: identity.ErrNewer},
+	} {
+		writeState(t, directory, written.content)
+		if _, _, err := identity.Recorded(directory); !errors.Is(err, written.refused) {
+			t.Errorf("an installation %s reads as %v", name, err)
+		}
+	}
+	if err := os.Chmod(directory, 0o750); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if _, _, err := identity.Recorded(directory); !errors.Is(err, identity.ErrInsecure) {
+		t.Errorf("an installation others can reach reads as %v", err)
+	}
+}
+
 func TestAnInstallationCanBeReadWhileItChanges(t *testing.T) {
 	installation := open(t, stateDirectory(t))
 	done := make(chan struct{})

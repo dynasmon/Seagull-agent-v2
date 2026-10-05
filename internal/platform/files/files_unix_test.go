@@ -146,6 +146,26 @@ func TestWhatRootOwnsIsTrustedAndWhatAnotherAccountOwnsIsNot(t *testing.T) {
 	}
 }
 
+func TestTheOwnerOfAFileIsTheAccountItBelongsTo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bundle.json")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("create %s: %v", path, err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("describe %s: %v", path, err)
+	}
+	if owner, err := files.Owner(info); err != nil || owner != os.Geteuid() {
+		t.Errorf("a file this account created belongs to %d: %v", owner, err)
+	}
+	if owner, err := files.Owner(ownedBy{FileInfo: info, described: &syscall.Stat_t{Uid: 998}}); err != nil || owner != 998 {
+		t.Errorf("a file of uid 998 belongs to %d: %v", owner, err)
+	}
+	if _, err := files.Owner(ownedBy{FileInfo: info, described: nil}); err == nil {
+		t.Error("a file that says nothing of its owner was given one")
+	}
+}
+
 func TestTheRoomLeftIsWhatTheFilesystemStillTakes(t *testing.T) {
 	directory := open(t, t.TempDir())
 	before, err := files.Available(directory)

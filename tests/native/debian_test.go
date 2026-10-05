@@ -94,6 +94,7 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "installing the package again runs the same installation", run: g.reinstall},
 		{name: "the service delivers its backlog once the platform takes it", run: g.deliver},
 		{name: "the service collects what sshd decides and nothing that only names sshd", run: g.collect},
+		{name: "the service account writes a bundle of what troubleshooting needs beside the running agent", run: g.diagnose},
 		{name: "purging deletes the installation, its settings and the service's", run: g.purge},
 		{name: "installing after a purge makes a new installation", run: g.fresh},
 	} {
@@ -170,6 +171,9 @@ func (g *gate) install(t *testing.T) {
 	if g.uid == 0 || g.uid >= 1000 || len(entry) != 7 || entry[6] != "/usr/sbin/nologin" {
 		t.Errorf("the package created the account %q, and a system account without a shell is wanted", entry)
 	}
+	if group := strings.Split(run(t, "getent", "group", "systemd-journal"), ":"); len(group) != 4 || !slices.Contains(strings.Split(group[3], ","), account) {
+		t.Errorf("the package left %s out of systemd-journal, whose members read the system journal: %q", account, group)
+	}
 	owns(t, state, g.uid, g.gid, fs.ModeDir|0o700)
 	owns(t, settingsDir, 0, 0, fs.ModeDir|0o755)
 	if enabled, active := answer("systemctl", "is-enabled", unit), answer("systemctl", "is-active", unit); enabled != "disabled" || active != "inactive" {
@@ -240,6 +244,7 @@ func (g *gate) enroll(t *testing.T) {
 	if err != nil || !strings.Contains(said, "is enrolled as agent "+agentID) {
 		t.Fatalf("import the certificate: %v\n%s", err, said)
 	}
+	g.recorded(t, "enrollment_requested", "credential_imported")
 }
 
 func (g *gate) start(t *testing.T) {

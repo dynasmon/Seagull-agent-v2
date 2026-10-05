@@ -1,17 +1,22 @@
 // Package journal reads the system journal through journalctl, whose export
 // format systemd documents: the entries a query matches, in the order the
 // journal holds them, each named by its cursor and carrying the moment
-// journald wrote it down and the fields asked for.
+// journald wrote it down and the fields asked for. It writes a note to the
+// journal through journald's own socket, and journald writes down beside the
+// note who sent it as the kernel tells, which no sender chooses: the account,
+// the process, its executable and command line, and the login it runs in.
 package journal
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os/exec"
 	"regexp"
 	"slices"
@@ -25,19 +30,26 @@ import (
 
 const (
 	MaxLine      = 64 << 10
+	MaxLast      = 10000
 	maxComplaint = 1 << 10
 	maxFields    = 32
+	maxNote      = 64 << 10
 	stopping     = time.Second
 	denied       = "insufficient permissions"
 )
 
-var program = "/usr/bin/journalctl"
+var (
+	program = "/usr/bin/journalctl"
+	socket  = "/run/systemd/journal/socket"
+)
 
 var (
 	ErrUnreadable = errors.New("journalctl wrote an entry that cannot be read")
 	ErrDenied     = errors.New("the account the agent runs as may not read the system journal")
 	cursorPattern = regexp.MustCompile(`^s=[0-9a-f]{32};i=[0-9a-f]{1,16};b=[0-9a-f]{32};m=[0-9a-f]{1,16};t=[0-9a-f]{1,16};x=[0-9a-f]{1,16}$`)
 	fieldPattern  = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
+	unitPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:_.@-]{0,240}\.service$`)
+	namePattern   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 )
 
 type Match struct {
@@ -47,7 +59,10 @@ type Match struct {
 
 // A Query reads the entries that hold, for every field it matches on, one of
 // the values it names for that field, and of each entry the fields it names.
+// Naming a unit reads what journalctl reads for one: what the processes of the
+// service wrote and what the service manager wrote about it.
 type Query struct {
+	Unit    string
 	Matches []Match
 	Fields  []string
 }
@@ -55,6 +70,7 @@ type Query struct {
 type Position struct {
 	Cursor string
 	Since  time.Time
+	Last   int
 }
 
 type Entry struct {
@@ -63,14 +79,24 @@ type Entry struct {
 	Fields   map[string]string
 }
 
+type Note struct {
+	Identifier string
+	Priority   int
+	Message    string
+	Fields     map[string]string
+}
+
 type Journal struct {
 	query Query
 }
 
 func New(query Query) (*Journal, error) {
 	var problems []error
-	if len(query.Matches) == 0 {
-		problems = append(problems, errors.New("a query matches on at least one field"))
+	if len(query.Matches) == 0 && query.Unit == "" {
+		problems = append(problems, errors.New("a query matches on a unit or on at least one field"))
+	}
+	if query.Unit != "" && !unitPattern.MatchString(query.Unit) {
+		problems = append(problems, fmt.Errorf("%s is not a service of the system", secrets.Bounded(query.Unit)))
 	}
 	for _, match := range query.Matches {
 		if !fieldPattern.MatchString(match.Field) || match.Value == "" || strings.ContainsAny(match.Value, "\x00\n") {
@@ -88,16 +114,63 @@ func New(query Query) (*Journal, error) {
 	if len(problems) > 0 {
 		return nil, fmt.Errorf("compose the query of the journal: %w", errors.Join(problems...))
 	}
-	return &Journal{query: Query{Matches: slices.Clone(query.Matches), Fields: slices.Clone(query.Fields)}}, nil
+	return &Journal{query: Query{Unit: query.Unit, Matches: slices.Clone(query.Matches), Fields: slices.Clone(query.Fields)}}, nil
 }
 
 func Cursor(cursor string) bool { return cursorPattern.MatchString(cursor) }
 
+func Send(note Note) error {
+	payload, err := note.encode()
+	if err != nil {
+		return err
+	}
+	return send(payload)
+}
+
+func (n Note) encode() ([]byte, error) {
+	var problems []error
+	if !namePattern.MatchString(n.Identifier) {
+		problems = append(problems, fmt.Errorf("%s is not an identifier a note is written under", secrets.Shown(n.Identifier)))
+	}
+	if n.Priority < 0 || n.Priority > 7 {
+		problems = append(problems, fmt.Errorf("priority %d is not one of syslog's, 0 to 7", n.Priority))
+	}
+	if n.Message == "" {
+		problems = append(problems, errors.New("a note says something"))
+	}
+	written := []Match{{Field: "MESSAGE", Value: n.Message}, {Field: "PRIORITY", Value: strconv.Itoa(n.Priority)}, {Field: "SYSLOG_IDENTIFIER", Value: n.Identifier}}
+	for _, name := range slices.Sorted(maps.Keys(n.Fields)) {
+		if !fieldPattern.MatchString(name) || strings.HasPrefix(name, "_") || slices.ContainsFunc(written, func(held Match) bool { return held.Field == name }) {
+			problems = append(problems, fmt.Errorf("%s is not a field a note may carry", secrets.Bounded(name)))
+			continue
+		}
+		written = append(written, Match{Field: name, Value: n.Fields[name]})
+	}
+	if len(problems) > 0 {
+		return nil, fmt.Errorf("compose the note: %w", errors.Join(problems...))
+	}
+	var payload bytes.Buffer
+	for _, field := range written {
+		if !strings.Contains(field.Value, "\n") {
+			payload.WriteString(field.Field + "=" + field.Value + "\n")
+			continue
+		}
+		payload.WriteString(field.Field + "\n")
+		payload.Write(binary.LittleEndian.AppendUint64(nil, uint64(len(field.Value))))
+		payload.WriteString(field.Value + "\n")
+	}
+	if payload.Len() > maxNote {
+		return nil, fmt.Errorf("compose the note: it holds %d bytes, and journald is sent %d at most", payload.Len(), maxNote)
+	}
+	return payload.Bytes(), nil
+}
+
 // Open starts journalctl at from: at the entry its cursor names while the
-// journal holds it, and otherwise where that entry was, or at the first entry
-// written at or after Since. Without following it stops at the end of the
-// journal; following, it goes on as journald writes until ctx ends or the
-// reader is closed, and journalctl follows the boot that is running alone.
+// journal holds it, and otherwise where that entry was, at the first entry
+// written at or after Since, or at the last entries the query matches. Without
+// following it stops at the end of the journal; following, it goes on as
+// journald writes until ctx ends or the reader is closed, and journalctl
+// follows the boot that is running alone.
 func (j *Journal) Open(ctx context.Context, from Position, follow bool) (*Reader, error) {
 	start, err := from.argument()
 	if err != nil {
@@ -106,6 +179,9 @@ func (j *Journal) Open(ctx context.Context, from Position, follow bool) (*Reader
 	arguments := []string{"--system", "--no-pager", "--output=json", "--output-fields=" + strings.Join(j.query.Fields, ","), start}
 	if follow {
 		arguments = append(arguments, "--follow")
+	}
+	if j.query.Unit != "" {
+		arguments = append(arguments, "--unit="+j.query.Unit)
 	}
 	for _, match := range j.query.Matches {
 		arguments = append(arguments, match.Field+"="+match.Value)
@@ -132,9 +208,13 @@ func (j *Journal) Open(ctx context.Context, from Position, follow bool) (*Reader
 }
 
 func (p Position) argument() (string, error) {
-	switch {
-	case p.Cursor != "" && !p.Since.IsZero():
-		return "", errors.New("a reading of the journal starts at a cursor or at a moment, not both")
+	switch starts := len(slices.DeleteFunc([]bool{p.Cursor != "", !p.Since.IsZero(), p.Last != 0}, func(set bool) bool { return !set })); {
+	case starts > 1:
+		return "", errors.New("a reading of the journal starts at a cursor, at a moment or at its last entries, and at one of them alone")
+	case p.Last < 0 || p.Last > MaxLast:
+		return "", fmt.Errorf("a reading of the journal starts at its last 1 to %d entries, not %d", MaxLast, p.Last)
+	case p.Last > 0:
+		return "--lines=" + strconv.Itoa(p.Last), nil
 	case p.Cursor != "":
 		if !cursorPattern.MatchString(p.Cursor) {
 			return "", fmt.Errorf("%s is not a cursor of the journal", secrets.Bounded(p.Cursor))
@@ -147,7 +227,7 @@ func (p Position) argument() (string, error) {
 		}
 		return fmt.Sprintf("--since=@%d.%06d", micros/1_000_000, micros%1_000_000), nil
 	}
-	return "", errors.New("a reading of the journal starts at a cursor or at a moment")
+	return "", errors.New("a reading of the journal starts at a cursor, at a moment or at its last entries")
 }
 
 type Reader struct {
