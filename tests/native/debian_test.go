@@ -417,6 +417,7 @@ func (g *gate) reinstall(t *testing.T) {
 }
 
 func (g *gate) deliver(t *testing.T) {
+	await(t, g.invocation, "delivery_failed", 30*time.Second)
 	g.platform.taking.Store(true)
 	events, inventory := admittedIDs("events", admittedEvents), admittedIDs("inventory", admittedItems)
 	deadline := time.Now().Add(time.Minute)
