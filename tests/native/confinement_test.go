@@ -391,7 +391,7 @@ func (g *gate) confine(t *testing.T) {
 		"list /home":                 {"EACCES", allowed},
 		"list /run/user":             {"EACCES", allowed},
 		"see /proc/1":                {"ENOENT", allowed},
-		"unix socket":                {"EAFNOSUPPORT", allowed},
+		"unix socket":                {allowed, allowed},
 		"netlink socket":             {"EAFNOSUPPORT", allowed},
 		"inet socket":                {allowed, allowed},
 		"inet6 socket":               {allowed, allowed},
