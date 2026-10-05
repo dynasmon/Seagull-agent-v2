@@ -162,7 +162,7 @@ The service also confines the agent to what it uses of the host, which
 | Shared memory | `PrivateIPC=yes` and `InaccessiblePaths=-/dev/shm -/dev/mqueue` | no IPC object, shared memory or message queue that another process holds |
 | The kernel | `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`, `ProtectControlGroups=yes`, `ProtectClock=yes` and `ProtectHostname=yes` | `/proc/sys`, `/sys` and the control groups to read; no module, kernel log, clock or host name |
 | Processes | `ProtectProc=invisible` | the processes of its own account, alone, in `/proc` |
-| The network | `RestrictAddressFamilies=AF_INET AF_INET6` | IPv4 and IPv6 sockets alone: no local socket of its own, so no D-Bus or other local service to reach, and no netlink socket |
+| The network | `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX` | IPv4, IPv6 and local sockets: the inventory has `systemctl` reach systemd over the system bus, and reads the interfaces without a netlink socket, which the agent cannot open |
 | System calls | `SystemCallFilter=@system-service` and `SystemCallFilter=~@privileged`, `SystemCallArchitectures=native` and `SystemCallErrorNumber=EPERM` | the calls a system service makes, less those that need the superuser; any other fails with `EPERM`, and a call through the 32-bit entry ends the process |
 | Within those calls | `MemoryDenyWriteExecute=yes`, `LockPersonality=yes`, `RestrictNamespaces=yes`, `RestrictRealtime=yes` and `RestrictSUIDSGID=yes` | no memory both writable and executable, no other execution domain, no namespace, no real-time scheduling, no setuid or setgid file |
 
@@ -220,7 +220,8 @@ The evidence:
   spool as the account, start, kill the agent, upgrade to the next version,
   override a ceiling, remove, reinstall, deliver the backlog once the emulated
   platform takes it, collect what the host's own sshd decides, write a
-  diagnostics bundle beside the running agent, purge and install again. Until it delivers the platform answers every batch as the
+  diagnostics bundle beside the running agent, take stock of the host as it
+  changes, purge and install again. Until it delivers the platform answers every batch as the
   recorded gateway does when its backbone does not take one. To collect, it
   installs openssh-server when the host has none, lets it take passwords, gives
   an account of its own a password and the loopback the address 203.0.113.10,
@@ -244,7 +245,7 @@ The evidence:
   the account may write. In the service the account may write its
   installation, its `/tmp` and its `/var/tmp` and nothing else, finds no device
   but the seven the table names, and is refused everything else it tries but
-  Internet sockets. Outside the service it is allowed each of those, unless
+  Internet and local sockets. Outside the service it is allowed each of those, unless
   Ubuntu already refuses it, as it does the kernel's log and real-time
   scheduling, and what it wrote to `/tmp` and `/var/tmp` in the service is not
   in the host's. The gate then reads the agent's own process: no capability,
@@ -336,7 +337,7 @@ own in a build whose whole module graph is verified.
     "renewal_url": "https://control.example:8446",
     "trust_bundle": "/etc/seagull-agent/platform-ca.pem"
   },
-  "modules": {"authentication": {"enabled": true}}
+  "modules": {"authentication": {"enabled": true}, "inventory": {"enabled": true}}
 }
 ```
 
@@ -383,7 +384,8 @@ The agent reads the file whole, or refuses it whole:
 | `transport.max_upload_bytes_per_second` | `1MiB` | `64KiB` to `1GiB`, and enough to connect and send a whole batch within `transport.request_timeout` |
 | `spool.max_bytes` | `512MiB` | `16MiB` to `64GiB`, and at least four batches |
 | `spool.max_age` | `72h` | `1h` to `720h`; events are kept `168h` at most |
-| `modules` | `{}` | `{"authentication": {"enabled": true}}`, to collect what sshd decides; `authentication` is the one collector this build has |
+| `modules` | `{}` | `{"authentication": {"enabled": true}}`, to collect what sshd decides, and `{"inventory": {"enabled": true}}`, to take stock of what the host has: `authentication` and `inventory` are the collectors this build has |
+| `modules.inventory.interval` | `1h` | `1m` to `24h`: how often the inventory takes stock; a collector that follows its source, as `authentication` does, takes none |
 | `resources.memory_limit` | `256MiB` | `64MiB` to `8GiB` |
 | `resources.max_concurrent_scans` | `2` | 1 to 64 |
 | `resources.max_scan_bytes_per_second` | `8MiB` | `1MiB` to `1GiB` |
@@ -446,9 +448,9 @@ it, which authorities a certificate the agent imports has to chain to, where,
 how long and how often the agent renews its credential, which collectors run,
 and where and in what batches it delivers what they collect. A reload applies
 `modules` whole: a collector it no longer names is stopped and the agent waits
-for it, and one it names again starts where it stopped. The governor keeps the
-budget for scans before anything spends it, since no collector scans yet. A
-module this build does not have is refused, and so is `updates.enabled`: an
+for it, and one it names again starts where it stopped, while a new
+`modules.inventory.interval` takes effect after the round the inventory is
+waiting for. A module this build does not have is refused, and so is `updates.enabled`: an
 agent that accepted either would be promising collection it cannot do or
 updates it cannot install.
 
@@ -496,9 +498,9 @@ for them. A panic inside a module is not recovered, as anywhere else in the
 agent.
 
 The composition root composes the collection with the collectors this build
-has, `authentication` alone, each enabled when `modules` names it, and the
-collection runs as an optional component: a collector that spent its budget
-leaves the agent delivering what the others admit.
+has, `authentication` and `inventory`, each enabled when `modules` names it,
+and the collection runs as an optional component: a collector that spent its
+budget leaves the agent delivering what the others admit.
 
 ## Authentication
 
@@ -624,6 +626,153 @@ The evidence:
   byte, and holds what a [recorded platform](#compatibility-with-the-platform)
   stored and decided of them, once and sent again.
 
+## Inventory
+
+`internal/modules/inventory` takes stock of what the host has and admits it to
+the spool as `seagull.inventory.v1` records, one complete snapshot of a kind at
+a time, while `modules.inventory.enabled` is true. It takes stock as it starts
+and then every `modules.inventory.interval`, an hour unless the configuration
+says otherwise, at a phase of the interval drawn from the installation, so a
+fleet started together does not take stock together.
+
+| Kind | Read from | What one item says |
+| --- | --- | --- |
+| `operating_system` | `/etc/os-release`, or `/usr/lib/os-release` | `NAME`, `VERSION_ID`, `BUILD_ID`, `ID` as the platform, `VERSION_CODENAME`, and as the family the first distribution `ID_LIKE` names, or `ID` itself |
+| `kernel` | `uname` | the kernel's name, release, version and machine |
+| `hardware` | `/proc/cpuinfo`, `/proc/meminfo`, `/sys/devices/system/cpu` and `/sys/class/dmi/id` | the processor's model, its cores counted once whatever threads each runs, the fastest it runs as cpufreq says or else the speed `/proc/cpuinfo` gives, the memory and the system's vendor and model |
+| `package` | dpkg, through `dpkg-query` | each package dpkg keeps files of on the host, configured or not: its name, version and architecture, the source package and version it was built from as dpkg writes a `Source` field, manager `dpkg`, and the size dpkg records |
+| `service` | systemd, through `systemctl` | each service unit systemd holds loaded or has a unit file of: its name, its description, whether systemd holds it active, inactive or failed, and the state of its unit file |
+| `network_interface` | `/sys/class/net`, `/proc/net/if_inet6`, and the IPv4 addresses `SIOCGIFCONF` hands a socket | each interface of the agent's network namespace: its name, hardware address, MTU, kind of device, whether it is up, and every address with its prefix |
+| `user` | `/etc/passwd` and `/etc/group` | each account those files hold: its name, uid, gid, home and shell, and every group it belongs to by its gid or as a member |
+
+A snapshot is the whole of its kind as the source enumerates it, so the
+platform retires an item a later snapshot no longer names. A kind the agent
+cannot enumerate whole is never sent as a part:
+
+- on a host without what a kind is read from, such as dpkg or systemd, the
+  agent sends nothing of that kind and says so once, as
+  `inventory_not_collected` at the level of information;
+- an enumeration that fails, a source the agent cannot read whole or a line of
+  `dpkg-query` it does not understand leaves the platform with the last
+  snapshot it took, reported as `inventory_not_collected` with the reason and a
+  `recovery`, once until the reason changes, and `inventory_collected_again`
+  once it is taken again;
+- an empty enumeration that succeeded is an empty snapshot, which tells the
+  platform the host has none of that kind;
+- a line of the account files that the C library would not read as an account
+  or a group is left out and counted, as `inventory_entries_skipped`.
+
+Each record is checked before it is admitted against what the
+[recorded platform](#compatibility-with-the-platform) takes: 10,000 items, each
+field within the length its gateway checks, and 960 KiB encoded. That platform's
+backbone carries no record above 1,000,012 bytes once its gateway stamped it,
+and answers a batch holding one as unavailable for good, so a larger record
+would hold the inventory route forever. A kind over a ceiling, or over what one
+batch of `transport.max_batch_bytes` carries, is not admitted and is reported;
+it is never truncated or split into snapshots that would each retire the
+others' items. Text that only describes an item, such as a service's
+description or the hardware's model, is cut to what the platform takes and
+made UTF-8; a name, a version or an address is never altered, so one the
+platform would refuse keeps its whole kind out. A host of more than 10,000
+packages has no package inventory on that platform, which has no protocol to
+assemble a snapshot from parts.
+
+Each snapshot is named by the installation, its kind and the moment it was
+taken, as a UUID, so the same snapshot is always the same record, and it is
+admitted to the spool before `collection/inventory.json` records it: when it
+was taken, its record, its size and a digest of what it says. A kind is
+admitted again when what the host holds of it changed, or once the snapshot the
+platform holds is a day old, give or take half an interval, so what the
+platform holds of a kind is never older than that while the agent runs. A
+restarted agent therefore sends only what changed while it was stopped. A stop
+between the spool taking a snapshot and the file recording it has the agent
+admit the kind again under a new name, which leaves what the platform holds as
+it was.
+`inventory_admitted` names each kind admitted and why: `first`, `changed`,
+`refreshed`, or `the clock went back`.
+
+The platform orders a kind's snapshots by when they were taken, to the
+millisecond, and keeps the newer. A snapshot taken no later than the last one
+the agent admitted, because the clock was set back, would be held as older than
+it and change nothing, so the agent holds it back, as `inventory_deferred`,
+until its clock passes the last one. The platform admits nothing more than five
+minutes ahead of its own clock, so a last snapshot further ahead than that was
+never admitted: the agent then admits the kind at the time its clock reads and
+says so as `inventory_clock_regressed`.
+
+The platform tells the items of a kind apart by what it derives from them: a
+package by its name, architecture and manager, an account by its uid, a service
+or an interface by its name. dpkg installs one version of a name and
+architecture, so no two packages it holds are taken as one. Two accounts that
+share a uid, such as a second account with uid 0 beside root, are taken as one:
+the agent sends both and reports them as `inventory_items_merged`, and the
+[recorded platform](#compatibility-with-the-platform) keeps one of them, which
+was the second when it was measured, so root was not among its accounts.
+
+A round of taking stock is one scan of the [governor](#resources): it waits
+for a slot and for room in the inventory stream for what it admitted last time,
+charges the scan budget with the bytes it takes, and admits what changed in
+one write. A spool with no room keeps the snapshots waiting, as the status
+says, while the governor looks for room. `inventory_taken` ends each round at
+the debug level, with how many kinds it admitted.
+
+What it does not take:
+
+- the processes running. `ProtectProc=invisible` keeps them out of the
+  service's sight, and their command lines carry what nobody configured the
+  agent to keep; process visibility belongs to a collector of its own;
+- packages of any manager but dpkg: rpm, apk, snap, flatpak and those of a
+  language, and a host without dpkg has no package inventory;
+- accounts a directory service holds, the passwords and when an account last
+  logged in;
+- the firmware's serial number, which `/sys/class/dmi/id` shows the superuser
+  alone, and when a package was installed, which dpkg does not record;
+- the path of a service's unit file, a template or an alias of a service,
+  which are no service of their own, a unit systemd was asked for and found no
+  file of, unless it still runs, and services of a manager other than systemd;
+- the interfaces of another network namespace, such as those of containers.
+
+What it does not claim:
+
+- an inventory the recorded platform holds consistently. It identifies an
+  account by its uid alone, so it holds two accounts that share one as one, and
+  it has no ceiling of its own for a record, so the agent keeps below the one
+  its backbone was measured carrying. Both are the platform's to fix;
+- that a kind changed and changed back between two rounds was ever seen: the
+  agent compares snapshots, not what happened between them;
+- vulnerability findings, which the platform derives from what the agent sends.
+
+The evidence:
+
+- the adapters under `internal/platform` are tested against stand-ins for
+  `dpkg-query` and `systemctl`, against account files, os-release files and
+  procfs and sysfs trees written by the test, refusing what does not read
+  whole, and read this host's own: the packages `dpkg-query` lists, the
+  services systemd manages, the account files, and every interface, address
+  and prefix the standard library reads over netlink;
+- `internal/protocol` holds every bound of the recorded platform's inventory
+  contract at its value and one past it;
+- `internal/modules/inventory` takes every kind from a host the test describes,
+  the same bytes whatever order a source lists its items in; admits the first
+  round whole, nothing again on an unchanged host until a refresh is due, and
+  only the kind that changed; never records a snapshot in its baseline before
+  the spool holds it, and admits again what a baseline it could not write left
+  out; holds back a snapshot taken no later than the last and admits one after
+  a clock set back far; and reports kinds it cannot take, records over a
+  ceiling, accounts sharing a uid and a spool with no room;
+- the [native gate](#installing) has the installed agent take stock of the
+  host, and checks the packages against `dpkg-query`, the accounts against
+  `/etc/passwd`, the kernel against `uname` and its own service as running and
+  enabled. It then installs a probe package, an account sharing uid 0 with
+  root, a dummy interface with an IPv4 and an IPv6 address and a transient
+  service, restarts the agent and checks they were delivered and the shared
+  uid reported; upgrades the probe and checks one package at the new version;
+  purges and removes them all and checks they are gone; and restarts the agent
+  on the unchanged host and checks it sends no kind that did not change;
+- `tests/compatibility` takes again, with the collector of the build under
+  test, the records the installed agent delivered of what that host held, byte
+  for byte, and holds what a recorded platform made of them.
+
 ## Privileges
 
 The agent is one process running as one account, and everything it does happens
@@ -637,6 +786,7 @@ is not one.
 | Read its configuration and its trust bundle | files that account, or root, writes and it reads |
 | Reach the platform | an outgoing TLS connection, which needs no privilege |
 | Collect what sshd decides | read the system journal, as a member of `systemd-journal`, which the package makes the account and the service grants again |
+| Take stock of what the host has | read what the host shows any account: os-release, procfs, sysfs, the account files, dpkg's database through `dpkg-query`, and systemd's services through `systemctl`, which reaches systemd over the system bus, a local socket |
 
 Nothing on that list needs the superuser, a Linux capability, or a helper of its
 own. A collector that needs more names it there, and the packaging grants that
@@ -2079,7 +2229,10 @@ The agent is in the state of its worst part, and a part nothing asked for is
 disabled and weighs nothing. Then, for each module this build has, its state,
 since when, how often it was started again and why it does not collect, or,
 for the authentication collector while it collects, since when it waits for
-room in the spool and how often the journal dropped what it had not read yet.
+room in the spool and how often the journal dropped what it had not read yet,
+and, for the inventory, the kinds this host does not have, the kinds it does
+not admit and why, which degrades the collection, and the items the platform
+would hold as one.
 Then, for each stream, what waits and when the
 oldest record waiting was admitted, when the route last delivered and, while it
 fails, since when, how often, why and when it tries next; what the spool settled
@@ -2367,7 +2520,9 @@ What none of that claims:
   the one setting where a credential could arrive; it does not search text for
   what looks like a secret. A collector admits what it understood of its
   source and nothing else: the authentication collector keeps what an outcome
-  of sshd says, and the line sshd wrote it in, which says nothing more;
+  of sshd says, and the line sshd wrote it in, which says nothing more, and
+  the inventory keeps what the host's own files and tools say it has, never a
+  password, a command line or what a file holds;
 - the spool keeps records as they are handed to it and never looks inside one,
   so what a record holds is decided by the collector that admits it. What the
   agent writes about a record is where it is in the spool and the identifier it
@@ -2538,7 +2693,25 @@ in a minute and the guess that succeeded were each decided and stored, and
 sending the batches again stored and decided nothing more. The suite derives the
 same events from the recorded entries with the collector of the build under
 test, byte for byte, so a change to what the collector makes of sshd fails it
-until the scenario is recorded again. The suite fails when `go.mod`
+until the scenario is recorded again. The same commit held what the
+[inventory](#inventory) delivered of an Ubuntu 24.04 host, which the native
+gate recorded as the platform adapters read it right after each of four rounds,
+with the batches the installed agent delivered: every kind first, then a probe
+package, an account sharing uid 0 with root, a dummy interface and a transient
+service, then the probe upgraded, then all of them removed. That commit's own
+inventory admitter, broker and projector took the batches round by round into
+its store, which after each round held as current what the latest snapshot of
+each kind named: the probe at 1.0, then at 2.0 in its place, then gone. Of the
+two accounts with uid 0 it held one, the second, so root was not among the
+accounts it held while the other existed. Every batch sent again, and the first
+snapshot of the probe sent after the last, changed nothing it held; the items of
+a snapshot stored without its scan left the probe current until the scan was
+stored, and an empty snapshot left no package current. A record a byte over the
+agent's ceiling of 960 KiB was durable, and one of 1,000,100 bytes was answered
+as the backbone being unavailable, as it would be for good. The suite takes again the
+records the agent delivered from what the host held, byte for byte, so a change
+to what the collector makes of the host fails it until both are recorded
+again. The suite fails when `go.mod`
 pins contracts no recorded platform was built with, when a recorded platform
 never durably accepted a version the agent speaks, or when a recorded refusal
 reads differently. Compatibility is claimed only with recorded platforms, for
