@@ -1668,6 +1668,76 @@ func TestTheAgentCollectsAuthenticationWhileItsConfigurationNamesIt(t *testing.T
 	}
 }
 
+func TestTheAgentTakesStockOfThisHostOnceAndAgainOnlyWhenItChanges(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the agent takes stock of linux hosts")
+	}
+	state := stateDirectory(t)
+	path := configured(t, state, map[string]string{"modules": `{"inventory": {"enabled": true}}`, "logging": `{"level": "debug"}`})
+	entries, stop := running(t, path)
+	if started := await(t, entries, "module_started"); started["module"] != "inventory" || started["state"] != "running" {
+		t.Errorf("the agent started %v", started)
+	}
+	admitted, round := taking(t, entries)
+	want := []string{"operating_system", "kernel", "hardware", "network_interface", "user"}
+	if _, err := os.Stat("/usr/bin/dpkg-query"); err == nil {
+		want = append(want, "package")
+	}
+	for _, kind := range want {
+		if !slices.Contains(admitted, kind) {
+			t.Errorf("taking stock of this host the agent admitted %v, and it has %s", admitted, kind)
+		}
+	}
+	if round["admitted"] != float64(len(admitted)) {
+		t.Errorf("the agent ended its round with %v after admitting %v", round, admitted)
+	}
+	if code, _ := stop(); code != 0 {
+		t.Fatalf("the agent exited with %d", code)
+	}
+
+	entries, stop = running(t, path)
+	opened := await(t, entries, "spool_opened")
+	if held, _ := opened["inventory"].(map[string]any); held["outstanding"] != float64(len(admitted)) {
+		t.Errorf("started again, the agent's spool holds %v", opened["inventory"])
+	}
+	again, round := taking(t, entries)
+	for _, kind := range []string{"operating_system", "kernel", "package", "user"} {
+		if slices.Contains(again, kind) {
+			t.Errorf("started again on a host whose %s did not change, the agent admitted %v", kind, again)
+		}
+	}
+	if round["admitted"] != float64(len(again)) {
+		t.Errorf("the agent ended its round with %v after admitting %v", round, again)
+	}
+	if code, _ := stop(); code != 0 {
+		t.Fatalf("the agent exited with %d", code)
+	}
+}
+
+// taking reads the log of a round of the inventory collector: the kinds it
+// admitted, and how it said the round ended.
+func taking(t *testing.T, entries <-chan map[string]any) ([]string, map[string]any) {
+	t.Helper()
+	var admitted []string
+	timeout := time.After(time.Minute)
+	for {
+		select {
+		case entry, open := <-entries:
+			if !open {
+				t.Fatal("the agent stopped before it took stock")
+			}
+			switch entry["msg"] {
+			case "inventory_admitted":
+				admitted = append(admitted, fmt.Sprint(entry["kind"]))
+			case "inventory_taken":
+				return admitted, entry
+			}
+		case <-timeout:
+			t.Fatal("the agent took no stock within a minute")
+		}
+	}
+}
+
 func hangup(t *testing.T, agent *exec.Cmd) {
 	t.Helper()
 	if err := agent.Process.Signal(syscall.SIGHUP); err != nil {
