@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -22,6 +23,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/accounts"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dpkg"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/processes"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
@@ -217,7 +219,12 @@ func kindsOf(records []*inventoryv1.Record) []string {
 
 func (h *harness) baseline() map[string]map[string]any {
 	h.t.Helper()
-	content, err := os.ReadFile(filepath.Join(h.directory, inventory.Name+".json"))
+	return h.baselineOf(inventory.Name)
+}
+
+func (h *harness) baselineOf(module string) map[string]map[string]any {
+	h.t.Helper()
+	content, err := os.ReadFile(filepath.Join(h.directory, module+".json"))
 	if err != nil {
 		h.t.Fatalf("read the baseline: %v", err)
 	}
@@ -610,9 +617,72 @@ func TestACollectorNeedsWhatItWorksWith(t *testing.T) {
 		"no governor":     {Installation: installation, Spool: h.spool, Directory: directory, Logger: logger},
 		"no directory":    {Installation: installation, Spool: h.spool, Governor: h.governor, Logger: logger},
 		"no logger":       {Installation: installation, Spool: h.spool, Governor: h.governor, Directory: directory},
+		"another module":  {Module: "fim", Installation: installation, Spool: h.spool, Governor: h.governor, Directory: directory, Logger: logger},
 	} {
 		if _, err := inventory.New(options); err == nil {
 			t.Errorf("a collector with %s was composed", name)
 		}
+	}
+}
+
+func TestTheProcessesAreTakenByAModuleOfTheirOwn(t *testing.T) {
+	h := prepare(t, spool.Limits{MaxBytes: 64 << 20})
+	at := time.Date(2026, 10, 6, 13, 0, 0, 0, time.UTC)
+	running := func(options *inventory.Options) { options.Module = inventory.Processes }
+	collector := h.round(at, running)
+	if records := h.admitted(); !slices.Equal(kindsOf(records), []string{"process"}) || records[0].GetCollection().GetCollector() != "processes" {
+		t.Fatalf("the processes module admitted %v", records)
+	}
+	if stats := collector.Stats(); len(stats.Kinds) != 1 || stats.Kinds[0].Kind != "process" || stats.Kinds[0].Items != 4 || !stats.Kinds[0].Sent.Equal(at) {
+		t.Errorf("the processes module says %+v", stats)
+	}
+	if admitted := h.log.lines("inventory_admitted"); len(admitted) != 1 || admitted[0]["module"] != "processes" || admitted[0]["because"] != "first" {
+		t.Errorf("the processes module logged %v", admitted)
+	}
+	if _, err := os.Stat(filepath.Join(h.directory, inventory.Name+".json")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the processes module wrote the inventory's baseline: %v", err)
+	}
+	took := h.baselineOf(inventory.Processes)
+	h.round(at.Add(30*time.Second), running)
+	if records := h.admitted(); len(records) != 1 || len(h.log.lines("inventory_baseline_lost")) != 0 {
+		t.Errorf("started again on processes that did not change, the module admitted %v", kindsOf(records))
+	}
+
+	h.round(at.Add(time.Minute))
+	if records := h.admitted(); !slices.Equal(kindsOf(records), append([]string{"process"}, every...)) {
+		t.Errorf("after the inventory's round, the spool holds %v", kindsOf(records))
+	}
+	if again := h.baselineOf(inventory.Processes); !maps.EqualFunc(again, took, func(a, b map[string]any) bool { return a["record_id"] == b["record_id"] }) {
+		t.Errorf("the inventory's round changed the baseline of the processes from %v to %v", took, again)
+	}
+	h.host.change(func(host *fakeHost) { host.processes = host.processes[:3] })
+	h.round(at.Add(2*time.Minute), running)
+	if records := h.admitted(); len(records) != 9 || len(records[8].GetItems()) != 3 {
+		t.Errorf("once a process ended, the processes module admitted %v", kindsOf(records))
+	}
+}
+
+func TestProcessesTheServiceHidesAreReportedAndNeverAdmittedInPart(t *testing.T) {
+	h := prepare(t, spool.Limits{MaxBytes: 64 << 20})
+	at := time.Date(2026, 10, 6, 13, 0, 0, 0, time.UTC)
+	running := func(options *inventory.Options) { options.Module = inventory.Processes }
+	h.host.change(func(host *fakeHost) {
+		host.failures["process"] = fmt.Errorf("%w: procfs is mounted for the agent with hidepid=invisible", processes.ErrHidden)
+	})
+	collector := h.round(at, running)
+	if records := h.admitted(); len(records) != 0 {
+		t.Errorf("with the processes hidden, the module admitted %v", kindsOf(records))
+	}
+	if failure := collector.Stats().Kinds[0].Failure; !errors.Is(failure, processes.ErrHidden) {
+		t.Errorf("with the processes hidden, the module says %v", failure)
+	}
+	if missed := h.log.lines("inventory_not_collected"); len(missed) != 1 || missed[0]["level"] != "WARN" || missed[0]["kind"] != "process" ||
+		!strings.Contains(fmt.Sprint(missed[0]["recovery"]), "ProtectProc=default") {
+		t.Errorf("with the processes hidden, the module logged %v", missed)
+	}
+	h.host.change(func(host *fakeHost) { delete(host.failures, "process") })
+	h.round(at.Add(time.Hour), running)
+	if records := h.admitted(); !slices.Equal(kindsOf(records), []string{"process"}) {
+		t.Errorf("once the processes are shown, the module admitted %v", kindsOf(records))
 	}
 }
