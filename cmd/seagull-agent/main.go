@@ -29,6 +29,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
 	"github.com/dynasmon/Seagull-agent-v2/internal/pki"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dumps"
@@ -140,7 +141,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	level := new(slog.LevelVar)
 	logger := logging(stderr, settings, level)
 	apply(settings, level)
-	inventory(logger, granted)
+	privileged(logger, granted)
 	memory(logger, withheld)
 	resources(logger, settings)
 	state := settings.Identity.StateDirectory
@@ -205,13 +206,13 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	}
 	held.governor = governed
 	observed := &observing{began: began, path: path, state: state, installation: installation, spool: spooled, governor: governed, configuration: held}
-	collection, collector, err := collect(installation, settings, spooled, governed, logger)
+	collected, err := collect(installation, held.active, spooled, governed, logger)
 	if err != nil {
 		return refused(err)
 	}
-	held.collection = collection
-	observed.collection, observed.authentication = collection, collector
-	composed := append([]agentruntime.Component{held.component(asked), {Name: "collection", Policy: agentruntime.Optional, Run: collection.Run}}, components...)
+	held.collection = collected.collection
+	observed.collection, observed.authentication, observed.inventory = collected.collection, collected.authentication, collected.inventory
+	composed := append([]agentruntime.Component{held.component(asked), {Name: "collection", Policy: agentruntime.Optional, Run: collected.collection.Run}}, components...)
 	if isEnrolled {
 		client, err := platform(settings, chosen.authorities, credential)
 		if err != nil {
@@ -285,11 +286,12 @@ func unstarted(stderr io.Writer, path string, err error) int {
 
 // The capabilities the agent needs beyond the account it runs as: none. Its
 // installation, its keys and its settings are files that account reaches, the
-// platform is a network service like any other, and the authentication
-// collector reads the system journal as a member of systemd-journal, a group.
+// platform is a network service like any other, the authentication collector
+// reads the system journal as a member of systemd-journal, a group, and the
+// inventory collector reads what the host shows any account.
 func needed() []string { return nil }
 
-func inventory(logger *slog.Logger, granted privileges.Privileges) {
+func privileged(logger *slog.Logger, granted privileges.Privileges) {
 	reported := []any{
 		slog.Int("user", granted.User),
 		slog.Int("group", granted.Group),
@@ -410,12 +412,18 @@ func (c *configuration) reload() error {
 	return nil
 }
 
-func collect(installation *identity.Installation, settings config.Config, spooled *spool.Spool, governed *governor.Governor, logger *slog.Logger) (*modules.Collection, *authentication.Collector, error) {
+type collectors struct {
+	collection     *modules.Collection
+	authentication *authentication.Collector
+	inventory      *inventory.Collector
+}
+
+func collect(installation *identity.Installation, active *config.Active, spooled *spool.Spool, governed *governor.Governor, logger *slog.Logger) (collectors, error) {
 	directory, err := installation.Directory(collectionDirectory)
 	if err != nil {
-		return nil, nil, err
+		return collectors{}, err
 	}
-	collector, err := authentication.New(authentication.Options{
+	authenticating, err := authentication.New(authentication.Options{
 		Installation: installation.ID(),
 		Spool:        spooled,
 		Governor:     governed,
@@ -423,17 +431,29 @@ func collect(installation *identity.Installation, settings config.Config, spoole
 		Logger:       logger,
 	})
 	if err != nil {
-		return nil, nil, err
+		return collectors{}, err
 	}
-	collection, err := modules.New(logger, modules.Policy{}, modules.Module{
-		Name:    authentication.Name,
-		Enabled: slices.Contains(enabled(settings), authentication.Name),
-		Collect: collector.Collect,
+	taking, err := inventory.New(inventory.Options{
+		Installation: installation.ID(),
+		Spool:        spooled,
+		Governor:     governed,
+		Directory:    directory,
+		Logger:       logger,
+		Interval:     func() time.Duration { return time.Duration(active.Settings().Modules[inventory.Name].Interval) },
+		Largest:      func() int64 { return int64(active.Settings().Transport.MaxBatchBytes) - protocol.BatchEnvelopeBytes },
 	})
 	if err != nil {
-		return nil, nil, err
+		return collectors{}, err
 	}
-	return collection, collector, nil
+	settings := active.Settings()
+	collection, err := modules.New(logger, modules.Policy{},
+		modules.Module{Name: authentication.Name, Enabled: slices.Contains(enabled(settings), authentication.Name), Collect: authenticating.Collect},
+		modules.Module{Name: inventory.Name, Enabled: slices.Contains(enabled(settings), inventory.Name), Collect: taking.Collect},
+	)
+	if err != nil {
+		return collectors{}, err
+	}
+	return collectors{collection: collection, authentication: authenticating, inventory: taking}, nil
 }
 
 func enabled(settings config.Config) []string {

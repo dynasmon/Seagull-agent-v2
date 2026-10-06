@@ -52,6 +52,8 @@ type platform struct {
 	stored    map[string][]string
 	collected []*eventv1.Event
 	batches   [][]byte
+	inventory []*inventoryv1.Record
+	stocked   [][]byte
 }
 
 func emulate(t *testing.T) *platform {
@@ -185,6 +187,7 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 	content, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
 	var ids []string
 	var collected []*eventv1.Event
+	var stocked []*inventoryv1.Record
 	switch {
 	case err != nil || r.Method != http.MethodPost:
 	case r.URL.Path == "/v1/events":
@@ -202,6 +205,9 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 		if err = proto.Unmarshal(content, &batch); err == nil {
 			for _, record := range batch.GetRecords() {
 				ids = append(ids, record.GetRecordId())
+				if record.GetCollection().GetCollector() == "inventory" {
+					stocked = append(stocked, record)
+				}
 			}
 		}
 	}
@@ -220,6 +226,10 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 	if len(collected) > 0 {
 		p.batches = append(p.batches, content)
 	}
+	p.inventory = append(p.inventory, stocked...)
+	if len(stocked) > 0 {
+		p.stocked = append(p.stocked, content)
+	}
 	p.mu.Unlock()
 	answer(http.StatusOK, &ingestv1.BatchAck{Accepted: true, Durable: true, Received: uint32(len(ids))})
 }
@@ -234,6 +244,12 @@ func (p *platform) authentications() ([]*eventv1.Event, [][]byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return slices.Clone(p.collected), slices.Clone(p.batches)
+}
+
+func (p *platform) inventories() ([]*inventoryv1.Record, [][]byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.inventory), slices.Clone(p.stocked)
 }
 
 // A renewal as the recorded platform answers one: to the agent the certificate

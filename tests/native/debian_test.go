@@ -37,7 +37,7 @@ import (
 
 var (
 	packaged = flag.String("package", "", "the Debian package the gate installs on this host, as root")
-	evidence = flag.String("evidence", "", "a directory to write what sshd decided and what the agent delivered of it to")
+	evidence = flag.String("evidence", "", "a directory to write what sshd decided, what the host had and what the agent delivered of them to")
 )
 
 const (
@@ -95,6 +95,7 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "the service delivers its backlog once the platform takes it", run: g.deliver},
 		{name: "the service collects what sshd decides and nothing that only names sshd", run: g.collect},
 		{name: "the service account writes a bundle of what troubleshooting needs beside the running agent", run: g.diagnose},
+		{name: "the service takes stock of what the host has and admits a kind again when it changed", run: g.inventory},
 		{name: "purging deletes the installation, its settings and the service's", run: g.purge},
 		{name: "installing after a purge makes a new installation", run: g.fresh},
 	} {
@@ -117,6 +118,8 @@ type gate struct {
 	installation string
 	held         map[string]string
 	collects     bool
+	inventories  bool
+	debugging    bool
 }
 
 func open(t *testing.T) *gate {
@@ -216,10 +219,15 @@ func (g *gate) write(t *testing.T) {
 		t.Fatalf("the settings the package installs name %v", settings["server"])
 	}
 	server["ingest_url"], server["renewal_url"] = g.platform.ingest.URL, g.platform.renewal.URL
-	if collected, ok := settings["modules"].(map[string]any)["authentication"].(map[string]any); !ok || collected["enabled"] != true {
-		t.Fatalf("the settings the package installs collect with %v", settings["modules"])
+	for _, collector := range []string{"authentication", "inventory"} {
+		if collected, ok := settings["modules"].(map[string]any)[collector].(map[string]any); !ok || collected["enabled"] != true {
+			t.Fatalf("the settings the package installs collect with %v", settings["modules"])
+		}
 	}
-	settings["modules"] = map[string]any{"authentication": map[string]any{"enabled": g.collects}}
+	settings["modules"] = map[string]any{"authentication": map[string]any{"enabled": g.collects}, "inventory": map[string]any{"enabled": g.inventories}}
+	if g.debugging {
+		settings["logging"] = map[string]any{"level": "debug"}
+	}
 	rewritten, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		t.Fatalf("write the settings: %v", err)
@@ -417,6 +425,7 @@ func (g *gate) reinstall(t *testing.T) {
 }
 
 func (g *gate) deliver(t *testing.T) {
+	await(t, g.invocation, "delivery_failed", 30*time.Second)
 	g.platform.taking.Store(true)
 	events, inventory := admittedIDs("events", admittedEvents), admittedIDs("inventory", admittedItems)
 	deadline := time.Now().Add(time.Minute)
@@ -576,7 +585,8 @@ func (g *gate) delivered(t *testing.T, count int) []*eventv1.Event {
 
 func (g *gate) record(t *testing.T, began time.Time) {
 	t.Helper()
-	if err := os.MkdirAll(*evidence, 0o755); err != nil {
+	recorded := filepath.Join(*evidence, "authentication")
+	if err := os.MkdirAll(recorded, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	read, err := systemjournal.New(systemjournal.Query{
@@ -604,7 +614,7 @@ func (g *gate) record(t *testing.T, began time.Time) {
 	}
 	_, batches := g.platform.authentications()
 	for i, batch := range batches {
-		if err := os.WriteFile(filepath.Join(*evidence, fmt.Sprintf("batch-%03d.pb", i)), batch, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(recorded, fmt.Sprintf("batch-%03d.pb", i)), batch, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -626,7 +636,7 @@ func (g *gate) record(t *testing.T, began time.Time) {
 	}
 	written, err := json.MarshalIndent(scenario, "", "  ")
 	if err == nil {
-		err = os.WriteFile(filepath.Join(*evidence, "scenario.json"), append(written, '\n'), 0o644)
+		err = os.WriteFile(filepath.Join(recorded, "scenario.json"), append(written, '\n'), 0o644)
 	}
 	if err != nil {
 		t.Fatal(err)

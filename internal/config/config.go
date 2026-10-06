@@ -54,7 +54,8 @@ var (
 	levels     = map[string]slog.Level{"debug": slog.LevelDebug, "info": slog.LevelInfo, "warn": slog.LevelWarn, "error": slog.LevelError}
 	logFormats = []string{JSONLogs, TextLogs}
 	providers  = []string{KeysInFiles}
-	collectors = []string{"authentication"}
+	collectors = []string{"authentication", "inventory"}
+	periodic   = map[string]Duration{"inventory": Duration(time.Hour)}
 )
 
 type Config struct {
@@ -101,8 +102,38 @@ type Spool struct {
 
 type Modules map[string]Module
 
+// A module collects while it is enabled. One that takes stock of the host
+// rather than follow a source does it every interval, which a module that
+// follows a source has none of.
 type Module struct {
-	Enabled bool `json:"enabled"`
+	Enabled  bool     `json:"enabled"`
+	Interval Duration `json:"interval,omitzero"`
+}
+
+// The decoder names a setting by its path through the groups it is in, and a
+// module's name is the key of a group rather than one of its settings, so a
+// module's settings are decoded here, each refusal named with its module.
+func (m *Modules) UnmarshalJSON(content []byte) error {
+	var written map[string]json.RawMessage
+	if err := json.Unmarshal(content, &written); err != nil {
+		return err
+	}
+	held := make(Modules, len(written))
+	for name, settings := range written {
+		decoder := json.NewDecoder(bytes.NewReader(settings))
+		decoder.DisallowUnknownFields()
+		var module Module
+		if err := decoder.Decode(&module); err != nil {
+			var mistyped *json.UnmarshalTypeError
+			if errors.As(err, &mistyped) {
+				mistyped.Field = join(name, mistyped.Field)
+			}
+			return err
+		}
+		held[name] = module
+	}
+	*m = held
+	return nil
 }
 
 type Resources struct {
@@ -402,8 +433,21 @@ func (s *Spool) validate() []error {
 func (m Modules) validate() []error {
 	var found []error
 	for _, name := range slices.Sorted(maps.Keys(m)) {
-		if !slices.Contains(collectors, name) {
+		held := m[name]
+		fallback, takesStock := periodic[name]
+		switch {
+		case !slices.Contains(collectors, name):
 			found = append(found, fmt.Errorf("modules.%s is configured, and this build collects with %s", secrets.Bounded(name), strings.Join(collectors, ", ")))
+		case !takesStock && held.Interval != 0:
+			found = append(found, fmt.Errorf("modules.%s.interval is %s, and the %s collector follows its source rather than take stock every interval", name, held.Interval, name))
+		case takesStock:
+			if held.Interval == 0 {
+				held.Interval = fallback
+				m[name] = held
+			}
+			if err := duration("modules."+name+".interval", held.Interval, Duration(time.Minute), Duration(24*time.Hour)); err != nil {
+				found = append(found, err)
+			}
 		}
 	}
 	return found

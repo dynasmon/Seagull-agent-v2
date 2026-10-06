@@ -254,7 +254,7 @@ func TestTheServiceRunsTheAgentAsThePackageInstallsIt(t *testing.T) {
 		"ProtectProc":             "invisible",
 		"ProcSubset":              "",
 		"PrivateUsers":            "",
-		"RestrictAddressFamilies": "AF_INET AF_INET6",
+		"RestrictAddressFamilies": "AF_INET AF_INET6 AF_UNIX",
 		"RestrictNamespaces":      "yes",
 		"RestrictRealtime":        "yes",
 		"RestrictSUIDSGID":        "yes",
@@ -282,8 +282,10 @@ func TestTheServiceRunsTheAgentAsThePackageInstallsIt(t *testing.T) {
 		t.Error("purging the package does not remove the link that enabling the service creates")
 	}
 
-	if !settings.Modules["authentication"].Enabled {
-		t.Errorf("the settings the package installs leave the authentication collector out: %v", settings.Modules)
+	for _, collector := range []string{"authentication", "inventory"} {
+		if !settings.Modules[collector].Enabled {
+			t.Errorf("the settings the package installs leave the %s collector out: %v", collector, settings.Modules)
+		}
 	}
 	if path.Dir(state) != "/var/lib" || !slices.Contains(directories, "d "+state+" 0700 "+account[1]+" "+account[1]+" -") {
 		t.Errorf("the installation is kept in %s, and the package creates %q", state, directories)

@@ -6,5 +6,5 @@
     "renewal_url": "https://control.example:8446",
     "trust_bundle": "/etc/seagull-agent/platform-ca.pem"
   },
-  "modules": {"authentication": {"enabled": true}}
+  "modules": {"authentication": {"enabled": true}, "inventory": {"enabled": true}}
 }

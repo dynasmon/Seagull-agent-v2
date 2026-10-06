@@ -1,0 +1,156 @@
+
+$56ee24f7-79e6-42ca-81d9-e0f88c1b6d50∂V
+$c15c54ee-ffce-8f60-9e16-f745fc92d7e9 *‚≤è÷∑∏æ2
+aaebce1b3b04linux"amd64:
+	inventorydpkgJAí>
+adduser3.137ubuntu1all"dpkg*adduser (3.137ubuntu1)8Ä†J.í+
+apt2.8.3amd64"dpkg*apt (2.8.3)8Ä‡ÄJIíF
+
+base-files13ubuntu10.4amd64"dpkg*base-files (13ubuntu10.4)8Ä–JIíF
+base-passwd3.6.3build1amd64"dpkg*base-passwd (3.6.3build1)8ÄJCí@
+bash5.2.21-2ubuntu4amd64"dpkg*bash (5.2.21-2ubuntu4)8Ä‡vJSíP
+bsdutils1:2.39.3-9ubuntu6.6amd64"dpkg*util-linux (2.39.3-9ubuntu6.6)8ÄàJLíI
+	coreutils9.4-3ubuntu6.2amd64"dpkg*coreutils (9.4-3ubuntu6.2)8ÄÄ≤JCí@
+dash0.5.12-6ubuntu5amd64"dpkg*dash (0.5.12-6ubuntu5)8ÄÿJIíF
+dbus1.14.10-4ubuntu4.1amd64"dpkg*dbus (1.14.10-4ubuntu4.1)8Ä∏
+JMíJ
+dbus-bin1.14.10-4ubuntu4.1amd64"dpkg*dbus (1.14.10-4ubuntu4.1)8Ä∏JPíM
+dbus-daemon1.14.10-4ubuntu4.1amd64"dpkg*dbus (1.14.10-4ubuntu4.1)8ÄàJZíW
+dbus-session-bus-common1.14.10-4ubuntu4.1all"dpkg*dbus (1.14.10-4ubuntu4.1)8ÄËJYíV
+dbus-system-bus-common1.14.10-4ubuntu4.1all"dpkg*dbus (1.14.10-4ubuntu4.1)8Ä¿JCí@
+debconf1.5.86ubuntu1all"dpkg*debconf (1.5.86ubuntu1)8ÄËJGíD
+debianutils
+5.17build1amd64"dpkg*debianutils (5.17build1)8ÄÄJKíH
+	diffutils1:3.10-1build1amd64"dpkg*diffutils (1:3.10-1build1)8Ä†JDíA
+dpkg1.22.6ubuntu6.6amd64"dpkg*dpkg (1.22.6ubuntu6.6)8ÄÖJ_í\
+	e2fsprogs1.47.0-2.4~exp1ubuntu4.1amd64"dpkg*$e2fsprogs (1.47.0-2.4~exp1ubuntu4.1)8ÄÄ^JIíF
+	findutils4.9.0-5build1amd64"dpkg*findutils (4.9.0-5build1)8Ä¿"J\íY
+gcc-14-base14.2.0-4ubuntu2~24.04.1amd64"dpkg* gcc-14 (14.2.0-4ubuntu2~24.04.1)8ÄàJIíF
+gpgv2.4.4-2ubuntu17.4amd64"dpkg*gnupg2 (2.4.4-2ubuntu17.4)8ÄàJ=í:
+grep3.11-4build1amd64"dpkg*grep (3.11-4build1)8Ä¿JCí@
+gzip1.12-1ubuntu3.1amd64"dpkg*gzip (1.12-1ubuntu3.1)8Ä†JMíJ
+hostname3.23+nmu2ubuntu2amd64"dpkg*hostname (3.23+nmu2ubuntu2)8ÄJWíT
+init-system-helpers1.66ubuntu1all"dpkg*!init-system-helpers (1.66ubuntu1)8ÄêJNíK
+iproute26.1.0-1ubuntu6.4amd64"dpkg*iproute2 (6.1.0-1ubuntu6.4)8Ä»ΩJEíB
+libacl12.3.2-1build1.1amd64"dpkg*acl (2.3.2-1build1.1)8Ä–Jsíp
+libapparmor1!4.0.1really4.0.1-0ubuntu0.24.04.8amd64"dpkg*,apparmor (4.0.1really4.0.1-0ubuntu0.24.04.8)8Ä¿J;í8
+libapt-pkg6.0t642.8.3amd64"dpkg*apt (2.8.3)8ÄàÀJ\íY
+libargon2-10~20190702+dfsg-4build1amd64"dpkg* argon2 (0~20190702+dfsg-4build1)8Ä¿JJíG
+
+libassuan02.5.6-1build1amd64"dpkg*libassuan (2.5.6-1build1)8Ä†JKíH
+libattr11:2.5.2-1build1.1amd64"dpkg*attr (1:2.5.2-1build1.1)8Ä‡JUíR
+libaudit-common1:3.1.2-2.1build1.1all"dpkg*audit (1:3.1.2-2.1build1.1)8ÄàJQíN
+	libaudit11:3.1.2-2.1build1.1amd64"dpkg*audit (1:3.1.2-2.1build1.1)8Ä∏	JRíO
+	libblkid12.39.3-9ubuntu6.6amd64"dpkg*util-linux (2.39.3-9ubuntu6.6)8ÄêJFíC
+libbpf11:1.3.0-2build2amd64"dpkg*libbpf (1.3.0-2build2)8ÄÄJJíG
+libbsd00.12.1-1build1.1amd64"dpkg*libbsd (0.12.1-1build1.1)8Ä¯JNíK
+
+libbz2-1.01.0.8-5.1build0.1amd64"dpkg*bzip2 (1.0.8-5.1build0.1)8Ä¯JIíF
+libc-bin2.39-0ubuntu8.7amd64"dpkg*glibc (2.39-0ubuntu8.7)8Ä∏àJFíC
+libc62.39-0ubuntu8.7amd64"dpkg*glibc (2.39-0ubuntu8.7)8Ä∏«JJíG
+
+libcap-ng00.8.4-2build2amd64"dpkg*libcap-ng (0.8.4-2build2)8Ä‡JMíJ
+libcap21:2.66-5ubuntu2.4amd64"dpkg*libcap2 (1:2.66-5ubuntu2.4)8ÄêJQíN
+libcap2-bin1:2.66-5ubuntu2.4amd64"dpkg*libcap2 (1:2.66-5ubuntu2.4)8Ä¿JQíN
+libcbor0.100.10.2-1.2ubuntu2amd64"dpkg*libcbor (0.10.2-1.2ubuntu2)8Ä∞Jaí^
+libcom-err21.47.0-2.4~exp1ubuntu4.1amd64"dpkg*$e2fsprogs (1.47.0-2.4~exp1ubuntu4.1)8Ä»JOíL
+	libcrypt11:4.4.36-4build1amd64"dpkg*libxcrypt (1:4.4.36-4build1)8ÄêJZíW
+libcryptsetup122:2.7.0-1ubuntu4.2amd64"dpkg*cryptsetup (2:2.7.0-1ubuntu4.2)8Ä¯&JIíF
+libdb5.3t645.3.28+dfsg2-7amd64"dpkg*db5.3 (5.3.28+dfsg2-7)8ÄànJPíM
+libdbus-1-31.14.10-4ubuntu4.1amd64"dpkg*dbus (1.14.10-4ubuntu4.1)8Ä–JNíK
+libdebconfclient00.271ubuntu3amd64"dpkg*cdebconf (0.271ubuntu3)8Ä∞JZíW
+libdevmapper1.02.12:1.02.185-3ubuntu3.2amd64"dpkg*lvm2 (2.03.16-3ubuntu3.2)8Ä¿JTíQ
+libedit23.1-20230828-1build1amd64"dpkg*libedit (3.1-20230828-1build1)8ÄêJSíP
+
+libelf1t640.190-1.1ubuntu0.1amd64"dpkg*elfutils (0.190-1.1ubuntu0.1)8Ä‡JKíH
+	libexpat12.6.1-2ubuntu0.6amd64"dpkg*expat (2.6.1-2ubuntu0.6)8ÄÄJcí`
+libext2fs2t641.47.0-2.4~exp1ubuntu4.1amd64"dpkg*$e2fsprogs (1.47.0-2.4~exp1ubuntu4.1)8Ä–!JRíO
+	libfdisk12.39.3-9ubuntu6.6amd64"dpkg*util-linux (2.39.3-9ubuntu6.6)8Ä∏JDíA
+libffi83.4.6-1build1amd64"dpkg*libffi (3.4.6-1build1)8Ä¿JKíH
+
+libfido2-11.14.0-1build3amd64"dpkg*libfido2 (1.14.0-1build3)8ÄêJZíW
+	libgcc-s114.2.0-4ubuntu2~24.04.1amd64"dpkg* gcc-14 (14.2.0-4ubuntu2~24.04.1)8Ä®JUíR
+libgcrypt201.10.3-2ubuntu0.1amd64"dpkg*libgcrypt20 (1.10.3-2ubuntu0.1)8Ä†WJVíS
+libgmp102:6.3.0+dfsg-2ubuntu6.1amd64"dpkg*gmp (2:6.3.0+dfsg-2ubuntu6.1)8Ä¯!JXíU
+libgnutls30t643.8.3-1.1ubuntu3.6amd64"dpkg*gnutls28 (3.8.3-1.1ubuntu3.6)8Ä¿ìJRíO
+libgpg-error01.47-3build2.1amd64"dpkg*libgpg-error (1.47-3build2.1)8Ä»JUíR
+libgssapi-krb5-21.20.1-6ubuntu2.10amd64"dpkg*krb5 (1.20.1-6ubuntu2.10)8Ä–JSíP
+libhogweed6t643.9.1-2.2build1.1amd64"dpkg*nettle (3.9.1-2.2build1.1)8ÄàJKíH
+	libidn2-02.3.7-2build1.1amd64"dpkg*libidn2 (2.3.7-2build1.1)8ÄÄJEíB
+
+libjson-c50.17-1build1amd64"dpkg*json-c (0.17-1build1)8Ä®JQíN
+libk5crypto31.20.1-6ubuntu2.10amd64"dpkg*krb5 (1.20.1-6ubuntu2.10)8ÄêJKíH
+libkeyutils11.6.3-3build1amd64"dpkg*keyutils (1.6.3-3build1)8Ä»JUíR
+libkmod231+20240202-2ubuntu7.2amd64"dpkg*kmod (31+20240202-2ubuntu7.2)8ÄÄ	JNíK
+	libkrb5-31.20.1-6ubuntu2.10amd64"dpkg*krb5 (1.20.1-6ubuntu2.10)8Ä∏?JTíQ
+libkrb5support01.20.1-6ubuntu2.10amd64"dpkg*krb5 (1.20.1-6ubuntu2.10)8Ä®JFíC
+liblz4-11.9.4-1build1.1amd64"dpkg*lz4 (1.9.4-1build1.1)8Äÿ	Jeíb
+liblzma55.6.1+really5.4.5-1ubuntu0.3amd64"dpkg*'xz-utils (5.6.1+really5.4.5-1ubuntu0.3)8ÄÿJFíC
+libmd01.1.0-2build1.1amd64"dpkg*libmd (1.1.0-2build1.1)8Ä¯JDíA
+libmnl01.0.5-2build1amd64"dpkg*libmnl (1.0.5-2build1)8ÄJRíO
+	libmount12.39.3-9ubuntu6.6amd64"dpkg*util-linux (2.39.3-9ubuntu6.6)8ÄÄJZíW
+libncursesw66.4+20240113-1ubuntu2amd64"dpkg*ncurses (6.4+20240113-1ubuntu2)8Ä∞JRíO
+libnettle8t643.9.1-2.2build1.1amd64"dpkg*nettle (3.9.1-2.2build1.1)8Ä¿JFíC
+libnpth0t641.6-3.1build1amd64"dpkg*npth (1.6-3.1build1)8Ä–JQíN
+libp11-kit00.25.3-4ubuntu2.1amd64"dpkg*p11-kit (0.25.3-4ubuntu2.1)8ÄÄkJNíK
+libpam-modules1.5.3-5ubuntu5.5amd64"dpkg*pam (1.5.3-5ubuntu5.5)8ÄGJRíO
+libpam-modules-bin1.5.3-5ubuntu5.5amd64"dpkg*pam (1.5.3-5ubuntu5.5)8ÄJLíI
+libpam-runtime1.5.3-5ubuntu5.5all"dpkg*pam (1.5.3-5ubuntu5.5)8Ä†JHíE
+libpam0g1.5.3-5ubuntu5.5amd64"dpkg*pam (1.5.3-5ubuntu5.5)8ÄàJNíK
+libpcre2-8-010.42-4ubuntu2.1amd64"dpkg*pcre2 (10.42-4ubuntu2.1)8Äÿ'JQíN
+
+libproc2-02:4.0.4-4ubuntu3.3amd64"dpkg*procps (2:4.0.4-4ubuntu3.3)8ÄÿJRíO
+libseccomp22.5.5-1ubuntu3.1amd64"dpkg*libseccomp (2.5.5-1ubuntu3.1)8Ä¯JNíK
+libselinux13.5-2ubuntu2.1amd64"dpkg*libselinux (3.5-2ubuntu2.1)8Ä¿JNíK
+libsemanage-common3.5-1build5all"dpkg*libsemanage (3.5-1build5)8Ä–JJíG
+libsemanage23.5-1build5amd64"dpkg*libsemanage (3.5-1build5)8ÄÄJDíA
+	libsepol23.5-2build1amd64"dpkg*libsepol (3.5-2build1)8Ä¯.JVíS
+libsmartcols12.39.3-9ubuntu6.6amd64"dpkg*util-linux (2.39.3-9ubuntu6.6)8Ä‡
+J\íY
+libss21.47.0-2.4~exp1ubuntu4.1amd64"dpkg*$e2fsprogs (1.47.0-2.4~exp1ubuntu4.1)8Ä®JSíP
+
+libssl3t643.0.13-0ubuntu3.11amd64"dpkg*openssl (3.0.13-0ubuntu3.11)8Ä∞ùJ\íY
+
+libstdc++614.2.0-4ubuntu2~24.04.1amd64"dpkg* gcc-14 (14.2.0-4ubuntu2~24.04.1)8Ä∞¬JXíU
+libsystemd-shared255.4-1ubuntu8.17amd64"dpkg*systemd (255.4-1ubuntu8.17)8ÄàÔJQíN
+libsystemd0255.4-1ubuntu8.17amd64"dpkg*systemd (255.4-1ubuntu8.17)8Ä†@J_í\
+
+libtasn1-64.19.0-3ubuntu0.24.04.2amd64"dpkg*$libtasn1-6 (4.19.0-3ubuntu0.24.04.2)8Ä–JWíT
+	libtinfo66.4+20240113-1ubuntu2amd64"dpkg*ncurses (6.4+20240113-1ubuntu2)8Ä‡"JNíK
+libudev1255.4-1ubuntu8.17amd64"dpkg*systemd (255.4-1ubuntu8.17)8ÄËJPíM
+libunistring51.1-2build1.1amd64"dpkg*libunistring (1.1-2build1.1)8ÄËmJQíN
+libuuid12.39.3-9ubuntu6.6amd64"dpkg*util-linux (2.39.3-9ubuntu6.6)8Ä®JAí>
+libwrap07.6.q-33amd64"dpkg*tcp-wrappers (7.6.q-33)8ÄÿJOíL
+libxtables121.8.10-3ubuntu2amd64"dpkg*iptables (1.8.10-3ubuntu2)8Ä∏JGíD
+
+libxxhash00.8.2-2build1amd64"dpkg*xxhash (0.8.2-2build1)8Ä–JVíS
+libzstd11.5.5+dfsg2-2build1.1amd64"dpkg*libzstd (1.5.5+dfsg2-2build1.1)8Ä»/JVíS
+login1:4.13+dfsg1-4ubuntu3.2amd64"dpkg* shadow (1:4.13+dfsg1-4ubuntu3.2)8Ä†7J]íZ
+logsave1.47.0-2.4~exp1ubuntu4.1amd64"dpkg*$e2fsprogs (1.47.0-2.4~exp1ubuntu4.1)8ÄòJQíN
+mawk1.3.4.20240123-1build1amd64"dpkg*mawk (1.3.4.20240123-1build1)8ÄàJNíK
+mount2.39.3-9ubuntu6.6amd64"dpkg*util-linux (2.39.3-9ubuntu6.6)8ÄËJXíU
+ncurses-base6.4+20240113-1ubuntu2all"dpkg*ncurses (6.4+20240113-1ubuntu2)8ÄÄJYíV
+ncurses-bin6.4+20240113-1ubuntu2amd64"dpkg*ncurses (6.4+20240113-1ubuntu2)8Ä∏(J[íX
+openssh-client1:9.6p1-3ubuntu13.19amd64"dpkg*openssh (1:9.6p1-3ubuntu13.19)8Äê›J[íX
+openssh-server1:9.6p1-3ubuntu13.19amd64"dpkg*openssh (1:9.6p1-3ubuntu13.19)8ÄàÉJ_í\
+openssh-sftp-server1:9.6p1-3ubuntu13.19amd64"dpkg*openssh (1:9.6p1-3ubuntu13.19)8Ä®JXíU
+passwd1:4.13+dfsg1-4ubuntu3.2amd64"dpkg* shadow (1:4.13+dfsg1-4ubuntu3.2)8ÄòóJQíN
+	perl-base5.38.2-3.2ubuntu0.2amd64"dpkg*perl (5.38.2-3.2ubuntu0.2)8Ä»ÓJMíJ
+procps2:4.0.4-4ubuntu3.3amd64"dpkg*procps (2:4.0.4-4ubuntu3.3)8Ä¿pJÇí
+seagull-agent%0.0.0~20261005170543.9a0f54c3b650-1.1amd64"dpkg*5seagull-agent (0.0.0~20261005170543.9a0f54c3b650-1.1)8ÄÿˇJSíP
+seagull-native-gate-probe2.0all"dpkg* seagull-native-gate-source (2.0)8Ä JKíH
+sed4.9-2ubuntu0.24.04.1amd64"dpkg*sed (4.9-2ubuntu0.24.04.1)8Ä†JCí@
+sensible-utils0.0.22all"dpkg*sensible-utils (0.0.22)8Ä¯JXíU
+sudo1.9.15p5-3ubuntu5.24.04.3amd64"dpkg* sudo (1.9.15p5-3ubuntu5.24.04.3)8ÄÄŸJNíK
+systemd255.4-1ubuntu8.17amd64"dpkg*systemd (255.4-1ubuntu8.17)8Ä†ﬁJOíL
+systemd-dev255.4-1ubuntu8.17all"dpkg*systemd (255.4-1ubuntu8.17)8Äò-JRíO
+systemd-sysv255.4-1ubuntu8.17amd64"dpkg*systemd (255.4-1ubuntu8.17)8Ä¯JMíJ
+sysvinit-utils3.08-6ubuntu3amd64"dpkg*sysvinit (3.08-6ubuntu3)8ÄÿJEíB
+tar1.35+dfsg-3build1amd64"dpkg*tar (1.35+dfsg-3build1)8Ä†,JOíL
+ubuntu-keyring2023.11.28.1all"dpkg*ubuntu-keyring (2023.11.28.1)8ÄËJ7í4
+ucf3.0043+nmu1all"dpkg*ucf (3.0043+nmu1)8Ä∞J;í8
+
+unminimize0.2.1amd64"dpkg*unminimize (0.2.1)8ÄÄJTíQ
+
+util-linux2.39.3-9ubuntu6.6amd64"dpkg*util-linux (2.39.3-9ubuntu6.6)8Ä¯÷JUíR
+zlib1g1:1.3.dfsg-3.1ubuntu2.1amd64"dpkg*zlib (1:1.3.dfsg-3.1ubuntu2.1)8Äò
