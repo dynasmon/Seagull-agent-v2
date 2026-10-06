@@ -29,6 +29,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/interfaces"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/journal"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/machine"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/processes"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/services"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	"github.com/dynasmon/Seagull-agent-v2/internal/status"
@@ -360,6 +361,10 @@ func TestAModuleTheAgentHasNotStartedYetFailsNothing(t *testing.T) {
 type describedHost struct {
 	accounts accounts.Database
 	failures map[string]error
+}
+
+func (h describedHost) Processes(context.Context) ([]processes.Process, error) {
+	return []processes.Process{{PID: 1, Name: "systemd", StartedAt: time.Date(2026, 10, 6, 9, 0, 2, 0, time.UTC)}}, h.failures["process"]
 }
 
 func (describedHost) Hostname() (string, error) { return "web-01", nil }
