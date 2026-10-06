@@ -39,6 +39,7 @@ type observing struct {
 	collection     *modules.Collection
 	authentication *authentication.Collector
 	inventory      *inventory.Collector
+	processes      *inventory.Collector
 	renewer        *renewal.Renewer
 	delivery       *delivery.Delivery
 }
@@ -93,8 +94,8 @@ func (o *observing) collected(snapshot *status.Snapshot) status.Component {
 			held.Reason, state = "the agent has not started it yet", status.Running
 		case module.Name == authentication.Name && module.State == modules.Running:
 			held.Reason = status.Text(o.reading())
-		case module.Name == inventory.Name && module.State == modules.Running:
-			reason, failing := o.inventoried()
+		case module.State == modules.Running && o.taking(module.Name) != nil:
+			reason, failing := inventoried(o.taking(module.Name))
 			held.Reason = status.Text(reason)
 			if failing != nil {
 				held.State, state, recovery = status.Degraded, status.Degraded, inventory.Recovery(failing)
@@ -148,11 +149,21 @@ func (o *observing) reading() string {
 	return strings.Join(said, "; ")
 }
 
-// What the inventory says of the kinds it takes: those this host does not
-// have, those it cannot admit and why, and items the platform holds as one.
-// It is failing when a kind the host has is not admitted.
-func (o *observing) inventoried() (string, error) {
-	held := o.inventory.Stats()
+func (o *observing) taking(module string) *inventory.Collector {
+	switch module {
+	case inventory.Name:
+		return o.inventory
+	case inventory.Processes:
+		return o.processes
+	}
+	return nil
+}
+
+// What a module that takes stock says of the kinds it takes: those this host
+// does not have, those it cannot admit and why, and items the platform holds
+// as one. It is failing when a kind the host has is not admitted.
+func inventoried(taking *inventory.Collector) (string, error) {
+	held := taking.Stats()
 	var said []string
 	var failing error
 	if !held.Waiting.IsZero() {
