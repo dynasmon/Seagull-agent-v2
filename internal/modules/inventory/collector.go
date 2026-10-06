@@ -1,9 +1,10 @@
 // Package inventory takes stock of what the host has: the distribution it
 // runs, its kernel, its hardware, the packages dpkg installed, the services
-// systemd manages, its network interfaces and its local accounts. Every
-// interval it takes each kind whole, and admits a complete snapshot of a kind
-// to the spool when what the host holds of it changed, or once the one the
-// platform holds is a day old, give or take half an interval.
+// systemd manages, its network interfaces and its local accounts, and, as a
+// module of its own, the processes it runs. Every interval each module takes
+// its kinds whole, and admits a complete snapshot of a kind to the spool when
+// what the host holds of it changed, or once the one the platform holds is a
+// day old, give or take half an interval.
 package inventory
 
 import (
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/processes"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 )
@@ -38,6 +40,7 @@ type Spool interface {
 }
 
 type Options struct {
+	Module       string
 	Installation string
 	Spool        Spool
 	Governor     *governor.Governor
@@ -68,6 +71,7 @@ type Stats struct {
 type Collector struct {
 	options Options
 	logger  *slog.Logger
+	takers  []taker
 
 	mu      sync.Mutex
 	kinds   []KindStats
@@ -76,8 +80,14 @@ type Collector struct {
 }
 
 func New(options Options) (*Collector, error) {
+	if options.Module == "" {
+		options.Module = Name
+	}
+	if options.Module != Name && options.Module != Processes {
+		return nil, fmt.Errorf("compose the %s collector: the modules that take stock are %s and %s", options.Module, Name, Processes)
+	}
 	if options.Installation == "" || options.Spool == nil || options.Governor == nil || options.Directory == nil || options.Logger == nil {
-		return nil, fmt.Errorf("compose the %s collector: an installation, a spool, a governor, a directory and a logger are all needed to collect", Name)
+		return nil, fmt.Errorf("compose the %s collector: an installation, a spool, a governor, a directory and a logger are all needed to collect", options.Module)
 	}
 	if options.Interval == nil {
 		options.Interval = func() time.Duration { return everyHour }
@@ -91,9 +101,12 @@ func New(options Options) (*Collector, error) {
 	if options.Now == nil {
 		options.Now = time.Now
 	}
-	collector := &Collector{options: options, logger: options.Logger.With(slog.String("module", Name))}
+	collector := &Collector{options: options, logger: options.Logger.With(slog.String("module", options.Module))}
 	for _, held := range kinds {
-		collector.kinds = append(collector.kinds, KindStats{Kind: KindName(held.kind)})
+		if moduleOf(held.kind) == options.Module {
+			collector.takers = append(collector.takers, held)
+			collector.kinds = append(collector.kinds, KindStats{Kind: KindName(held.kind)})
+		}
 	}
 	return collector, nil
 }
@@ -117,7 +130,7 @@ func (c *Collector) Collect(ctx context.Context) error {
 			return err
 		}
 		if wanted := c.interval(); schedule == nil || wanted != every {
-			if schedule, err = c.options.Governor.Periodic(Name, wanted); err != nil {
+			if schedule, err = c.options.Governor.Periodic(c.options.Module, wanted); err != nil {
 				return err
 			}
 			every = wanted
@@ -139,10 +152,10 @@ func (c *Collector) Stats() Stats {
 }
 
 func (c *Collector) begin() (baseline, error) {
-	if err := discard(c.options.Directory); err != nil {
+	if err := discard(c.options.Directory, c.options.Module); err != nil {
 		return baseline{}, err
 	}
-	held, err := load(c.options.Directory)
+	held, err := load(c.options.Directory, c.options.Module)
 	switch {
 	case err == nil:
 		c.mu.Lock()
@@ -180,8 +193,8 @@ type chosen struct {
 func (c *Collector) take(ctx context.Context, held *baseline) error {
 	began := time.Now()
 	var admitting []chosen
-	err := c.options.Governor.Scan(ctx, governor.Scan{Module: Name, Room: c.room, Needs: held.needs()}, func(ctx context.Context, meter *governor.Meter) error {
-		for _, described := range kinds {
+	err := c.options.Governor.Scan(ctx, governor.Scan{Module: c.options.Module, Room: c.room, Needs: held.needs()}, func(ctx context.Context, meter *governor.Meter) error {
+		for _, described := range c.takers {
 			at := c.options.Now().UTC()
 			taken, err := Take(ctx, c.options.Host, c.options.Installation, described.kind, at)
 			if ctx.Err() != nil {
@@ -217,7 +230,7 @@ func (c *Collector) take(ctx context.Context, held *baseline) error {
 	for _, sent := range admitting {
 		held.Kinds[sent.Kind] = entry{CollectedAt: sent.at, RecordID: sent.Record.GetRecordId(), Items: len(sent.Record.GetItems()), Bytes: len(sent.Encoded), Digest: sent.Digest}
 	}
-	if err := save(c.options.Directory, *held); err != nil {
+	if err := save(c.options.Directory, c.options.Module, *held); err != nil {
 		return err
 	}
 	for _, sent := range admitting {
@@ -307,6 +320,8 @@ func Recovery(failed error) string {
 		return "raise transport.max_batch_bytes, up to the 8MiB the platform takes"
 	case errors.Is(failed, ErrClockBehind):
 		return "none: the agent admits the kind once its clock passes the last snapshot it admitted"
+	case errors.Is(failed, processes.ErrHidden):
+		return "have the service show the agent every process: a drop-in for seagull-agent.service that sets ProtectProc=default, then systemctl daemon-reload and systemctl restart seagull-agent"
 	}
 	var inadmissible *protocol.Inadmissible
 	if errors.As(failed, &inadmissible) {

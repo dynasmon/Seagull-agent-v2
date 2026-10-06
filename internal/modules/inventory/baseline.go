@@ -20,11 +20,10 @@ import (
 )
 
 const (
-	baselineFile = Name + ".json"
-	format       = 1
-	maxBaseline  = 64 << 10
-	maxRecordID  = 64
-	leastNeeds   = 64 << 10
+	format      = 1
+	maxBaseline = 64 << 10
+	maxRecordID = 64
+	leastNeeds  = 64 << 10
 )
 
 var (
@@ -32,7 +31,7 @@ var (
 	ErrNewer     = errors.New("what the collector last admitted of the host was written down by a newer agent")
 	ErrInsecure  = errors.New("what the collector last admitted of the host is not private to the account the agent runs as")
 	errUnwritten = errors.New("the collector has admitted nothing of the host yet")
-	interrupted  = regexp.MustCompile(`^\.` + regexp.QuoteMeta(baselineFile) + `\.[0-9a-f]{16}\.tmp$`)
+	interrupted  = regexp.MustCompile(`^\.([a-z]+)\.json\.[0-9a-f]{16}\.tmp$`)
 	digested     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
@@ -60,7 +59,8 @@ func (b baseline) needs() int64 {
 	return max(held, leastNeeds)
 }
 
-func load(root *os.Root) (baseline, error) {
+func load(root *os.Root, module string) (baseline, error) {
+	baselineFile := module + ".json"
 	path := filepath.Join(root.Name(), baselineFile)
 	described, err := root.Lstat(baselineFile)
 	switch {
@@ -89,14 +89,14 @@ func load(root *os.Root) (baseline, error) {
 	if err != nil {
 		return baseline{}, fmt.Errorf("read %s: %w", path, err)
 	}
-	held, err := decode(content)
+	held, err := decode(content, module)
 	if err != nil {
 		return baseline{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return held, nil
 }
 
-func decode(content []byte) (baseline, error) {
+func decode(content []byte, module string) (baseline, error) {
 	if len(content) > maxBaseline {
 		return baseline{}, fmt.Errorf("%w: it is larger than %d bytes", ErrDamaged, maxBaseline)
 	}
@@ -122,7 +122,7 @@ func decode(content []byte) (baseline, error) {
 		return baseline{}, fmt.Errorf("%w: format %d is not one this agent reads", ErrDamaged, held.Format)
 	}
 	for name, sent := range held.Kinds {
-		known := slices.ContainsFunc(kinds, func(held taker) bool { return KindName(held.kind) == name })
+		known := slices.ContainsFunc(kinds, func(held taker) bool { return KindName(held.kind) == name && moduleOf(held.kind) == module })
 		if !known || sent.CollectedAt.IsZero() || sent.RecordID == "" || len(sent.RecordID) > maxRecordID || sent.Items < 0 || sent.Bytes < 0 || !digested.MatchString(sent.Digest) {
 			return baseline{}, fmt.Errorf("%w: what it says of %s does not read", ErrDamaged, secrets.Shown(name))
 		}
@@ -136,7 +136,8 @@ func decode(content []byte) (baseline, error) {
 // A baseline lost in a crash only has the collector admit again snapshots
 // the platform already took, which leave what it holds as it was, so the file
 // is synced before it replaces the last one and the directory is not.
-func save(root *os.Root, held baseline) error {
+func save(root *os.Root, module string, held baseline) error {
+	baselineFile := module + ".json"
 	path := filepath.Join(root.Name(), baselineFile)
 	held.Format = format
 	content, err := json.Marshal(held)
@@ -167,7 +168,7 @@ func save(root *os.Root, held baseline) error {
 	return nil
 }
 
-func discard(root *os.Root) error {
+func discard(root *os.Root, module string) error {
 	directory, err := root.Open(".")
 	if err != nil {
 		return fmt.Errorf("open %s: %w", root.Name(), err)
@@ -178,7 +179,7 @@ func discard(root *os.Root) error {
 		return fmt.Errorf("list %s: %w", root.Name(), err)
 	}
 	for _, name := range names {
-		if !interrupted.MatchString(name) {
+		if found := interrupted.FindStringSubmatch(name); found == nil || found[1] != module {
 			continue
 		}
 		if err := root.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
