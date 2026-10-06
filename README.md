@@ -161,7 +161,7 @@ The service also confines the agent to what it uses of the host, which
 | Devices | `PrivateDevices=yes` | `null`, `zero`, `full`, `random`, `urandom`, `tty`, and `ptmx`, which opens pseudo-terminals |
 | Shared memory | `PrivateIPC=yes` and `InaccessiblePaths=-/dev/shm -/dev/mqueue` | no IPC object, shared memory or message queue that another process holds |
 | The kernel | `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`, `ProtectControlGroups=yes`, `ProtectClock=yes` and `ProtectHostname=yes` | `/proc/sys`, `/sys` and the control groups to read; no module, kernel log, clock or host name |
-| Processes | `ProtectProc=invisible` | the processes of its own account, alone, in `/proc` |
+| Processes | `ProtectProc=invisible` | the processes of its own account, alone, in `/proc`, until an operator shows it every process for the [processes module](#processes) |
 | The network | `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX` | IPv4, IPv6 and local sockets: the inventory has `systemctl` reach systemd over the system bus, and reads the interfaces without a netlink socket, which the agent cannot open |
 | System calls | `SystemCallFilter=@system-service` and `SystemCallFilter=~@privileged`, `SystemCallArchitectures=native` and `SystemCallErrorNumber=EPERM` | the calls a system service makes, less those that need the superuser; any other fails with `EPERM`, and a call through the 32-bit entry ends the process |
 | Within those calls | `MemoryDenyWriteExecute=yes`, `LockPersonality=yes`, `RestrictNamespaces=yes`, `RestrictRealtime=yes` and `RestrictSUIDSGID=yes` | no memory both writable and executable, no other execution domain, no namespace, no real-time scheduling, no setuid or setgid file |
@@ -384,8 +384,9 @@ The agent reads the file whole, or refuses it whole:
 | `transport.max_upload_bytes_per_second` | `1MiB` | `64KiB` to `1GiB`, and enough to connect and send a whole batch within `transport.request_timeout` |
 | `spool.max_bytes` | `512MiB` | `16MiB` to `64GiB`, and at least four batches |
 | `spool.max_age` | `72h` | `1h` to `720h`; events are kept `168h` at most |
-| `modules` | `{}` | `{"authentication": {"enabled": true}}`, to collect what sshd decides, and `{"inventory": {"enabled": true}}`, to take stock of what the host has: `authentication` and `inventory` are the collectors this build has |
+| `modules` | `{}` | `{"authentication": {"enabled": true}}`, to collect what sshd decides, `{"inventory": {"enabled": true}}`, to take stock of what the host has, and `{"processes": {"enabled": true}}`, to take stock of the processes it runs: `authentication`, `inventory` and `processes` are the collectors this build has |
 | `modules.inventory.interval` | `1h` | `1m` to `24h`: how often the inventory takes stock; a collector that follows its source, as `authentication` does, takes none |
+| `modules.processes.interval` | `1h` | `1m` to `24h`: how often the processes module takes stock |
 | `resources.memory_limit` | `256MiB` | `64MiB` to `8GiB` |
 | `resources.max_concurrent_scans` | `2` | 1 to 64 |
 | `resources.max_scan_bytes_per_second` | `8MiB` | `1MiB` to `1GiB` |
@@ -449,8 +450,8 @@ how long and how often the agent renews its credential, which collectors run,
 and where and in what batches it delivers what they collect. A reload applies
 `modules` whole: a collector it no longer names is stopped and the agent waits
 for it, and one it names again starts where it stopped, while a new
-`modules.inventory.interval` takes effect after the round the inventory is
-waiting for. A module this build does not have is refused, and so is `updates.enabled`: an
+`modules.inventory.interval` or `modules.processes.interval` takes effect after
+the round its module is waiting for. A module this build does not have is refused, and so is `updates.enabled`: an
 agent that accepted either would be promising collection it cannot do or
 updates it cannot install.
 
@@ -718,9 +719,8 @@ the debug level, with how many kinds it admitted.
 
 What it does not take:
 
-- the processes running. `ProtectProc=invisible` keeps them out of the
-  service's sight, and their command lines carry what nobody configured the
-  agent to keep; process visibility belongs to a collector of its own;
+- the processes running, which the [processes module](#processes) takes once
+  an operator shows the agent every process;
 - packages of any manager but dpkg: rpm, apk, snap, flatpak and those of a
   language, and a host without dpkg has no package inventory;
 - accounts a directory service holds, the passwords and when an account last
@@ -773,6 +773,106 @@ The evidence:
   test, the records the installed agent delivered of what that host held, byte
   for byte, and holds what a recorded platform made of them.
 
+## Processes
+
+The processes module takes stock of the processes the host runs, as the
+`process` kind of `seagull.inventory.v1`: it is the [inventory](#inventory)'s
+collector run as a module of its own, with a baseline of its own,
+`collection/processes.json`, a phase of its own and its own
+`modules.processes.interval`, an hour unless the configuration says otherwise.
+It takes a complete snapshot of the processes as it starts and then every
+interval, and admits it when it differs from the last one it admitted, which a
+host's processes nearly always do, or once that one is a day old.
+
+It is off unless an operator turns it on, in two steps, because the service
+hides from the agent the processes of every account but its own
+(`ProtectProc=invisible`, as [Installing](#installing) lists). The service
+shows it every process with a drop-in:
+
+```ini
+# /etc/systemd/system/seagull-agent.service.d/processes.conf
+[Service]
+ProtectProc=default
+```
+
+followed by `systemctl daemon-reload`, and the module runs once `modules` names
+`{"processes": {"enabled": true}}` and the service is restarted. The drop-in
+shows the agent what procfs shows any account of a host whose procfs hides
+nothing: every process, its parent, its name, its account and when it started,
+and the arguments it was started with, which the agent never opens. Without the
+drop-in, the module sends nothing of the processes: `inventory_not_collected`
+says procfs is mounted for the agent with `hidepid=invisible`, its `recovery`
+names the drop-in, and the status reports the collection as degraded in the
+same words. A snapshot is never a part of the processes: one the agent cannot
+take whole, because procfs hides processes from it or refuses it one, or one of
+more than 10,000 processes, which the
+[recorded platform](#compatibility-with-the-platform) takes no more of in a
+record, is not admitted.
+
+| Field | What it says |
+| --- | --- |
+| `pid` | the process, as `/proc` names its directory |
+| `parent_pid` | the parent `stat` names, when the snapshot holds a process of that PID that started no later than its child, and 0 otherwise, so a PID another process took over between two reads is nobody's parent |
+| `name` | the name the kernel keeps for the process, as `stat` gives it: the first 15 bytes of its program's, unless the process chose another, as any process may. A name that is printable UTF-8 is sent as it is, any other quoted as Go quotes a string, such as `"\xff) S 1 ("`, so no name keeps the other processes out of the snapshot |
+| `user` | the account the process acts as, its effective uid in `status`, named as `/etc/passwd` names that uid first, and by the uid when it does not |
+| `started_at` | when the process started: the boot time `/proc/stat` gives, to the second, and the ticks since boot `stat` counts at USER_HZ, 100 a second on every architecture Go builds Linux for, so a process is the same item in every snapshot while the clock is not set |
+| `path` | the executable `/proc/<pid>/exe` links, of the processes of the agent's own account alone: procfs shows that link of another account's process only to whoever may trace it, which takes `CAP_SYS_PTRACE` |
+| `command_line` | nothing: the agent opens neither the arguments nor the environment of any process, and an architecture test refuses production code that names either file |
+
+Each process is read through the directory `/proc` keeps of it, held open while
+its files are read, so a process that ends meanwhile is left out of the
+snapshot, as one that ended before it, rather than read as the process that
+took its PID. The platform tells processes apart by their PID and the moment
+they started, so a later snapshot retires the processes that ended.
+
+A round reads `stat` and `status` of every process, which costs the kernel more
+than the agent: reading 413 processes took 20 ms of processor time on the 8
+processors and Linux 7.0 this was developed on, averaged over 50 readings, and
+in the native gate's container, which runs about ten processes, a whole round,
+admitted to the spool and written down, took between 4 and 56 ms in the runs
+recorded.
+
+What it does not take or claim:
+
+- every process that ran: a snapshot holds the processes alive as it is taken,
+  once an interval, and a process that starts and ends between two is never
+  seen;
+- what a process is: a process chooses its own name, a setuid program acts as
+  an account other than the one that ran it, and an executable can be replaced
+  under a process that runs it, as a path ending in ` (deleted)` says;
+- the executable of another account's process, a hash or a signature of any
+  executable, a namespace or a container, which the contract has no field for;
+- when processes start and end: the contracts the agent is built with have no
+  event class for a process, and the agent sends none until the platform takes
+  them;
+- the processes of another PID namespace than the agent's, which a container
+  of its own would hide.
+
+The evidence:
+
+- `internal/platform/processes` is tested against procfs trees written by the
+  test, with names that hold parentheses, line breaks and bytes that are no
+  text, a process that ends as it is read, mounts that hide processes, more
+  processes than taken and files that do not read whole, and against this
+  host's own processes; a fuzz target holds what `stat` reads as;
+- `internal/modules/inventory` takes the processes as procfs shows them, names
+  no parent that started after its child, quotes what is no text, names each
+  account as the account files do, and takes no snapshot of processes it
+  cannot see whole, in a module that keeps a baseline of its own;
+- the agent, started by `cmd/seagull-agent`'s tests on the host that runs them,
+  admits one snapshot of the processes, in which it finds itself with its
+  executable and its parent;
+- the [native gate](#installing) enables the module on the installed service,
+  checks that it reports the processes hidden, sends nothing of them and says
+  how to show them; then adds the drop-in and checks that every process the
+  superuser read alike before and after the round was delivered as procfs said
+  of it, a process of `nobody` that named itself `"\xff) S 1 ("` quoted, the
+  agent's own processes alone with their executable, and no process with a
+  command line or a parent that started after it; then stops that process and
+  checks it is gone from the next snapshot;
+- `tests/compatibility` holds what a recorded platform made of the snapshots
+  the installed agent delivered.
+
 ## Privileges
 
 The agent is one process running as one account, and everything it does happens
@@ -787,6 +887,7 @@ is not one.
 | Reach the platform | an outgoing TLS connection, which needs no privilege |
 | Collect what sshd decides | read the system journal, as a member of `systemd-journal`, which the package makes the account and the service grants again |
 | Take stock of what the host has | read what the host shows any account: os-release, procfs, sysfs, the account files, dpkg's database through `dpkg-query`, and systemd's services through `systemctl`, which reaches systemd over the system bus, a local socket |
+| Take stock of the processes | read what procfs shows any account of every process, once the service shows the agent every process; the executable of another account's process takes `CAP_SYS_PTRACE`, which the agent is never given, so it goes without |
 
 Nothing on that list needs the superuser, a Linux capability, or a helper of its
 own. A collector that needs more names it there, and the packaging grants that
@@ -2613,6 +2714,9 @@ conventions:
   sends only to a platform it authenticated, over a client whose every bound it
   set;
 - production code reads nothing from the environment the agent was started in;
+- production code names neither the `cmdline` nor the `environ` file procfs
+  keeps of a process, so the agent reads the arguments and the environment of
+  no process;
 - production code never recovers from a panic.
 
 The dependency rules are checked against the build graph Go computes for each
@@ -2711,7 +2815,13 @@ agent's ceiling of 960 KiB was durable, and one of 1,000,100 bytes was answered
 as the backbone being unavailable, as it would be for good. The suite takes again the
 records the agent delivered from what the host held, byte for byte, so a change
 to what the collector makes of the host fails it until both are recorded
-again. The suite fails when `go.mod`
+again. The same commit held what the [processes module](#processes) delivered
+of the processes of the gate's host, which the native gate recorded in two
+rounds: once the service showed the agent every process, then once a process
+of `nobody` that had named itself `"\xff) S 1 ("` ended. After each round it
+held as current the processes the latest snapshot named, as it named them, to
+the millisecond its store keeps a moment to: the probe quoted, then gone; and
+sending both snapshots again changed nothing it held. The suite fails when `go.mod`
 pins contracts no recorded platform was built with, when a recorded platform
 never durably accepted a version the agent speaks, or when a recorded refusal
 reads differently. Compatibility is claimed only with recorded platforms, for
