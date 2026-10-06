@@ -59,6 +59,7 @@ import (
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
+	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
 
 const childArguments = "SEAGULL_AGENT_TEST_ARGUMENTS"
@@ -1711,6 +1712,58 @@ func TestTheAgentTakesStockOfThisHostOnceAndAgainOnlyWhenItChanges(t *testing.T)
 	}
 	if code, _ := stop(); code != 0 {
 		t.Fatalf("the agent exited with %d", code)
+	}
+}
+
+func TestTheAgentTakesStockOfTheProcessesItSeesAsAModuleOfTheirOwn(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the agent takes stock of the processes of linux hosts")
+	}
+	state := stateDirectory(t)
+	path := configured(t, state, map[string]string{"modules": `{"processes": {"enabled": true}}`, "logging": `{"level": "debug"}`})
+	entries, stop := running(t, path)
+	if started := await(t, entries, "module_started"); started["module"] != "processes" || started["state"] != "running" {
+		t.Errorf("the agent started %v", started)
+	}
+	admitted, round := taking(t, entries)
+	if !slices.Equal(admitted, []string{"process"}) || round["module"] != "processes" {
+		t.Errorf("taking stock of the processes the agent admitted %v and ended with %v", admitted, round)
+	}
+	if code, _ := stop(); code != 0 {
+		t.Fatalf("the agent exited with %d", code)
+	}
+	root, err := os.OpenRoot(filepath.Join(state, spoolDirectory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	kept, err := spool.Open(root, spool.Limits{MaxBytes: 64 << 20}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kept.Close()
+	held, err := kept.Read(spool.Inventory, 1, 16, 64<<20)
+	if err != nil || len(held) != 1 {
+		t.Fatalf("the spool holds %d inventory records: %v", len(held), err)
+	}
+	record := &inventoryv1.Record{}
+	if err := proto.Unmarshal(held[0].Payload, record); err != nil || record.GetKind() != inventoryv1.Kind_KIND_PROCESS || record.GetCollection().GetCollector() != "processes" {
+		t.Fatalf("the spool holds %v: %v", record, err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pids := map[uint32]*inventoryv1.Process{}
+	for _, item := range record.GetItems() {
+		pids[item.GetProcess().GetPid()] = item.GetProcess()
+		if item.GetProcess().GetCommandLine() != "" {
+			t.Errorf("the agent took the command line of %v", item.GetProcess())
+		}
+	}
+	own := pids[uint32(os.Getpid())]
+	if own.GetPath() != executable || own.GetParentPid() != uint32(os.Getppid()) || pids[1] == nil || pids[uint32(os.Getppid())] == nil {
+		t.Errorf("of %d processes, the agent took itself as %v", len(pids), own)
 	}
 }
 
