@@ -2,17 +2,25 @@ package inventory
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
+	"unicode"
 	"unicode/utf8"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/accounts"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dpkg"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/interfaces"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/machine"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/processes"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/services"
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
 
@@ -20,6 +28,7 @@ const (
 	manager    = "dpkg"
 	cut        = "..."
 	maxDisplay = 256
+	maxPath    = 4096
 )
 
 // Host is what the collector reads of the machine it runs on, each kind
@@ -33,6 +42,7 @@ type Host interface {
 	Services(ctx context.Context) ([]services.Service, error)
 	Interfaces() ([]interfaces.Interface, error)
 	Accounts() (accounts.Database, error)
+	Processes(ctx context.Context) ([]processes.Process, error)
 }
 
 type system struct{}
@@ -49,6 +59,9 @@ func (system) Services(ctx context.Context) ([]services.Service, error) {
 }
 func (system) Interfaces() ([]interfaces.Interface, error) { return interfaces.List() }
 func (system) Accounts() (accounts.Database, error)        { return accounts.Read() }
+func (system) Processes(ctx context.Context) ([]processes.Process, error) {
+	return processes.List(ctx, protocol.MaxInventoryItemsPerRecord)
+}
 
 type taker struct {
 	kind   inventoryv1.Kind
@@ -64,6 +77,7 @@ var kinds = []taker{
 	{kind: inventoryv1.Kind_KIND_SERVICE, source: "systemd", take: takeServices},
 	{kind: inventoryv1.Kind_KIND_NETWORK_INTERFACE, source: "sysfs", take: takeInterfaces},
 	{kind: inventoryv1.Kind_KIND_USER, source: "passwd", take: takeAccounts},
+	{kind: inventoryv1.Kind_KIND_PROCESS, source: "procfs", take: takeProcesses},
 }
 
 func takeDistribution(_ context.Context, host Host) ([]*inventoryv1.Item, int, error) {
@@ -198,16 +212,67 @@ func takeAccounts(_ context.Context, host Host) ([]*inventoryv1.Item, int, error
 	return items, held.Skipped, nil
 }
 
+func takeProcesses(ctx context.Context, host Host) ([]*inventoryv1.Item, int, error) {
+	running, err := host.Processes(ctx)
+	switch {
+	case errors.Is(err, processes.ErrTooMany):
+		return nil, 0, fmt.Errorf("%w: %w", ErrTooLarge, err)
+	case err != nil:
+		return nil, 0, err
+	}
+	named := map[uint32]string{}
+	if held, err := host.Accounts(); err == nil {
+		for _, account := range held.Accounts {
+			if _, found := named[account.UID]; !found {
+				named[account.UID] = account.Name
+			}
+		}
+	}
+	started := make(map[uint32]time.Time, len(running))
+	for _, process := range running {
+		started[process.PID] = process.StartedAt
+	}
+	items := make([]*inventoryv1.Item, 0, len(running))
+	for _, process := range running {
+		parent := process.Parent
+		if at, held := started[parent]; !held || at.After(process.StartedAt) {
+			parent = 0
+		}
+		user, found := named[process.User]
+		if !found {
+			user = strconv.FormatUint(uint64(process.User), 10)
+		}
+		path := ""
+		if process.Executable != "" {
+			path = told(process.Executable, maxPath)
+		}
+		items = append(items, &inventoryv1.Item{Body: &inventoryv1.Item_Process{Process: &inventoryv1.Process{
+			Pid: process.PID, ParentPid: parent, Name: told(process.Name, maxDisplay), Path: path, User: told(user, maxDisplay), StartedAt: timestamppb.New(process.StartedAt),
+		}}})
+	}
+	return items, 0, nil
+}
+
 // shown is text the host describes something with, as the platform keeps it:
 // a description is no identity, so one longer than the platform takes is cut
 // rather than lose the whole kind it belongs to, and what is not UTF-8 is
 // replaced rather than refused.
 func shown(text string) string {
-	text = strings.ToValidUTF8(text, "\uFFFD")
-	if len(text) <= maxDisplay {
+	return bounded(strings.ToValidUTF8(text, "\uFFFD"), maxDisplay)
+}
+
+func told(text string, most int) string {
+	if text == "" || !utf8.ValidString(text) || strings.IndexFunc(text, func(held rune) bool { return !unicode.IsPrint(held) }) >= 0 {
+		text = strconv.Quote(text)
+	}
+	return bounded(text, most)
+}
+
+func bounded(text string, most int) string {
+	if len(text) <= most {
 		return text
 	}
-	held := text[:maxDisplay-len(cut)]
+	held := text[:most-len(cut)]
 	for !utf8.ValidString(held) {
 		held = held[:len(held)-1]
 	}
