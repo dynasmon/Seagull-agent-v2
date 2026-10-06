@@ -205,7 +205,7 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 		if err = proto.Unmarshal(content, &batch); err == nil {
 			for _, record := range batch.GetRecords() {
 				ids = append(ids, record.GetRecordId())
-				if record.GetCollection().GetCollector() == "inventory" {
+				if collector := record.GetCollection().GetCollector(); collector == "inventory" || collector == "processes" {
 					stocked = append(stocked, record)
 				}
 			}
