@@ -247,7 +247,10 @@ func (g *gate) checkProcesses(t *testing.T, name, changed string, record *invent
 		if process.User == uint32(g.uid) {
 			path = process.Executable
 		}
-		if delivered.GetUser() != user || delivered.GetPath() != path || printable(process.Name) && delivered.GetName() != process.Name {
+		worker, _, _ := strings.Cut(process.Name, "-")
+		working := process.Parent == 2 && strings.HasPrefix(worker, "kworker/")
+		named := delivered.GetName() == process.Name || working && (delivered.GetName() == worker || strings.HasPrefix(delivered.GetName(), worker+"-"))
+		if delivered.GetUser() != user || delivered.GetPath() != path || printable(process.Name) && !named {
 			t.Errorf("process %d (%q of %d, run from %q) was delivered as %v", process.PID, process.Name, process.User, process.Executable, delivered)
 		}
 		if parent, found := stable[process.Parent]; found && !parent.StartedAt.After(process.StartedAt) && delivered.GetParentPid() != process.Parent {
