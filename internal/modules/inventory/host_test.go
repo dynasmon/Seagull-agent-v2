@@ -18,6 +18,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dpkg"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/interfaces"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/machine"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/processes"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/services"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
@@ -38,6 +39,7 @@ type fakeHost struct {
 	services   []services.Service
 	interfaces []interfaces.Interface
 	accounts   accounts.Database
+	processes  []processes.Process
 	failures   map[string]error
 }
 
@@ -65,9 +67,17 @@ func newHost() *fakeHost {
 			Accounts: []accounts.Account{{Name: "root", Home: "/root", Shell: "/bin/bash"}, {Name: "seagull-agent", UID: 997, GID: 997, Home: "/", Shell: "/usr/sbin/nologin"}},
 			Groups:   []accounts.Group{{Name: "root"}, {Name: "systemd-journal", GID: 999, Members: []string{"seagull-agent"}}, {Name: "seagull-agent", GID: 997}},
 		},
+		processes: []processes.Process{
+			{PID: 1, Name: "systemd", StartedAt: booted.Add(2 * time.Second)},
+			{PID: 2, Name: "kthreadd", StartedAt: booted.Add(2 * time.Second)},
+			{PID: 812, Parent: 1, Name: "sshd", StartedAt: booted.Add(9 * time.Second)},
+			{PID: 4242, Parent: 1, User: 997, Name: "seagull-agent", StartedAt: booted.Add(time.Hour), Executable: "/usr/bin/seagull-agent"},
+		},
 		failures: map[string]error{},
 	}
 }
+
+var booted = time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
 
 func (h *fakeHost) change(change func(*fakeHost)) {
 	h.mu.Lock()
@@ -121,6 +131,12 @@ func (h *fakeHost) Accounts() (accounts.Database, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.accounts, h.failures["user"]
+}
+
+func (h *fakeHost) Processes(context.Context) ([]processes.Process, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.processes), h.failures["process"]
 }
 
 func taken(t *testing.T, host inventory.Host, kind inventoryv1.Kind, at time.Time) inventory.Snapshot {
