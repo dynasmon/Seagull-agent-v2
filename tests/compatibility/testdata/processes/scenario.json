@@ -1,0 +1,44 @@
+{
+  "agent_id": "web-01",
+  "batches": 2,
+  "build": "seagull-agent v0.0.0-20261006163658-3dc6812e68dd go1.26.8 linux/amd64\nprotocol_version 1\nevent_schema_version 1\ninventory_schema_version 1",
+  "host": {
+    "kernel": "7.0.0-38-generic",
+    "systemd": "systemd 255 (255.4-1ubuntu8.17)"
+  },
+  "installation_id": "5095e136-7a10-4ad9-98ad-ef02bc9cffbd",
+  "probe": {
+    "account": "nobody",
+    "named": "\"\\xff) S 1 (\"",
+    "unit": "seagull-native-gate-named.service"
+  },
+  "recorded_at": "2026-10-06T16:39:31.031989721Z",
+  "rounds": [
+    {
+      "name": "first",
+      "changed": "the service shows the agent every process",
+      "records": [
+        {
+          "collected_at": "2026-10-06T16:39:30.780644226Z",
+          "kind": "process",
+          "record_id": "ac8af77d-3ca0-876f-8482-ca6aab782042"
+        }
+      ],
+      "stable": 7,
+      "items": 10
+    },
+    {
+      "name": "ended",
+      "changed": "the process that named itself ended",
+      "records": [
+        {
+          "collected_at": "2026-10-06T16:39:30.906157403Z",
+          "kind": "process",
+          "record_id": "c5d72b12-22b1-8c01-a7f1-2e69666ae317"
+        }
+      ],
+      "stable": 6,
+      "items": 8
+    }
+  ]
+}
