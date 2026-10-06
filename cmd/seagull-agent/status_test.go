@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -411,7 +412,9 @@ func TestTheStatusSaysWhatTheInventoryCannotAdmitAndWhatToDo(t *testing.T) {
 		t.Fatal(err)
 	}
 	shared := accounts.Database{Accounts: []accounts.Account{{Name: "root"}, {Name: "toor"}}}
+	hidden := fmt.Errorf("%w: procfs is mounted for the agent with hidepid=invisible", processes.ErrHidden)
 	for name, held := range map[string]struct {
+		module   string
 		host     describedHost
 		state    status.State
 		reason   string
@@ -423,10 +426,14 @@ func TestTheStatusSaysWhatTheInventoryCannotAdmitAndWhatToDo(t *testing.T) {
 			reason: "inventory: user is not admitted: " + accounts.ErrUnreadable.Error(), recovery: "none: the agent takes the kind again at its next round"},
 		"accounts sharing a uid": {host: describedHost{accounts: shared}, state: status.Running,
 			reason: `the platform holds as one user "0": "root", "toor"`},
+		"processes the service hides": {module: inventory.Processes, host: describedHost{failures: map[string]error{"process": hidden}}, state: status.Degraded,
+			reason: "processes: process is not admitted: " + hidden.Error(), recovery: inventory.Recovery(hidden)},
+		"processes it sees": {module: inventory.Processes, state: status.Running},
 	} {
 		t.Run(name, func(t *testing.T) {
+			module := cmp.Or(held.module, inventory.Name)
 			collector, err := inventory.New(inventory.Options{
-				Installation: "5d0f6c9e-6a4b-4f43-9a3f-2f5a8f8f7c11", Spool: kept, Governor: governed, Directory: root("collection"), Logger: logger, Host: held.host,
+				Module: module, Installation: "5d0f6c9e-6a4b-4f43-9a3f-2f5a8f8f7c11", Spool: kept, Governor: governed, Directory: root("collection"), Logger: logger, Host: held.host,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -434,13 +441,16 @@ func TestTheStatusSaysWhatTheInventoryCannotAdmitAndWhatToDo(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			done := make(chan error, 2)
 			go func() { done <- collector.Collect(ctx) }()
-			collection, err := modules.New(logger, modules.Policy{}, modules.Module{Name: inventory.Name, Enabled: true, Collect: func(ctx context.Context) error { <-ctx.Done(); return nil }})
+			collection, err := modules.New(logger, modules.Policy{}, modules.Module{Name: module, Enabled: true, Collect: func(ctx context.Context) error { <-ctx.Done(); return nil }})
 			if err != nil {
 				t.Fatal(err)
 			}
 			go func() { done <- collection.Run(ctx) }()
 			defer func() { cancel(); <-done; <-done }()
 			observed := &observing{path: "/etc/seagull-agent/agent.json", collection: collection, inventory: collector}
+			if module == inventory.Processes {
+				observed.inventory, observed.processes = nil, collector
+			}
 			deadline := time.Now().Add(5 * time.Second)
 			for collector.Stats().Round.IsZero() || collection.Health()[0].State != modules.Running {
 				if time.Now().After(deadline) {
