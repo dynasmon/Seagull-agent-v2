@@ -3,6 +3,8 @@ package inventory_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"maps"
 	"net/netip"
 	"runtime"
 	"slices"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/accounts"
@@ -256,5 +259,111 @@ func TestAnAccountBelongsToItsOwnGroupAndToEveryGroupThatListsIt(t *testing.T) {
 	}
 	if user := items[1].GetUser(); user.GetGid() != "4242" || len(user.GetGroups()) != 0 {
 		t.Errorf("an account whose group the host does not name is %v", user)
+	}
+}
+
+func TestEachProcessIsWhatProcfsSaysOfItAndNamesTheAccountItActsAs(t *testing.T) {
+	at := time.Date(2026, 10, 6, 13, 0, 0, 0, time.UTC)
+	host := newHost()
+	host.accounts.Accounts = append(host.accounts.Accounts, accounts.Account{Name: "toor", Home: "/root", Shell: "/bin/sh"})
+	host.processes = append(host.processes, processes.Process{PID: 900, Parent: 812, User: 1000, Name: "bash", StartedAt: booted.Add(2 * time.Hour)})
+	held := taken(t, host, inventoryv1.Kind_KIND_PROCESS, at)
+	record := held.Record
+	if record.GetCollection().GetCollector() != "processes" || record.GetCollection().GetSource() != "procfs" || record.GetMode() != inventoryv1.Mode_MODE_SNAPSHOT {
+		t.Errorf("the process record is %v", record)
+	}
+	started := func(since time.Duration) *timestamppb.Timestamp { return timestamppb.New(booted.Add(since)) }
+	want := []*inventoryv1.Item{
+		{Body: &inventoryv1.Item_Process{Process: &inventoryv1.Process{Pid: 1, Name: "systemd", User: "root", StartedAt: started(2 * time.Second)}}},
+		{Body: &inventoryv1.Item_Process{Process: &inventoryv1.Process{Pid: 2, Name: "kthreadd", User: "root", StartedAt: started(2 * time.Second)}}},
+		{Body: &inventoryv1.Item_Process{Process: &inventoryv1.Process{Pid: 4242, ParentPid: 1, Name: "seagull-agent", Path: "/usr/bin/seagull-agent", User: "seagull-agent", StartedAt: started(time.Hour)}}},
+		{Body: &inventoryv1.Item_Process{Process: &inventoryv1.Process{Pid: 812, ParentPid: 1, Name: "sshd", User: "root", StartedAt: started(9 * time.Second)}}},
+		{Body: &inventoryv1.Item_Process{Process: &inventoryv1.Process{Pid: 900, ParentPid: 812, Name: "bash", User: "1000", StartedAt: started(2 * time.Hour)}}},
+	}
+	if !slices.EqualFunc(record.GetItems(), want, func(a, b *inventoryv1.Item) bool { return proto.Equal(a, b) }) {
+		t.Errorf("the processes are\n%v\nwant\n%v", record.GetItems(), want)
+	}
+	if other := taken(t, host, inventoryv1.Kind_KIND_PACKAGE, at); other.Record.GetRecordId() == record.GetRecordId() || other.Record.GetCollection().GetCollector() != "inventory" {
+		t.Errorf("the packages taken at the same moment are %v", other.Record)
+	}
+	host.failures["user"] = accounts.ErrUnreadable
+	if user := taken(t, host, inventoryv1.Kind_KIND_PROCESS, at).Record.GetItems()[0].GetProcess().GetUser(); user != "0" {
+		t.Errorf("without the account files, the superuser's process acts as %q", user)
+	}
+}
+
+func TestAProcessNamesAsParentOnlyAProcessThatStartedBeforeIt(t *testing.T) {
+	host := newHost()
+	host.processes = []processes.Process{
+		{PID: 1, Name: "init", StartedAt: booted},
+		{PID: 10, Parent: 1, Name: "same-tick", StartedAt: booted},
+		{PID: 20, Parent: 30, Name: "orphaned", StartedAt: booted.Add(time.Minute)},
+		{PID: 30, Parent: 1, Name: "took-the-pid", StartedAt: booted.Add(time.Hour)},
+		{PID: 40, Parent: 50, Name: "parent-ended", StartedAt: booted.Add(time.Minute)},
+	}
+	parents := map[string]uint32{}
+	for _, item := range taken(t, host, inventoryv1.Kind_KIND_PROCESS, time.Now()).Record.GetItems() {
+		parents[item.GetProcess().GetName()] = item.GetProcess().GetParentPid()
+	}
+	if want := map[string]uint32{"init": 0, "same-tick": 1, "orphaned": 0, "took-the-pid": 1, "parent-ended": 0}; !maps.Equal(parents, want) {
+		t.Errorf("the processes name their parents as %v, want %v", parents, want)
+	}
+}
+
+func TestNoNameAProcessChoosesKeepsTheOthersOut(t *testing.T) {
+	host := newHost()
+	host.processes = []processes.Process{
+		{PID: 1, Name: "init", StartedAt: booted},
+		{PID: 2, Parent: 1, Name: "", StartedAt: booted},
+		{PID: 3, Parent: 1, Name: "\xff\xfe) S 1 (", StartedAt: booted},
+		{PID: 4, Parent: 1, Name: "tab\there\nand there", StartedAt: booted},
+		{PID: 5, Parent: 1, Name: strings.Repeat("\xff", 64), StartedAt: booted, Executable: "/" + strings.Repeat("d", 4094) + " (deleted)"},
+		{PID: 6, Parent: 1, Name: "ok", User: 42, StartedAt: booted, Executable: "/opt/\xffbin/run"},
+	}
+	host.accounts.Accounts = append(host.accounts.Accounts, accounts.Account{Name: "user\xff", UID: 42})
+	items := taken(t, host, inventoryv1.Kind_KIND_PROCESS, time.Now()).Record.GetItems()
+	got := map[uint32]*inventoryv1.Process{}
+	for _, item := range items {
+		got[item.GetProcess().GetPid()] = item.GetProcess()
+	}
+	if name := got[2].GetName(); name != `""` {
+		t.Errorf("a process without a name is named %q", name)
+	}
+	if name := got[3].GetName(); name != `"\xff\xfe) S 1 ("` {
+		t.Errorf("a process named in bytes that are no text is named %q", name)
+	}
+	if name := got[4].GetName(); name != `"tab\there\nand there"` {
+		t.Errorf("a process named with control characters is named %q", name)
+	}
+	if name, path := got[5].GetName(), got[5].GetPath(); len(name) > 256 || !strings.HasPrefix(name, `"\xff`) || !strings.HasSuffix(name, "...") || len(path) > 4096 || !strings.HasSuffix(path, "...") {
+		t.Errorf("a process of a long name run from a long path is named %q, %d bytes, run from %d bytes", name, len(name), len(path))
+	}
+	if path, user := got[6].GetPath(), got[6].GetUser(); path != `"/opt/\xffbin/run"` || user != `"user\xff"` {
+		t.Errorf("a process run from a path that is no text by an account named in bytes is run from %q as %q", path, user)
+	}
+	for _, item := range items {
+		if item.GetProcess().GetCommandLine() != "" {
+			t.Errorf("a process carries the command line %q", item.GetProcess().GetCommandLine())
+		}
+	}
+}
+
+func TestProcessesTheAgentCannotSeeAllOfAreNoSnapshot(t *testing.T) {
+	host := newHost()
+	host.failures["process"] = fmt.Errorf("%w: procfs is mounted for the agent with hidepid=invisible", processes.ErrHidden)
+	held, err := inventory.Take(t.Context(), host, installation, inventoryv1.Kind_KIND_PROCESS, time.Now())
+	if !errors.Is(err, processes.ErrHidden) || errors.Is(err, inventory.ErrUnsupported) || held.Record != nil {
+		t.Errorf("hidden processes gave %v", err)
+	}
+	if recovery := inventory.Recovery(err); !strings.Contains(recovery, "ProtectProc=default") {
+		t.Errorf("hidden processes are recovered from by %q", recovery)
+	}
+	host.failures["process"] = fmt.Errorf("%w: more than %d", processes.ErrTooMany, protocol.MaxInventoryItemsPerRecord)
+	if _, err := inventory.Take(t.Context(), host, installation, inventoryv1.Kind_KIND_PROCESS, time.Now()); !errors.Is(err, inventory.ErrTooLarge) {
+		t.Errorf("more processes than the platform takes in a record gave %v", err)
+	}
+	host.failures["process"] = fmt.Errorf("read the processes of windows: %w", errors.ErrUnsupported)
+	if _, err := inventory.Take(t.Context(), host, installation, inventoryv1.Kind_KIND_PROCESS, time.Now()); !errors.Is(err, inventory.ErrUnsupported) {
+		t.Errorf("a host without procfs gave %v", err)
 	}
 }
