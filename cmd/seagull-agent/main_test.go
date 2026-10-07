@@ -924,6 +924,28 @@ func TestAnAgentHoldingMoreThanAnythingItDoesNeedsSaysSo(t *testing.T) {
 	}
 }
 
+func TestAnAgentWatchingFilesMayReadWhatOnlyRootReadsAndNothingMore(t *testing.T) {
+	watching := config.Config{Modules: config.Modules{"files": {Enabled: true}}}
+	for _, held := range []struct {
+		capabilities []string
+		settings     config.Config
+		level        string
+		beyond       []any
+	}{
+		{capabilities: []string{"CAP_DAC_READ_SEARCH"}, settings: watching, level: "INFO"},
+		{capabilities: []string{"CAP_DAC_READ_SEARCH", "CAP_SYS_PTRACE"}, settings: watching, level: "WARN", beyond: []any{"CAP_SYS_PTRACE"}},
+		{capabilities: []string{"CAP_DAC_READ_SEARCH"}, settings: config.Config{Modules: config.Modules{"files": {Enabled: false}}}, level: "WARN", beyond: []any{"CAP_DAC_READ_SEARCH"}},
+	} {
+		var logs bytes.Buffer
+		privileged(slog.New(slog.NewJSONHandler(&logs, nil)), privileges.Privileges{User: 987, Group: 987, Capabilities: held.capabilities}, needed(held.settings))
+		reported, found := logged(t, logs.String(), "agent_privileges")
+		beyond, _ := reported["beyond"].([]any)
+		if !found || reported["level"] != held.level || !slices.Equal(beyond, held.beyond) {
+			t.Errorf("an agent holding %v with %v reported %v", held.capabilities, held.settings.Modules, reported)
+		}
+	}
+}
+
 func TestAnAgentItsServiceKeepsFromItsStateDirectoryIsToldWhereItMayWrite(t *testing.T) {
 	path := configured(t, stateDirectory(t), nil)
 	unwritten := fmt.Errorf("create the installation state directory: %w", &fs.PathError{Op: "mkdir", Path: "/srv/seagull-agent", Err: syscall.EROFS})
@@ -1666,6 +1688,109 @@ func TestTheAgentCollectsAuthenticationWhileItsConfigurationNamesIt(t *testing.T
 	}
 	if err := agent.Wait(); err != nil {
 		t.Fatalf("the agent exited with %v, want a clean exit", err)
+	}
+}
+
+// A directory beside the package the test runs in: the agent refuses to
+// watch what the service gives it a temporary directory of its own for, which
+// is where the test's other directories are.
+func outsideTemporary(t *testing.T) string {
+	t.Helper()
+	made, err := os.MkdirTemp(".", ".watched-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(made) })
+	absolute, err := filepath.Abs(made)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, refused := range []string{"/tmp", "/var/tmp"} {
+		if strings.HasPrefix(absolute, refused+"/") {
+			t.Skipf("the checkout is within %s, which the agent watches nothing of", refused)
+		}
+	}
+	return absolute
+}
+
+func TestTheAgentWatchesTheFilesItIsToldToAndWritesDownWhatChanges(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the agent watches the files of linux hosts")
+	}
+	watched := outsideTemporary(t)
+	if err := os.WriteFile(filepath.Join(watched, "config"), []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state := stateDirectory(t)
+	path := configured(t, state, map[string]string{"modules": fmt.Sprintf(`{"files": {"enabled": true, "paths": [%q]}}`, watched)})
+	agent := exec.CommandContext(t.Context(), os.Args[0])
+	agent.Env = append(os.Environ(), childArguments+"=-config "+path+" run")
+	logs, err := agent.StderrPipe()
+	if err != nil {
+		t.Fatalf("attach to the agent's log: %v", err)
+	}
+	if err := agent.Start(); err != nil {
+		t.Fatalf("start the agent: %v", err)
+	}
+	entries := follow(t, logs)
+	if started := await(t, entries, "module_started"); started["module"] != "files" || started["state"] != "running" {
+		t.Errorf("the agent started %v", started)
+	}
+	if watching := await(t, entries, "files_watched"); watching["entries"] != float64(2) || watching["module"] != "files" {
+		t.Errorf("the agent took the baseline as %v", watching)
+	}
+	if err := os.WriteFile(filepath.Join(watched, "config"), []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed := await(t, entries, "file_changed")
+	if changed["path"] != filepath.Join(watched, "config") || changed["operation"] != "modified" || changed["origin"] != "realtime" {
+		t.Errorf("the agent wrote down %v", changed)
+	}
+
+	rewrite(t, path, state, map[string]string{"modules": fmt.Sprintf(`{"files": {"enabled": true, "paths": [%q], "exclude": ["*.swp"]}}`, watched)})
+	hangup(t, agent)
+	await(t, entries, "configuration_reloaded")
+	if walked := await(t, entries, "files_walked"); walked["because"] != "scope" {
+		t.Errorf("the agent walked %v", walked)
+	}
+	for _, name := range []string{".config.swp", "new"} {
+		if err := os.WriteFile(filepath.Join(watched, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if created := await(t, entries, "file_changed"); created["path"] != filepath.Join(watched, "new") || created["operation"] != "created" {
+		t.Errorf("with swap files left out, the agent wrote down %v", created)
+	}
+
+	if err := agent.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("send SIGTERM: %v", err)
+	}
+	await(t, entries, "agent_stopped")
+	for entry := range entries {
+		if entry["msg"] == "file_changed" {
+			t.Errorf("the agent wrote down %v", entry)
+		}
+	}
+	if err := agent.Wait(); err != nil {
+		t.Fatalf("the agent exited with %v, want a clean exit", err)
+	}
+	if described, err := os.Stat(filepath.Join(state, collectionDirectory, "files.json")); err != nil || described.Mode().Perm() != 0o600 {
+		t.Errorf("the agent wrote down what it saw as %v, %v", described, err)
+	}
+	root, err := os.OpenRoot(filepath.Join(state, spoolDirectory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	kept, err := spool.Open(root, spool.Limits{MaxBytes: 64 << 20}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kept.Close()
+	for _, stream := range kept.Stats().Streams {
+		if stream.Outstanding > 0 {
+			t.Errorf("watching files, the agent admitted %d records to %s", stream.Outstanding, stream.Stream)
+		}
 	}
 }
 
