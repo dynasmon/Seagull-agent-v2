@@ -1,0 +1,299 @@
+{
+  "agent": {
+    "agent_id": "web-01",
+    "build": "seagull-agent v0.0.0-20261006163658-3dc6812e68dd go1.26.8 linux/amd64\nprotocol_version 1\nevent_schema_version 1\ninventory_schema_version 1",
+    "installation_id": "5095e136-7a10-4ad9-98ad-ef02bc9cffbd",
+    "recorded_at": "2026-10-06T16:39:31.031989721Z"
+  },
+  "platform": {
+    "admission_clock": "2026-10-06T16:40:31.031989721Z",
+    "broker": "redpandadata/redpanda:v24.2.20",
+    "commit": "0656b2ab8ae334f30e1119411695a77f90984a61",
+    "contracts": "v0.14.0",
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "store": "clickhouse/clickhouse-server:24.8"
+  },
+  "recorded_at": "2026-10-06T16:39:57.750886052Z",
+  "replayed": {
+    "answers": [
+      {
+        "outcome": "durable",
+        "accepted": true,
+        "durable": true,
+        "received": 1
+      },
+      {
+        "outcome": "durable",
+        "accepted": true,
+        "durable": true,
+        "received": 1
+      }
+    ],
+    "current": [
+      {
+        "pid": 1,
+        "parent_pid": 0,
+        "name": "systemd",
+        "user": "root",
+        "path": "",
+        "command_line": "",
+        "started_at": "2026-10-06T16:37:25.89Z"
+      },
+      {
+        "pid": 29,
+        "parent_pid": 1,
+        "name": "systemd-journal",
+        "user": "root",
+        "path": "",
+        "command_line": "",
+        "started_at": "2026-10-06T16:37:26.1Z"
+      },
+      {
+        "pid": 79,
+        "parent_pid": 1,
+        "name": "dbus-daemon",
+        "user": "messagebus",
+        "path": "",
+        "command_line": "",
+        "started_at": "2026-10-06T16:37:26.35Z"
+      },
+      {
+        "pid": 81,
+        "parent_pid": 1,
+        "name": "systemd-logind",
+        "user": "root",
+        "path": "",
+        "command_line": "",
+        "started_at": "2026-10-06T16:37:26.36Z"
+      },
+      {
+        "pid": 84,
+        "parent_pid": 1,
+        "name": "agetty",
+        "user": "root",
+        "path": "",
+        "command_line": "",
+        "started_at": "2026-10-06T16:37:26.37Z"
+      },
+      {
+        "pid": 98,
+        "parent_pid": 0,
+        "name": "native.test",
+        "user": "root",
+        "path": "",
+        "command_line": "",
+        "started_at": "2026-10-06T16:37:27.18Z"
+      },
+      {
+        "pid": 2217,
+        "parent_pid": 1,
+        "name": "seagull-agent",
+        "user": "seagull-agent",
+        "path": "/usr/bin/seagull-agent",
+        "command_line": "",
+        "started_at": "2026-10-06T16:39:30.63Z"
+      },
+      {
+        "pid": 2224,
+        "parent_pid": 98,
+        "name": "systemctl",
+        "user": "root",
+        "path": "",
+        "command_line": "",
+        "started_at": "2026-10-06T16:39:30.7Z"
+      }
+    ]
+  },
+  "rounds": [
+    {
+      "name": "first",
+      "record": "ac8af77d-3ca0-876f-8482-ca6aab782042",
+      "answers": [
+        {
+          "outcome": "durable",
+          "accepted": true,
+          "durable": true,
+          "received": 1
+        }
+      ],
+      "current": [
+        {
+          "pid": 1,
+          "parent_pid": 0,
+          "name": "systemd",
+          "user": "root",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:37:25.89Z"
+        },
+        {
+          "pid": 29,
+          "parent_pid": 1,
+          "name": "systemd-journal",
+          "user": "root",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:37:26.1Z"
+        },
+        {
+          "pid": 79,
+          "parent_pid": 1,
+          "name": "dbus-daemon",
+          "user": "messagebus",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:37:26.35Z"
+        },
+        {
+          "pid": 81,
+          "parent_pid": 1,
+          "name": "systemd-logind",
+          "user": "root",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:37:26.36Z"
+        },
+        {
+          "pid": 84,
+          "parent_pid": 1,
+          "name": "agetty",
+          "user": "root",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:37:26.37Z"
+        },
+        {
+          "pid": 98,
+          "parent_pid": 0,
+          "name": "native.test",
+          "user": "root",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:37:27.18Z"
+        },
+        {
+          "pid": 2158,
+          "parent_pid": 1,
+          "name": "\"\\xff) S 1 (\"",
+          "user": "nobody",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:39:30.37Z"
+        },
+        {
+          "pid": 2189,
+          "parent_pid": 1,
+          "name": "seagull-agent",
+          "user": "seagull-agent",
+          "path": "/usr/bin/seagull-agent",
+          "command_line": "",
+          "started_at": "2026-10-06T16:39:30.51Z"
+        },
+        {
+          "pid": 2196,
+          "parent_pid": 98,
+          "name": "systemctl",
+          "user": "root",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:39:30.57Z"
+        },
+        {
+          "pid": 2198,
+          "parent_pid": 2189,
+          "name": "journalctl",
+          "user": "seagull-agent",
+          "path": "/usr/bin/journalctl",
+          "command_line": "",
+          "started_at": "2026-10-06T16:39:30.57Z"
+        }
+      ]
+    },
+    {
+      "name": "ended",
+      "record": "c5d72b12-22b1-8c01-a7f1-2e69666ae317",
+      "answers": [
+        {
+          "outcome": "durable",
+          "accepted": true,
+          "durable": true,
+          "received": 1
+        }
+      ],
+      "current": [
+        {
+          "pid": 1,
+          "parent_pid": 0,
+          "name": "systemd",
+          "user": "root",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:37:25.89Z"
+        },
+        {
+          "pid": 29,
+          "parent_pid": 1,
+          "name": "systemd-journal",
+          "user": "root",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:37:26.1Z"
+        },
+        {
+          "pid": 79,
+          "parent_pid": 1,
+          "name": "dbus-daemon",
+          "user": "messagebus",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:37:26.35Z"
+        },
+        {
+          "pid": 81,
+          "parent_pid": 1,
+          "name": "systemd-logind",
+          "user": "root",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:37:26.36Z"
+        },
+        {
+          "pid": 84,
+          "parent_pid": 1,
+          "name": "agetty",
+          "user": "root",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:37:26.37Z"
+        },
+        {
+          "pid": 98,
+          "parent_pid": 0,
+          "name": "native.test",
+          "user": "root",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:37:27.18Z"
+        },
+        {
+          "pid": 2217,
+          "parent_pid": 1,
+          "name": "seagull-agent",
+          "user": "seagull-agent",
+          "path": "/usr/bin/seagull-agent",
+          "command_line": "",
+          "started_at": "2026-10-06T16:39:30.63Z"
+        },
+        {
+          "pid": 2224,
+          "parent_pid": 98,
+          "name": "systemctl",
+          "user": "root",
+          "path": "",
+          "command_line": "",
+          "started_at": "2026-10-06T16:39:30.7Z"
+        }
+      ]
+    }
+  ]
+}

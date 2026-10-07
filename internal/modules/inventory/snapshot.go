@@ -23,7 +23,10 @@ import (
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
 
-const Name = "inventory"
+const (
+	Name      = "inventory"
+	Processes = "processes"
+)
 
 var (
 	ErrUnsupported = errors.New("the agent does not take this kind of inventory on this host")
@@ -52,6 +55,15 @@ func Kinds() []inventoryv1.Kind {
 
 func KindName(kind inventoryv1.Kind) string {
 	return strings.ToLower(strings.TrimPrefix(kind.String(), "KIND_"))
+}
+
+// The module that takes a kind: what runs on the host is taken by a module of
+// its own, as only an operator can let the agent see every process.
+func moduleOf(kind inventoryv1.Kind) string {
+	if kind == inventoryv1.Kind_KIND_PROCESS {
+		return Processes
+	}
+	return Name
 }
 
 // Take reads one kind of what the host has and makes it a complete snapshot
@@ -88,13 +100,13 @@ func Take(ctx context.Context, host Host, installation string, kind inventoryv1.
 	}
 	hostname, _ := host.Hostname()
 	record := &inventoryv1.Record{
-		RecordId:      identify(installation, KindName(kind), at),
+		RecordId:      identify(moduleOf(kind), installation, KindName(kind), at),
 		SchemaVersion: protocol.InventorySchemaVersion,
 		Kind:          kind,
 		Mode:          inventoryv1.Mode_MODE_SNAPSHOT,
 		CollectedAt:   timestamppb.New(at),
 		Origin:        &eventv1.Origin{Host: &eventv1.Host{Hostname: hostname, Os: runtime.GOOS, Architecture: runtime.GOARCH}},
-		Collection:    &eventv1.Collection{Collector: Name, Source: described.source},
+		Collection:    &eventv1.Collection{Collector: moduleOf(kind), Source: described.source},
 		Items:         sorted,
 	}
 	if err := protocol.CheckInventory(record); err != nil {
@@ -165,8 +177,8 @@ func called(item *inventoryv1.Item) string {
 	return hex.EncodeToString(encoded[:min(len(encoded), 16)])
 }
 
-func identify(installation, kind string, at time.Time) string {
-	sum := sha256.Sum256(bytes.Join([][]byte{[]byte("seagull-agent/" + Name), []byte(installation), []byte(kind), []byte(at.UTC().Format(time.RFC3339Nano))}, []byte{0}))
+func identify(collector, installation, kind string, at time.Time) string {
+	sum := sha256.Sum256(bytes.Join([][]byte{[]byte("seagull-agent/" + collector), []byte(installation), []byte(kind), []byte(at.UTC().Format(time.RFC3339Nano))}, []byte{0}))
 	sum[6] = sum[6]&0x0f | 0x80
 	sum[8] = sum[8]&0x3f | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])

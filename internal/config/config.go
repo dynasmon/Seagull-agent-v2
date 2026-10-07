@@ -54,8 +54,8 @@ var (
 	levels     = map[string]slog.Level{"debug": slog.LevelDebug, "info": slog.LevelInfo, "warn": slog.LevelWarn, "error": slog.LevelError}
 	logFormats = []string{JSONLogs, TextLogs}
 	providers  = []string{KeysInFiles}
-	collectors = []string{"authentication", "inventory"}
-	periodic   = map[string]Duration{"inventory": Duration(time.Hour)}
+	collectors = []string{"authentication", "inventory", "processes"}
+	periodic   = map[string]Duration{"inventory": Duration(time.Hour), "processes": Duration(time.Hour)}
 )
 
 type Config struct {

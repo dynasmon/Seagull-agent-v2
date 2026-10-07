@@ -67,6 +67,9 @@ func TestMain(m *testing.M) {
 	if marker, ok := os.LookupEnv(probeVariable); ok {
 		os.Exit(probe(marker))
 	}
+	if name, ok := os.LookupEnv(namedVariable); ok {
+		os.Exit(named(name))
+	}
 	os.Exit(m.Run())
 }
 
@@ -96,6 +99,7 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "the service collects what sshd decides and nothing that only names sshd", run: g.collect},
 		{name: "the service account writes a bundle of what troubleshooting needs beside the running agent", run: g.diagnose},
 		{name: "the service takes stock of what the host has and admits a kind again when it changed", run: g.inventory},
+		{name: "the agent takes stock of the processes once an operator has the service show it every process", run: g.processes},
 		{name: "purging deletes the installation, its settings and the service's", run: g.purge},
 		{name: "installing after a purge makes a new installation", run: g.fresh},
 	} {
@@ -119,6 +123,7 @@ type gate struct {
 	held         map[string]string
 	collects     bool
 	inventories  bool
+	running      bool
 	debugging    bool
 }
 
@@ -224,7 +229,10 @@ func (g *gate) write(t *testing.T) {
 			t.Fatalf("the settings the package installs collect with %v", settings["modules"])
 		}
 	}
-	settings["modules"] = map[string]any{"authentication": map[string]any{"enabled": g.collects}, "inventory": map[string]any{"enabled": g.inventories}}
+	if _, running := settings["modules"].(map[string]any)["processes"]; running {
+		t.Fatalf("the settings the package installs take stock of the processes, which the service does not show the agent: %v", settings["modules"])
+	}
+	settings["modules"] = map[string]any{"authentication": map[string]any{"enabled": g.collects}, "inventory": map[string]any{"enabled": g.inventories}, "processes": map[string]any{"enabled": g.running}}
 	if g.debugging {
 		settings["logging"] = map[string]any{"level": "debug"}
 	}

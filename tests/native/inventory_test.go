@@ -5,6 +5,7 @@ package native_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dpkg"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/interfaces"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/machine"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/processes"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/services"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
 )
@@ -390,6 +392,9 @@ func (r recorded) Accounts() (accounts.Database, error)             { return r.o
 func (r recorded) Packages(context.Context) ([]dpkg.Package, error) { return r.observed.Packages, nil }
 func (r recorded) Services(context.Context) ([]services.Service, error) {
 	return r.observed.Services, nil
+}
+func (recorded) Processes(context.Context) ([]processes.Process, error) {
+	return nil, fmt.Errorf("the processes of the host are not read again: %w", errors.ErrUnsupported)
 }
 
 func (g *gate) inventoried(t *testing.T, rounds []round) {

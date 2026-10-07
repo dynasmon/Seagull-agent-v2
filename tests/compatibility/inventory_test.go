@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dpkg"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/interfaces"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/machine"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/processes"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/services"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
@@ -76,6 +78,9 @@ func (r recordedHost) Interfaces() ([]interfaces.Interface, error) {
 	return r.observedHost.Interfaces, nil
 }
 func (r recordedHost) Accounts() (accounts.Database, error) { return r.observedHost.Accounts, nil }
+func (recordedHost) Processes(context.Context) ([]processes.Process, error) {
+	return nil, fmt.Errorf("the processes of the recorded host were not recorded: %w", errors.ErrUnsupported)
+}
 
 func stock(t *testing.T) (stockScenario, map[string][]byte, []string) {
 	t.Helper()

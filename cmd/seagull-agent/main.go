@@ -211,7 +211,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 		return refused(err)
 	}
 	held.collection = collected.collection
-	observed.collection, observed.authentication, observed.inventory = collected.collection, collected.authentication, collected.inventory
+	observed.collection, observed.authentication, observed.inventory, observed.processes = collected.collection, collected.authentication, collected.inventory, collected.processes
 	composed := append([]agentruntime.Component{held.component(asked), {Name: "collection", Policy: agentruntime.Optional, Run: collected.collection.Run}}, components...)
 	if isEnrolled {
 		client, err := platform(settings, chosen.authorities, credential)
@@ -288,7 +288,8 @@ func unstarted(stderr io.Writer, path string, err error) int {
 // installation, its keys and its settings are files that account reaches, the
 // platform is a network service like any other, the authentication collector
 // reads the system journal as a member of systemd-journal, a group, and the
-// inventory collector reads what the host shows any account.
+// inventory collector reads what the host shows any account, as the processes
+// collector does once the service lets procfs show the agent every process.
 func needed() []string { return nil }
 
 func privileged(logger *slog.Logger, granted privileges.Privileges) {
@@ -416,6 +417,7 @@ type collectors struct {
 	collection     *modules.Collection
 	authentication *authentication.Collector
 	inventory      *inventory.Collector
+	processes      *inventory.Collector
 }
 
 func collect(installation *identity.Installation, active *config.Active, spooled *spool.Spool, governed *governor.Governor, logger *slog.Logger) (collectors, error) {
@@ -433,27 +435,33 @@ func collect(installation *identity.Installation, active *config.Active, spooled
 	if err != nil {
 		return collectors{}, err
 	}
-	taking, err := inventory.New(inventory.Options{
-		Installation: installation.ID(),
-		Spool:        spooled,
-		Governor:     governed,
-		Directory:    directory,
-		Logger:       logger,
-		Interval:     func() time.Duration { return time.Duration(active.Settings().Modules[inventory.Name].Interval) },
-		Largest:      func() int64 { return int64(active.Settings().Transport.MaxBatchBytes) - protocol.BatchEnvelopeBytes },
-	})
-	if err != nil {
-		return collectors{}, err
+	stocked := map[string]*inventory.Collector{}
+	for _, module := range []string{inventory.Name, inventory.Processes} {
+		taking, err := inventory.New(inventory.Options{
+			Module:       module,
+			Installation: installation.ID(),
+			Spool:        spooled,
+			Governor:     governed,
+			Directory:    directory,
+			Logger:       logger,
+			Interval:     func() time.Duration { return time.Duration(active.Settings().Modules[module].Interval) },
+			Largest:      func() int64 { return int64(active.Settings().Transport.MaxBatchBytes) - protocol.BatchEnvelopeBytes },
+		})
+		if err != nil {
+			return collectors{}, err
+		}
+		stocked[module] = taking
 	}
 	settings := active.Settings()
 	collection, err := modules.New(logger, modules.Policy{},
 		modules.Module{Name: authentication.Name, Enabled: slices.Contains(enabled(settings), authentication.Name), Collect: authenticating.Collect},
-		modules.Module{Name: inventory.Name, Enabled: slices.Contains(enabled(settings), inventory.Name), Collect: taking.Collect},
+		modules.Module{Name: inventory.Name, Enabled: slices.Contains(enabled(settings), inventory.Name), Collect: stocked[inventory.Name].Collect},
+		modules.Module{Name: inventory.Processes, Enabled: slices.Contains(enabled(settings), inventory.Processes), Collect: stocked[inventory.Processes].Collect},
 	)
 	if err != nil {
 		return collectors{}, err
 	}
-	return collectors{collection: collection, authentication: authenticating, inventory: taking}, nil
+	return collectors{collection: collection, authentication: authenticating, inventory: stocked[inventory.Name], processes: stocked[inventory.Processes]}, nil
 }
 
 func enabled(settings config.Config) []string {
