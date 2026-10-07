@@ -175,6 +175,12 @@ var dependencyRules = []dependencyRule{
 		reason:     "the governor bounds work and knows none of it: what a scan reads, which records an upload carries and how they travel belong to the work it paces",
 	},
 	{
+		packages:   "internal/modules/integrity",
+		forbidden:  []string{contractsPath, modulePath + "/internal/spool", modulePath + "/internal/protocol"},
+		transitive: true,
+		reason:     "the contracts carry no record of a file change, so the files collector admits nothing to the spool and maps nothing to the wire until they do",
+	},
+	{
 		packages: "internal/spool",
 		forbidden: append([]string{
 			contractsPath,
@@ -666,6 +672,34 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 				ImportPath: modulePath + "/internal/governor",
 				Imports:    []string{"context", "crypto/sha256", "log/slog", "math/rand/v2", "sync", "time"},
 				Deps:       []string{"context", "crypto/sha256", "log/slog", "math/rand/v2", "sync", "time"},
+			},
+		},
+		{
+			name: "the files collector admitting what it found to the spool",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/modules/integrity",
+				Imports:    []string{modulePath + "/internal/governor", modulePath + "/internal/spool"},
+				Deps:       []string{modulePath + "/internal/governor", modulePath + "/internal/platform/files", modulePath + "/internal/secrets", modulePath + "/internal/spool"},
+			},
+			want: []string{modulePath + "/internal/spool"},
+		},
+		{
+			name: "the files collector sending a change as an authentication event",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/modules/integrity",
+				Imports:    []string{modulePath + "/internal/protocol", contractsPath + "/gen/go/seagull/event/v1"},
+				Deps:       []string{contractsPath + "/gen/go/seagull/event/v1", modulePath + "/internal/protocol", "google.golang.org/protobuf/proto"},
+			},
+			want: []string{contractsPath + "/gen/go/seagull/event/v1", modulePath + "/internal/protocol"},
+		},
+		{
+			name: "the files collector watching through its adapters",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/modules/integrity",
+				Imports: []string{modulePath + "/internal/governor", modulePath + "/internal/platform/files", modulePath + "/internal/platform/inotify",
+					modulePath + "/internal/platform/tree", modulePath + "/internal/secrets"},
+				Deps: []string{modulePath + "/internal/governor", modulePath + "/internal/platform/files", modulePath + "/internal/platform/inotify",
+					modulePath + "/internal/platform/tree", modulePath + "/internal/secrets", "crypto/sha256", "os", "syscall"},
 			},
 		},
 		{
