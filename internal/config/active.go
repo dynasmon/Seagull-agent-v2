@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sync"
 )
 
@@ -35,6 +36,10 @@ func (a *Active) Reload(candidate Config) error {
 
 func (c Config) clone() Config {
 	c.Modules = maps.Clone(c.Modules)
+	for name, held := range c.Modules {
+		held.Paths, held.Exclude = slices.Clone(held.Paths), slices.Clone(held.Exclude)
+		c.Modules[name] = held
+	}
 	return c
 }
 
