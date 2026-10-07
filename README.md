@@ -157,7 +157,7 @@ The service also confines the agent to what it uses of the host, which
 
 | What | What the service sets | What it leaves the agent |
 | --- | --- | --- |
-| Files | `ProtectSystem=strict`, `ReadOnlyPaths=/run`, `BindReadOnlyPaths=/sys`, `ProtectHome=yes`, `PrivateTmp=yes` and `MemoryPressureWatch=off` | its installation, the one directory `StateDirectory=` names, and a `/tmp` and a `/var/tmp` of its own to write; every other filesystem read-only, and the home directories, `/root` and `/run/user` out of reach |
+| Files | `ProtectSystem=strict`, `ReadOnlyPaths=/run`, `BindReadOnlyPaths=/sys`, `ProtectHome=yes`, `PrivateTmp=yes` and `MemoryPressureWatch=off` | its installation, the one directory `StateDirectory=` names, and a `/tmp` and a `/var/tmp` of its own to write; every other filesystem read-only, and the home directories, `/root` and `/run/user` out of reach, until an operator shows them to the [files module](#files) |
 | Devices | `PrivateDevices=yes` | `null`, `zero`, `full`, `random`, `urandom`, `tty`, and `ptmx`, which opens pseudo-terminals |
 | Shared memory | `PrivateIPC=yes` and `InaccessiblePaths=-/dev/shm -/dev/mqueue` | no IPC object, shared memory or message queue that another process holds |
 | The kernel | `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`, `ProtectControlGroups=yes`, `ProtectClock=yes` and `ProtectHostname=yes` | `/proc/sys`, `/sys` and the control groups to read; no module, kernel log, clock or host name |
@@ -384,9 +384,12 @@ The agent reads the file whole, or refuses it whole:
 | `transport.max_upload_bytes_per_second` | `1MiB` | `64KiB` to `1GiB`, and enough to connect and send a whole batch within `transport.request_timeout` |
 | `spool.max_bytes` | `512MiB` | `16MiB` to `64GiB`, and at least four batches |
 | `spool.max_age` | `72h` | `1h` to `720h`; events are kept `168h` at most |
-| `modules` | `{}` | `{"authentication": {"enabled": true}}`, to collect what sshd decides, `{"inventory": {"enabled": true}}`, to take stock of what the host has, and `{"processes": {"enabled": true}}`, to take stock of the processes it runs: `authentication`, `inventory` and `processes` are the collectors this build has |
+| `modules` | `{}` | `{"authentication": {"enabled": true}}`, to collect what sshd decides, `{"inventory": {"enabled": true}}`, to take stock of what the host has, `{"processes": {"enabled": true}}`, to take stock of the processes it runs, and `{"files": {"enabled": true}}`, to watch files: `authentication`, `files`, `inventory` and `processes` are the collectors this build has |
 | `modules.inventory.interval` | `1h` | `1m` to `24h`: how often the inventory takes stock; a collector that follows its source, as `authentication` does, takes none |
 | `modules.processes.interval` | `1h` | `1m` to `24h`: how often the processes module takes stock |
+| `modules.files.paths` | the paths [Files](#files) lists | 1 to 64 absolute paths to watch, none within `/proc`, `/sys`, `/dev`, `/tmp`, `/var/tmp` or the installation; a module other than `files` takes none |
+| `modules.files.exclude` | none | up to 256 absolute paths within those, or patterns a name matches, such as `*.swp`, to leave out |
+| `modules.files.interval` | `1h` | `1m` to `24h`: how often the files module walks every path again |
 | `resources.memory_limit` | `256MiB` | `64MiB` to `8GiB` |
 | `resources.max_concurrent_scans` | `2` | 1 to 64 |
 | `resources.max_scan_bytes_per_second` | `8MiB` | `1MiB` to `1GiB` |
@@ -451,7 +454,8 @@ and where and in what batches it delivers what they collect. A reload applies
 `modules` whole: a collector it no longer names is stopped and the agent waits
 for it, and one it names again starts where it stopped, while a new
 `modules.inventory.interval` or `modules.processes.interval` takes effect after
-the round its module is waiting for. A module this build does not have is refused, and so is `updates.enabled`: an
+the round its module is waiting for, and new `modules.files.paths` or
+`modules.files.exclude` are walked at once. A module this build does not have is refused, and so is `updates.enabled`: an
 agent that accepted either would be promising collection it cannot do or
 updates it cannot install.
 
@@ -499,7 +503,8 @@ for them. A panic inside a module is not recovered, as anywhere else in the
 agent.
 
 The composition root composes the collection with the collectors this build
-has, `authentication` and `inventory`, each enabled when `modules` names it,
+has, `authentication`, `inventory`, `processes` and `files`, each enabled when
+`modules` names it,
 and the collection runs as an optional component: a collector that spent its
 budget leaves the agent delivering what the others admit.
 
@@ -873,6 +878,220 @@ The evidence:
 - `tests/compatibility` holds what a recorded platform made of the snapshots
   the installed agent delivered.
 
+## Files
+
+The files module watches the files and directories `modules.files.paths`
+names, and writes down in the agent's log what changes in them. It is off
+unless `modules` names `{"files": {"enabled": true}}`, which the settings the
+package installs do not, and it writes what it finds nowhere else: the
+contracts this build is made with have no record a file change travels in,
+and the platform takes none until it has one (BE-063 and BE-066), so the
+module admits nothing to the spool and delivers nothing.
+`tests/architecture` keeps `internal/modules/integrity` from reaching the
+spool, the protocol or the contracts until then.
+
+```json
+"modules": {
+  "files": {
+    "enabled": true,
+    "paths": ["/etc", "/usr/bin", "/usr/sbin", "/srv/app/config"],
+    "exclude": ["/etc/machine-id", "*.swp"]
+  }
+}
+```
+
+| Setting | Default | What the agent takes |
+| --- | --- | --- |
+| `modules.files.paths` | `/etc`, `/usr/bin`, `/usr/sbin`, `/usr/local/bin`, `/usr/local/sbin`, `/usr/lib/systemd/system`, `/boot`, `/var/spool/cron` | 1 to 64 absolute paths, each a file or a directory the module walks whole; none within `/proc`, `/sys`, `/dev`, `/tmp` or `/var/tmp`, which hold what the kernel makes up or what the service gives the agent of its own, nor within the installation |
+| `modules.files.exclude` | none | up to 256 absolute paths within those, each left out with all it holds, or patterns a name matches, such as `*.swp`, which leave out every entry whose name matches |
+| `modules.files.interval` | `1h` | `1m` to `24h`: how often the module walks every path again |
+
+A path that names nothing on the host is reported as such, and what appears
+there later as created. The installation is never watched: a path within
+`identity.state_directory` is refused, and the installation is left out of a
+path that holds it, so the agent never watches what it writes itself.
+
+What it does, in order:
+
+- as it starts, it walks every path whole and compares what it finds with
+  what it wrote down when it last looked, so a change made while the agent
+  was stopped is found as it starts; the first time, what it finds is the
+  baseline, and it reports nothing of it but `files_watched`, how many entries
+  it holds and how long it took;
+- it has the kernel tell it, through inotify, what happens in every directory
+  it walked, and looks again at each name the kernel spoke of once a second has
+  passed: what the kernel says is a hint, and the module reports what it finds
+  when it looks, not what it was told;
+- it walks every path whole again every `modules.files.interval`, after the
+  kernel dropped what it had to say, after a directory moved, and once a reload
+  changes what it watches.
+
+A change is a `file_changed` line in the agent's log, at `info`:
+
+| Field | What it says |
+| --- | --- |
+| `path` | the entry that changed, as the host names it; a name that is not printable text is quoted as Go quotes a string |
+| `operation` | `created`, `deleted`, `modified`, `renamed`, or `transient`: created and gone again before the module looked, which it never saw but the kernel said |
+| `previous` | the path a renamed entry had |
+| `changes` | what changed of a modified or renamed entry: `kind`, `identity` (another file stands at the path, as when a file is written in full and renamed over it), `owner`, `group`, `mode`, `content`, `links`, `target`, `device`, or `attributes` when only the time its inode changed did, which is what `setcap`, an ACL or an extended attribute changes, or a file touched back to the time it had |
+| `origin` | `realtime` when it followed what the kernel said, `reconciliation` when a walk found it |
+| `seen`, `coalesced` | what the kernel said of the name and how many times, when it did |
+| `before`, `after` | what the entry was and is: its kind, device and inode, number of names, owner, group, mode, size, the times its content and its inode changed, and the SHA-256 of a regular file's content, or why the module has none, the target of a link, or the numbers of a device |
+
+How it decides:
+
+- **links**: a link is an entry like any other, its target written down and
+  never followed. A path that is a link, or passes through one, is not watched,
+  and the module says which path the link leads to. A directory is opened one
+  name at a time from the root of the filesystem, through the directory that
+  holds it, and a file is opened without following a link and only when it is
+  the file the module saw at that name, so a link swapped in meanwhile is never
+  read and never leads out of what is watched;
+- **recursion**: a directory is walked whole on its own filesystem. A
+  filesystem mounted within it is written down and not walked, unless a path
+  names it, and one mounted over a directory the module watched is that
+  directory changing identity; a directory 64 levels down is not walked; and a module holds at
+  most 100,000 entries, past which it walks no further and says so;
+- **special files**: pipes, sockets and devices are written down with their
+  owner, their mode and, for a device, its numbers, and never opened;
+- **content**: a regular file of up to 256 MiB is read, through the descriptor
+  it was opened with, into its SHA-256, and read again, three times at most,
+  when it changed while it was read; one that keeps changing is `unstable`.
+  It is read again only when its size, its times or its inode changed, so a
+  walk reads what changed and lists the rest. A file larger than that is
+  `large`; one the agent's account cannot read is `unreadable`;
+- **renames**: a name that went and a name that came in one look are the one
+  file moved when they are the same inode of the same device, alike in size
+  and modification time, and no other name that went or came is that file, so
+  an inode a new file reuses is not taken for one that was deleted and a file
+  with several names is not guessed at. A directory that moved is one rename.
+  A move from or to outside what is watched is a deletion or a creation, with
+  `seen` saying `moved from` or `moved to`;
+- **what keeps changing**: the module waits a second after the kernel first
+  speaks of a name before it looks. A name it reported is held back for two
+  seconds, and for twice as long each time it changes again within its hold,
+  up to five minutes, so a file written every second is reported a few times
+  an hour, each report counting the hints it folded, rather than once a write.
+  A name created, deleted or moved is never held back, and the two names of a
+  move are looked at together. At most 1,000 changes a minute are written down,
+  so a package upgrade cannot crowd the rest of the agent out of the journal:
+  what is held back is counted in `files_changes_not_logged`;
+- **resources**: every entry a walk looks at is charged as 1 KiB read, and what
+  it hashes as what it reads, to `resources.max_scan_bytes_per_second`, which
+  the inventory shares, and a walk holds one of `resources.max_concurrent_scans`
+  for as long as it runs. The kernel watches a directory for each one the
+  module walked, up to 16,384 and to `fs.inotify.max_user_watches`, which the
+  account the agent runs as has to itself: a directory past them is found
+  changed by the next walk alone, and the module says so;
+- **what it wrote down**: `collection/files.json` in the installation, private
+  to the agent's account, holds every entry the module saw, written after every
+  walk, after what the kernel said was looked at, and every ten seconds during
+  a long walk. A walk cut short goes on from what it wrote down: a directory it
+  had not listed yet is baseline when it lists it, and a change it reported and
+  had not written down is reported again, so a crash repeats a change and never
+  loses one. One it cannot read is replaced by what the module sees then,
+  which is the baseline, with `files_baseline_lost`; one a newer agent wrote,
+  or another account could change, stops the module, which says why;
+- **what changes in the settings**: a reload that changes the paths or what
+  they leave out is walked at once. What the module now watches that it did not
+  before is baseline, never a creation, and what it no longer watches is
+  forgotten.
+
+The service the package installs runs the agent as an account of its own,
+which reads what any account reads: the module watches every name the account
+can see, and the content of every file it can read. The service hides `/home`,
+`/root` and `/run/user` from it (`ProtectHome=yes`), and many files under
+`/etc` are readable by root alone, such as `/etc/shadow`, `/etc/sudoers` and
+the host's SSH keys. A path the module cannot look at is reported, and so are
+the directories it cannot list and the files whose content it cannot read, in
+`files_not_covered` and in the status. A drop-in shows the agent what the
+service hides and lets it read what only root reads:
+
+```ini
+# /etc/systemd/system/seagull-agent.service.d/files.conf
+[Service]
+ProtectHome=read-only
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_DAC_READ_SEARCH
+```
+
+followed by `systemctl daemon-reload` and `systemctl restart seagull-agent`.
+`CAP_DAC_READ_SEARCH` lets the agent read any file on the host, its own keys
+and the host's among them, which is why it is the operator's to grant: while
+the files module is enabled, `agent_privileges` counts it as needed, and
+otherwise reports it as held beyond what the agent needs. What the agent could
+not read before is then baseline, never a change.
+
+The status reports the module as running, with how many entries and paths it
+watches, how many directories the kernel watches for it, what it found and
+when, and what it cannot see, and as degraded when it cannot look at a path it
+was given, when the paths hold more than it keeps, or when the kernel watches
+none or not all of its directories, with what to do in each case.
+
+Taking the baseline of the default paths on the 8 processors and Linux 7.0 this
+was developed on, 6,305 entries in 459 directories and 880 MB of readable
+content, took 3.6 s and 2.9 s of processor time with the pace lifted, nearly
+all of it hashing; at the default `resources.max_scan_bytes_per_second` of
+8 MiB it takes about two minutes. Started again with nothing changed, the walk
+took 186 ms and 248 ms of processor time, since it reads nothing whose size,
+times and inode stayed as they were; what it wrote down is 1.6 MiB, and the heap
+held 4 MiB after it. The tests walk 1,516 entries at 1 MiB a second in 1.4 s,
+spending 120 ms of processor time.
+
+The evidence:
+
+- `internal/platform/tree` is tested against trees the test builds: it refuses
+  a path a link stands in, describes every kind of file as `lstat` does, lists
+  a directory in full or not at all, and reads neither a file renamed over the
+  one it saw, nor a link, nor a pipe put in its place, without waiting on the
+  pipe;
+- `internal/platform/inotify` is tested against the kernel: a watch follows the
+  directory it was given wherever it moves, a rename's two names share a
+  cookie, closing the watcher ends a read waiting on it, and a queue the kernel
+  filled says so; a fuzz target holds what an event reads as;
+- `internal/modules/integrity` takes the baseline silently, reports creations,
+  writes, mode changes, renames within and across directories, deletions,
+  replacements, whole trees and files created and gone; finds as it starts what
+  changed while it was stopped, renames of files and directories included;
+  never follows a link, whether it stood there from the start or replaced a
+  file; keeps what it cannot read without reporting it gone; walks again after
+  an overflow; holds back a file written every 50 ms; releases its watcher as it
+  stops; takes what a new scope includes as baseline; reads at the pace the
+  governor allows; and, killed by `SIGKILL` part of the way through a baseline
+  or through the changes it found, goes on without reporting the baseline and
+  without losing a change; a fuzz target holds what it reads of its baseline;
+- the agent, started by `cmd/seagull-agent`'s tests, watches a directory it is
+  given, reports a write, applies a reload that leaves swap files out, and
+  admits nothing to the spool;
+- the [native gate](#installing) enables the module on the installed service
+  over a tree the superuser builds: it checks that a directory root closed to
+  others, a file only root reads and a path under `/root` are reported as what
+  the agent cannot see, with the drop-in as what to do; that a write, a setuid
+  bit, a change of owner, a file replaced by a link to `/etc/shadow`, a pipe, a
+  rename and a file created and removed at once are each reported as they
+  happen, and swap files are not; that a filesystem mounted over a directory of
+  the tree is reported as that directory changing identity, and is not walked;
+  that, with the agent stopped by `SIGSTOP` while the kernel's queue
+  overflows, what changed meanwhile is found by the walk that follows; that,
+  with the drop-in, the agent holds `CAP_DAC_READ_SEARCH` as needed, takes what
+  it could not read before as baseline and reports a key added under `/root`;
+  and that disabling the module leaves the agent holding no inotify instance.
+
+What it does not claim:
+
+- that the platform knows of a change: nothing leaves the host;
+- who made a change, or which process: inotify does not say, and the means
+  that do need privileges the agent is not given;
+- every change: a directory the kernel does not watch, or a change undone
+  between two walks, shows only in what is left of it, such as the time its
+  inode changed, and nothing at all when a file is deleted and recreated alike
+  between two walks in a directory nobody watches;
+- the content of a file larger than 256 MiB, of one the agent cannot read, or
+  of one that keeps changing as it is read;
+- a mount on the same filesystem: a bind mount of a directory into another is
+  walked as a directory, and its entries are watched twice;
+- patterns in paths: `/home/*/.ssh` is not a path, and each home is named.
+
 ## Privileges
 
 The agent is one process running as one account, and everything it does happens
@@ -888,9 +1107,13 @@ is not one.
 | Collect what sshd decides | read the system journal, as a member of `systemd-journal`, which the package makes the account and the service grants again |
 | Take stock of what the host has | read what the host shows any account: os-release, procfs, sysfs, the account files, dpkg's database through `dpkg-query`, and systemd's services through `systemctl`, which reaches systemd over the system bus, a local socket |
 | Take stock of the processes | read what procfs shows any account of every process, once the service shows the agent every process; the executable of another account's process takes `CAP_SYS_PTRACE`, which the agent is never given, so it goes without |
+| Watch files | read the names, owners, modes and times of what the paths it is given hold, and the content of what any account may read; `/home`, `/root` and the content of what only root reads take `CAP_DAC_READ_SEARCH` and `ProtectHome=read-only`, which an operator grants with a drop-in and the package never does |
 
-Nothing on that list needs the superuser, a Linux capability, or a helper of its
-own. A collector that needs more names it there, and the packaging grants that
+Nothing on that list needs the superuser or a helper of its own, and the one
+Linux capability on it is the operator's to grant, for the files module to read
+what only root reads: while that module is enabled the agent counts
+`CAP_DAC_READ_SEARCH` as needed, and otherwise as held beyond what it needs. A
+collector that needs more names it there, and the packaging grants that
 much: a group where a group is enough, as for the journal, and a capability only
 where it is not. The same holds for what the service confines: a collector that
 needs another kind of socket, a path to write or a group of system calls has the
@@ -2333,7 +2556,8 @@ for the authentication collector while it collects, since when it waits for
 room in the spool and how often the journal dropped what it had not read yet,
 and, for the inventory, the kinds this host does not have, the kinds it does
 not admit and why, which degrades the collection, and the items the platform
-would hold as one.
+would hold as one, and, for the files module, what it watches, what it found
+and what it cannot see.
 Then, for each stream, what waits and when the
 oldest record waiting was admitted, when the route last delivered and, while it
 fails, since when, how often, why and when it tries next; what the spool settled
@@ -2623,7 +2847,9 @@ What none of that claims:
   source and nothing else: the authentication collector keeps what an outcome
   of sshd says, and the line sshd wrote it in, which says nothing more, and
   the inventory keeps what the host's own files and tools say it has, never a
-  password, a command line or what a file holds;
+  password, a command line or what a file holds, and the files module writes
+  down the names, owners, modes, times and SHA-256 of what it watches, never
+  what a file holds;
 - the spool keeps records as they are handed to it and never looks inside one,
   so what a record holds is decided by the collector that admits it. What the
   agent writes about a record is where it is in the spool and the identifier it
@@ -2675,6 +2901,10 @@ conventions:
   its own settings name;
 - no collector reaches `internal/pki`, directly or through another package, so
   collectors never hold the keys the agent proves its identity with;
+- `internal/modules/integrity` reaches neither the spool, nor `internal/protocol`,
+  nor the contracts, directly or through another package: the contracts carry no
+  record of a file change, so the files collector admits nothing and maps
+  nothing to the wire until they do;
 - no collector imports `os/exec`, `syscall`, `unsafe` or `golang.org/x/sys`
   itself: it reaches the operating system through an adapter under
   `internal/platform`, which owns the commands it runs and the calls it makes;
