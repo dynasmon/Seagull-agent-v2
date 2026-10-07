@@ -41,6 +41,10 @@ const (
 	maxPathBytes    = 4 << 10
 	batchesSpooled  = 4
 	maxGroups       = 8
+	maxWatchedPaths = 64
+	maxExcluded     = 256
+	maxNameBytes    = 255
+	watcher         = "files"
 )
 
 var (
@@ -54,8 +58,10 @@ var (
 	levels     = map[string]slog.Level{"debug": slog.LevelDebug, "info": slog.LevelInfo, "warn": slog.LevelWarn, "error": slog.LevelError}
 	logFormats = []string{JSONLogs, TextLogs}
 	providers  = []string{KeysInFiles}
-	collectors = []string{"authentication", "inventory", "processes"}
-	periodic   = map[string]Duration{"inventory": Duration(time.Hour), "processes": Duration(time.Hour)}
+	collectors = []string{"authentication", "files", "inventory", "processes"}
+	periodic   = map[string]Duration{"files": Duration(time.Hour), "inventory": Duration(time.Hour), "processes": Duration(time.Hour)}
+	watched    = []string{"/etc", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin", "/usr/lib/systemd/system", "/boot", "/var/spool/cron"}
+	unwatched  = []string{"/proc", "/sys", "/dev", "/tmp", "/var/tmp"}
 )
 
 type Config struct {
@@ -104,10 +110,13 @@ type Modules map[string]Module
 
 // A module collects while it is enabled. One that takes stock of the host
 // rather than follow a source does it every interval, which a module that
-// follows a source has none of.
+// follows a source has none of, and the one that watches files watches the
+// paths it is given, less what it is told to leave out.
 type Module struct {
 	Enabled  bool     `json:"enabled"`
 	Interval Duration `json:"interval,omitzero"`
+	Paths    []string `json:"paths,omitempty"`
+	Exclude  []string `json:"exclude,omitempty"`
 }
 
 // The decoder names a setting by its path through the groups it is in, and a
@@ -360,6 +369,13 @@ func (c *Config) validate() error {
 		c.Logging.validate(),
 		c.Updates.validate(),
 	)
+	if state := c.Identity.StateDirectory; filepath.IsAbs(state) {
+		for _, path := range c.Modules[watcher].Paths {
+			if path == state || strings.HasPrefix(path, state+string(filepath.Separator)) {
+				found = append(found, fmt.Errorf("modules.%s.paths names %s, which is within identity.state_directory, the installation the agent writes itself", watcher, secrets.Shown(path)))
+			}
+		}
+	}
 	if len(transport) == 0 && len(spool) == 0 && c.Spool.MaxBytes < batchesSpooled*c.Transport.MaxBatchBytes {
 		found = append(found, fmt.Errorf("spool.max_bytes is %s, and a spool holds %d batches of transport.max_batch_bytes, %s, so records keep arriving while one is on its way",
 			c.Spool.MaxBytes, batchesSpooled, c.Transport.MaxBatchBytes))
@@ -438,6 +454,17 @@ func (m Modules) validate() []error {
 		switch {
 		case !slices.Contains(collectors, name):
 			found = append(found, fmt.Errorf("modules.%s is configured, and this build collects with %s", secrets.Bounded(name), strings.Join(collectors, ", ")))
+			continue
+		case name != watcher && (held.Paths != nil || held.Exclude != nil):
+			found = append(found, fmt.Errorf("modules.%s names paths, and only the %s collector watches any", name, watcher))
+		case name == watcher && held.Paths == nil:
+			held.Paths = slices.Clone(watched)
+			m[name] = held
+		}
+		if name == watcher {
+			found = append(found, held.scoped()...)
+		}
+		switch {
 		case !takesStock && held.Interval != 0:
 			found = append(found, fmt.Errorf("modules.%s.interval is %s, and the %s collector follows its source rather than take stock every interval", name, held.Interval, name))
 		case takesStock:
@@ -448,6 +475,54 @@ func (m Modules) validate() []error {
 			if err := duration("modules."+name+".interval", held.Interval, Duration(time.Minute), Duration(24*time.Hour)); err != nil {
 				found = append(found, err)
 			}
+		}
+	}
+	return found
+}
+
+func (m Module) scoped() []error {
+	var found []error
+	switch {
+	case len(m.Paths) == 0:
+		found = append(found, fmt.Errorf("modules.%s.paths names nothing, and the %s collector watches the paths it is given", watcher, watcher))
+	case len(m.Paths) > maxWatchedPaths:
+		found = append(found, fmt.Errorf("modules.%s.paths names %d paths, and this agent watches at most %d", watcher, len(m.Paths), maxWatchedPaths))
+	}
+	for i, path := range m.Paths {
+		name := fmt.Sprintf("modules.%s.paths[%d]", watcher, i)
+		if err := absolute(name, path, "a file or a directory to watch", "/etc"); err != nil {
+			found = append(found, err)
+			continue
+		}
+		switch made := slices.IndexFunc(unwatched, func(held string) bool { return path == held || strings.HasPrefix(path, held+"/") }); {
+		case made >= 0:
+			found = append(found, fmt.Errorf("%s is %s, within %s, which holds what the kernel or the service makes up for the agent rather than files the host keeps", name, secrets.Shown(path), unwatched[made]))
+		case slices.Index(m.Paths, path) < i:
+			found = append(found, fmt.Errorf("%s is %s, which the paths name before", name, secrets.Shown(path)))
+		}
+	}
+	if len(m.Exclude) > maxExcluded {
+		found = append(found, fmt.Errorf("modules.%s.exclude names %d paths and names, and this agent leaves out at most %d", watcher, len(m.Exclude), maxExcluded))
+	}
+	for i, excluded := range m.Exclude {
+		name := fmt.Sprintf("modules.%s.exclude[%d]", watcher, i)
+		if !strings.HasPrefix(excluded, "/") {
+			if _, err := filepath.Match(excluded, ""); err != nil || excluded == "" || len(excluded) > maxNameBytes || strings.ContainsRune(excluded, '/') {
+				found = append(found, fmt.Errorf("%s is %s, and it is an absolute path or a pattern a name matches, such as %q", name, secrets.Shown(excluded), "*.swp"))
+			}
+			continue
+		}
+		if err := absolute(name, excluded, "a file or a directory to leave out", "/etc/machine-id"); err != nil {
+			found = append(found, err)
+			continue
+		}
+		switch {
+		case slices.Index(m.Exclude, excluded) < i:
+			found = append(found, fmt.Errorf("%s is %s, which the exclusions name before", name, secrets.Shown(excluded)))
+		case slices.ContainsFunc(m.Paths, func(path string) bool { return path == excluded || strings.HasPrefix(path, excluded+"/") }):
+			found = append(found, fmt.Errorf("%s is %s, which leaves out a whole path modules.%s.paths names", name, secrets.Shown(excluded), watcher))
+		case !slices.ContainsFunc(m.Paths, func(path string) bool { return strings.HasPrefix(excluded, path+"/") }):
+			found = append(found, fmt.Errorf("%s is %s, which is within none of the paths modules.%s.paths names", name, secrets.Shown(excluded), watcher))
 		}
 	}
 	return found
