@@ -29,6 +29,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/integrity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
 	"github.com/dynasmon/Seagull-agent-v2/internal/pki"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
@@ -141,7 +142,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	level := new(slog.LevelVar)
 	logger := logging(stderr, settings, level)
 	apply(settings, level)
-	privileged(logger, granted)
+	privileged(logger, granted, needed(settings))
 	memory(logger, withheld)
 	resources(logger, settings)
 	state := settings.Identity.StateDirectory
@@ -206,12 +207,12 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	}
 	held.governor = governed
 	observed := &observing{began: began, path: path, state: state, installation: installation, spool: spooled, governor: governed, configuration: held}
-	collected, err := collect(installation, held.active, spooled, governed, logger)
+	collected, err := collect(installation, held.active, spooled, governed, logger, state)
 	if err != nil {
 		return refused(err)
 	}
-	held.collection = collected.collection
-	observed.collection, observed.authentication, observed.inventory, observed.processes = collected.collection, collected.authentication, collected.inventory, collected.processes
+	held.collection, held.files = collected.collection, collected.files
+	observed.collection, observed.authentication, observed.inventory, observed.processes, observed.files = collected.collection, collected.authentication, collected.inventory, collected.processes, collected.files
 	composed := append([]agentruntime.Component{held.component(asked), {Name: "collection", Policy: agentruntime.Optional, Run: collected.collection.Run}}, components...)
 	if isEnrolled {
 		client, err := platform(settings, chosen.authorities, credential)
@@ -290,9 +291,17 @@ func unstarted(stderr io.Writer, path string, err error) int {
 // reads the system journal as a member of systemd-journal, a group, and the
 // inventory collector reads what the host shows any account, as the processes
 // collector does once the service lets procfs show the agent every process.
-func needed() []string { return nil }
+// The files collector watches what that account may read, and reads what only
+// root may once an operator grants it CAP_DAC_READ_SEARCH, which is then no
+// more than it needs.
+func needed(settings config.Config) []string {
+	if settings.Modules[integrity.Name].Enabled {
+		return []string{"CAP_DAC_READ_SEARCH"}
+	}
+	return nil
+}
 
-func privileged(logger *slog.Logger, granted privileges.Privileges) {
+func privileged(logger *slog.Logger, granted privileges.Privileges, needed []string) {
 	reported := []any{
 		slog.Int("user", granted.User),
 		slog.Int("group", granted.Group),
@@ -301,7 +310,7 @@ func privileged(logger *slog.Logger, granted privileges.Privileges) {
 		slog.Bool("no_new_privs", granted.NoNewPrivs),
 		slog.String("seccomp", granted.Seccomp),
 	}
-	beyond := granted.Beyond(needed())
+	beyond := granted.Beyond(needed)
 	if len(beyond) == 0 {
 		logger.Info("agent_privileges", reported...)
 		return
@@ -349,6 +358,7 @@ type configuration struct {
 	spool      *spool.Spool
 	governor   *governor.Governor
 	collection *modules.Collection
+	files      *integrity.Collector
 
 	mu        sync.Mutex
 	applied   time.Time
@@ -405,6 +415,9 @@ func (c *configuration) reload() error {
 			return fmt.Errorf("apply the configuration read from %s: %w", c.path, err)
 		}
 	}
+	if c.files != nil {
+		c.files.Rescope()
+	}
 	c.mu.Lock()
 	c.refused, c.applied = nil, time.Now()
 	c.mu.Unlock()
@@ -418,9 +431,10 @@ type collectors struct {
 	authentication *authentication.Collector
 	inventory      *inventory.Collector
 	processes      *inventory.Collector
+	files          *integrity.Collector
 }
 
-func collect(installation *identity.Installation, active *config.Active, spooled *spool.Spool, governed *governor.Governor, logger *slog.Logger) (collectors, error) {
+func collect(installation *identity.Installation, active *config.Active, spooled *spool.Spool, governed *governor.Governor, logger *slog.Logger, state string) (collectors, error) {
 	directory, err := installation.Directory(collectionDirectory)
 	if err != nil {
 		return collectors{}, err
@@ -452,16 +466,31 @@ func collect(installation *identity.Installation, active *config.Active, spooled
 		}
 		stocked[module] = taking
 	}
+	watching, err := integrity.New(integrity.Options{
+		Governor:  governed,
+		Directory: directory,
+		Logger:    logger,
+		Scope: func() integrity.Scope {
+			held := active.Settings().Modules[integrity.Name]
+			return integrity.Scope{Paths: held.Paths, Exclude: held.Exclude}
+		},
+		Interval: func() time.Duration { return time.Duration(active.Settings().Modules[integrity.Name].Interval) },
+		Own:      []string{state},
+	})
+	if err != nil {
+		return collectors{}, err
+	}
 	settings := active.Settings()
 	collection, err := modules.New(logger, modules.Policy{},
 		modules.Module{Name: authentication.Name, Enabled: slices.Contains(enabled(settings), authentication.Name), Collect: authenticating.Collect},
 		modules.Module{Name: inventory.Name, Enabled: slices.Contains(enabled(settings), inventory.Name), Collect: stocked[inventory.Name].Collect},
 		modules.Module{Name: inventory.Processes, Enabled: slices.Contains(enabled(settings), inventory.Processes), Collect: stocked[inventory.Processes].Collect},
+		modules.Module{Name: integrity.Name, Enabled: slices.Contains(enabled(settings), integrity.Name), Collect: watching.Collect},
 	)
 	if err != nil {
 		return collectors{}, err
 	}
-	return collectors{collection: collection, authentication: authenticating, inventory: stocked[inventory.Name], processes: stocked[inventory.Processes]}, nil
+	return collectors{collection: collection, authentication: authenticating, inventory: stocked[inventory.Name], processes: stocked[inventory.Processes], files: watching}, nil
 }
 
 func enabled(settings config.Config) []string {

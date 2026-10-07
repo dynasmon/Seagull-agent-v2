@@ -910,7 +910,7 @@ func TestAnAgentHoldingMoreThanAnythingItDoesNeedsSaysSo(t *testing.T) {
 		Group:        0,
 		Groups:       []int{0},
 		Capabilities: []string{"CAP_DAC_READ_SEARCH", "CAP_SYS_ADMIN"},
-	})
+	}, needed(config.Config{}))
 	reported, found := logged(t, logs.String(), "agent_privileges")
 	if !found || reported["level"] != "WARN" {
 		t.Fatalf("an agent running as the superuser reported %v", reported)
