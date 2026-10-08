@@ -58,10 +58,15 @@ var (
 	levels     = map[string]slog.Level{"debug": slog.LevelDebug, "info": slog.LevelInfo, "warn": slog.LevelWarn, "error": slog.LevelError}
 	logFormats = []string{JSONLogs, TextLogs}
 	providers  = []string{KeysInFiles}
-	collectors = []string{"authentication", "files", "inventory", "processes"}
-	periodic   = map[string]Duration{"files": Duration(time.Hour), "inventory": Duration(time.Hour), "processes": Duration(time.Hour)}
-	watched    = []string{"/etc", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin", "/usr/lib/systemd/system", "/boot", "/var/spool/cron"}
-	unwatched  = []string{"/proc", "/sys", "/dev", "/tmp", "/var/tmp"}
+	collectors = []string{"authentication", "files", "inventory", "network", "processes"}
+	periodic   = map[string]rounds{
+		"files":     {every: Duration(time.Hour), least: Duration(time.Minute), most: Duration(24 * time.Hour)},
+		"inventory": {every: Duration(time.Hour), least: Duration(time.Minute), most: Duration(24 * time.Hour)},
+		"network":   {every: Duration(time.Minute), least: Duration(10 * time.Second), most: Duration(time.Hour)},
+		"processes": {every: Duration(time.Hour), least: Duration(time.Minute), most: Duration(24 * time.Hour)},
+	}
+	watched   = []string{"/etc", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin", "/usr/lib/systemd/system", "/boot", "/var/spool/cron"}
+	unwatched = []string{"/proc", "/sys", "/dev", "/tmp", "/var/tmp"}
 )
 
 type Config struct {
@@ -107,6 +112,10 @@ type Spool struct {
 }
 
 type Modules map[string]Module
+
+type rounds struct {
+	every, least, most Duration
+}
 
 // A module collects while it is enabled. One that takes stock of the host
 // rather than follow a source does it every interval, which a module that
@@ -450,7 +459,7 @@ func (m Modules) validate() []error {
 	var found []error
 	for _, name := range slices.Sorted(maps.Keys(m)) {
 		held := m[name]
-		fallback, takesStock := periodic[name]
+		paced, takesStock := periodic[name]
 		switch {
 		case !slices.Contains(collectors, name):
 			found = append(found, fmt.Errorf("modules.%s is configured, and this build collects with %s", secrets.Bounded(name), strings.Join(collectors, ", ")))
@@ -469,10 +478,10 @@ func (m Modules) validate() []error {
 			found = append(found, fmt.Errorf("modules.%s.interval is %s, and the %s collector follows its source rather than take stock every interval", name, held.Interval, name))
 		case takesStock:
 			if held.Interval == 0 {
-				held.Interval = fallback
+				held.Interval = paced.every
 				m[name] = held
 			}
-			if err := duration("modules."+name+".interval", held.Interval, Duration(time.Minute), Duration(24*time.Hour)); err != nil {
+			if err := duration("modules."+name+".interval", held.Interval, paced.least, paced.most); err != nil {
 				found = append(found, err)
 			}
 		}
