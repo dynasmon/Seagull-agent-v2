@@ -100,6 +100,7 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "the service account writes a bundle of what troubleshooting needs beside the running agent", run: g.diagnose},
 		{name: "the service takes stock of what the host has and admits a kind again when it changed", run: g.inventory},
 		{name: "the agent takes stock of the processes once an operator has the service show it every process", run: g.processes},
+		{name: "the agent watches the files it is told to, reads what only root reads once an operator lets it, and writes down what changes", run: g.files},
 		{name: "purging deletes the installation, its settings and the service's", run: g.purge},
 		{name: "installing after a purge makes a new installation", run: g.fresh},
 	} {
@@ -125,6 +126,8 @@ type gate struct {
 	inventories  bool
 	running      bool
 	debugging    bool
+	watching     []string
+	excluded     []string
 }
 
 func open(t *testing.T) *gate {
@@ -232,7 +235,14 @@ func (g *gate) write(t *testing.T) {
 	if _, running := settings["modules"].(map[string]any)["processes"]; running {
 		t.Fatalf("the settings the package installs take stock of the processes, which the service does not show the agent: %v", settings["modules"])
 	}
-	settings["modules"] = map[string]any{"authentication": map[string]any{"enabled": g.collects}, "inventory": map[string]any{"enabled": g.inventories}, "processes": map[string]any{"enabled": g.running}}
+	if _, watching := settings["modules"].(map[string]any)["files"]; watching {
+		t.Fatalf("the settings the package installs watch files, which an operator chooses: %v", settings["modules"])
+	}
+	modules := map[string]any{"authentication": map[string]any{"enabled": g.collects}, "inventory": map[string]any{"enabled": g.inventories}, "processes": map[string]any{"enabled": g.running}}
+	if len(g.watching) > 0 {
+		modules["files"] = map[string]any{"enabled": true, "paths": g.watching, "exclude": g.excluded}
+	}
+	settings["modules"] = modules
 	if g.debugging {
 		settings["logging"] = map[string]any{"level": "debug"}
 	}

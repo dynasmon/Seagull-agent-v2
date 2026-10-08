@@ -449,6 +449,94 @@ func TestTheInventoryIsTakenEveryIntervalWithinBoundsAndTheAuthenticationOnNone(
 	}
 }
 
+func TestTheFilesCollectorWatchesThePathsItIsGivenLessWhatItLeavesOut(t *testing.T) {
+	settings, err := config.Load(configured(t, map[string]string{"modules": `{"files": {"enabled": true}}`}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := settings.Modules["files"]
+	want := []string{"/etc", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin", "/usr/lib/systemd/system", "/boot", "/var/spool/cron"}
+	if !held.Enabled || !slices.Equal(held.Paths, want) || held.Exclude != nil || time.Duration(held.Interval) != time.Hour {
+		t.Errorf("an enabled files collector watches %+v", held)
+	}
+	printed, err := settings.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(printed), `"/usr/lib/systemd/system"`) || strings.Contains(string(printed), `"exclude"`) {
+		t.Errorf("the printed configuration shows the files collector as:\n%s", printed)
+	}
+
+	chosen := `{"files": {"enabled": true, "interval": "10m", "paths": ["/srv/app", "/etc/ssh/sshd_config", "/opt"], "exclude": ["/srv/app/cache", "*.swp", "[0-9]*~", "/opt/x/y"]}}`
+	settings, err = config.Load(configured(t, map[string]string{"modules": chosen}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	held = settings.Modules["files"]
+	if !slices.Equal(held.Paths, []string{"/srv/app", "/etc/ssh/sshd_config", "/opt"}) || !slices.Equal(held.Exclude, []string{"/srv/app/cache", "*.swp", "[0-9]*~", "/opt/x/y"}) ||
+		time.Duration(held.Interval) != 10*time.Minute {
+		t.Errorf("modules %s were read as %+v", chosen, held)
+	}
+	active := config.Activate(settings)
+	given := active.Settings()
+	given.Modules["files"].Paths[0] = "/elsewhere"
+	if active.Settings().Modules["files"].Paths[0] != "/srv/app" {
+		t.Error("changing the paths of the settings handed out changed the ones the agent runs on")
+	}
+
+	paths := make([]string, 65)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("%q", fmt.Sprintf("/srv/%d", i))
+	}
+	for modules, refusal := range map[string]string{
+		`{"files": {"enabled": true, "paths": []}}`:                                    "modules.files.paths names nothing",
+		`{"files": {"enabled": true, "paths": ["etc"]}}`:                               "modules.files.paths[0] is \"etc\", and it is an absolute path",
+		`{"files": {"enabled": true, "paths": ["/etc/"]}}`:                             "modules.files.paths[0] is \"/etc/\", and it is an absolute path",
+		`{"files": {"enabled": true, "paths": ["/"]}}`:                                 "modules.files.paths[0] is \"/\", and it names a file or a directory to watch, never the root of the filesystem",
+		`{"files": {"enabled": true, "paths": ["/etc", "/proc/sys"]}}`:                 "modules.files.paths[1] is \"/proc/sys\", within /proc",
+		`{"files": {"enabled": true, "paths": ["/tmp"]}}`:                              "modules.files.paths[0] is \"/tmp\", within /tmp",
+		`{"files": {"enabled": true, "paths": ["/var/tmp/x"]}}`:                        "within /var/tmp",
+		`{"files": {"enabled": true, "paths": ["/dev"]}}`:                              "within /dev",
+		`{"files": {"enabled": true, "paths": ["/sys/kernel"]}}`:                       "within /sys",
+		`{"files": {"enabled": true, "paths": ["/etc", "/etc"]}}`:                      "modules.files.paths[1] is \"/etc\", which the paths name before",
+		`{"files": {"enabled": true, "paths": [` + strings.Join(paths, ", ") + `]}}`:   "modules.files.paths names 65 paths, and this agent watches at most 64",
+		`{"files": {"enabled": true, "exclude": ["a/b"]}}`:                             "modules.files.exclude[0] is \"a/b\", and it is an absolute path or a pattern a name matches",
+		`{"files": {"enabled": true, "exclude": ["["]}}`:                               "modules.files.exclude[0] is \"[\", and it is an absolute path or a pattern",
+		`{"files": {"enabled": true, "exclude": [""]}}`:                                "modules.files.exclude[0] is \"\", and it is an absolute path or a pattern",
+		`{"files": {"enabled": true, "exclude": ["/opt/x"]}}`:                          "modules.files.exclude[0] is \"/opt/x\", which is within none of the paths",
+		`{"files": {"enabled": true, "exclude": ["/etc/a", "/etc/a"]}}`:                "modules.files.exclude[1] is \"/etc/a\", which the exclusions name before",
+		`{"files": {"enabled": true, "paths": ["/etc/ssh"], "exclude": ["/etc"]}}`:     "modules.files.exclude[0] is \"/etc\", which leaves out a whole path",
+		`{"files": {"enabled": true, "paths": ["/etc/ssh"], "exclude": ["/etc/ssh"]}}`: "which leaves out a whole path",
+		`{"files": {"enabled": true, "exclude": ["/etc/a/"]}}`:                         "modules.files.exclude[0] is \"/etc/a/\", and it is an absolute path",
+		`{"inventory": {"enabled": true, "paths": ["/etc"]}}`:                          "modules.inventory names paths, and only the files collector watches any",
+		`{"authentication": {"enabled": true, "exclude": ["*.swp"]}}`:                  "modules.authentication names paths, and only the files collector watches any",
+		`{"files": {"enabled": true, "interval": "30s"}}`:                              "modules.files.interval is 30s, and this agent takes between 1m and 24h",
+		`{"files": {"enabled": true, "paths": ["/etc"], "watch": true}}`:               "\"watch\" is not a setting this agent has",
+		`{"files": {"enabled": true, "paths": "/etc"}}`:                                "modules.files.paths is text, and it takes",
+	} {
+		_, err := config.Load(configured(t, map[string]string{"modules": modules}))
+		if !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), refusal) {
+			t.Errorf("modules %s were judged %v, want a refusal saying %q", modules, err, refusal)
+		}
+	}
+
+	directory := trusted(t)
+	installed := func(path string) string {
+		return written(t, directory, fmt.Sprintf(`{"format": 1, "identity": {"state_directory": "/var/lib/seagull-agent"}, "server": {"ingest_url": "https://gateway.example:8443", "renewal_url": "https://control.example:8446", "trust_bundle": %q}, "modules": {"files": {"enabled": true, "paths": [%q]}}}`,
+			platform(t, directory), path))
+	}
+	for _, path := range []string{"/var/lib/seagull-agent", "/var/lib/seagull-agent/collection"} {
+		if _, err := config.Load(installed(path)); !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), "which is within identity.state_directory") {
+			t.Errorf("watching %s within the installation was judged %v", path, err)
+		}
+	}
+	for _, path := range []string{"/var/lib", "/var/lib/seagull-agent-other"} {
+		if _, err := config.Load(installed(path)); err != nil {
+			t.Errorf("watching %s beside the installation was refused: %v", path, err)
+		}
+	}
+}
+
 func TestThePrintedConfigurationIsTheOneTheAgentRunsOn(t *testing.T) {
 	path := configured(t, map[string]string{"logging": `{"level": "debug"}`, "spool": `{"max_age": "90m"}`})
 	settings, err := config.Load(path)

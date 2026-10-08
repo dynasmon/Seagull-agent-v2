@@ -17,6 +17,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/integrity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/renewal"
@@ -40,6 +41,7 @@ type observing struct {
 	authentication *authentication.Collector
 	inventory      *inventory.Collector
 	processes      *inventory.Collector
+	files          *integrity.Collector
 	renewer        *renewal.Renewer
 	delivery       *delivery.Delivery
 }
@@ -99,6 +101,12 @@ func (o *observing) collected(snapshot *status.Snapshot) status.Component {
 			held.Reason = status.Text(reason)
 			if failing != nil {
 				held.State, state, recovery = status.Degraded, status.Degraded, inventory.Recovery(failing)
+			}
+		case module.State == modules.Running && module.Name == integrity.Name && o.files != nil:
+			reason, failing := watching(o.files.Stats())
+			held.Reason = status.Text(reason)
+			if failing != nil {
+				held.State, state, recovery = status.Degraded, status.Degraded, integrity.Recovery(failing)
 			}
 		}
 		snapshot.Modules = append(snapshot.Modules, held)
@@ -185,6 +193,28 @@ func inventoried(taking *inventory.Collector) (string, error) {
 		}
 	}
 	return strings.Join(said, "; "), failing
+}
+
+// What the files module says of the paths it watches: how much it holds,
+// what it found, and what it cannot see of them. It is failing when it cannot
+// look at a path it was given, the paths hold more than it keeps, or the
+// kernel tells it nothing of some directories, so their changes wait for its
+// next walk.
+func watching(held integrity.Stats) (string, error) {
+	said := []string{fmt.Sprintf("watching %d entries of %d paths, %d directories as they change", held.Entries, held.Paths, held.Watched)}
+	if held.Walked.IsZero() {
+		said[0] = fmt.Sprintf("taking the baseline of %d paths", held.Paths)
+	}
+	if held.Changes > 0 {
+		said = append(said, fmt.Sprintf("%d changes found since the agent started, the last at %s", held.Changes, held.Changed.UTC().Format(time.RFC3339)))
+	}
+	if held.Unlogged > 0 {
+		said = append(said, fmt.Sprintf("%d of them not written down, past what a minute takes", held.Unlogged))
+	}
+	if gaps := held.Coverage(); gaps != "" {
+		said = append(said, gaps)
+	}
+	return strings.Join(said, "; "), held.Failure
 }
 
 func (o *observing) streams(snapshot *status.Snapshot) status.Component {

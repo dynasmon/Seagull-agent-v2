@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -24,9 +25,11 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/integrity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/accounts"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dpkg"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/inotify"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/interfaces"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/journal"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/machine"
@@ -465,6 +468,36 @@ func TestTheStatusSaysWhatTheInventoryCannotAdmitAndWhatToDo(t *testing.T) {
 				t.Errorf("the collection stands at %+v with %+v", component, snapshot.Modules)
 			}
 		})
+	}
+}
+
+func TestTheStatusSaysWhatTheFilesModuleCannotSeeAndWhatToDo(t *testing.T) {
+	walked := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	for name, held := range map[string]struct {
+		stats    integrity.Stats
+		said     []string
+		failing  bool
+		recovery string
+	}{
+		"a baseline being taken": {stats: integrity.Stats{Paths: 3}, said: []string{"taking the baseline of 3 paths"}},
+		"what it watches and found": {stats: integrity.Stats{Paths: 2, Entries: 40, Watched: 7, Walked: walked, Changes: 3, Changed: walked, Unlogged: 1},
+			said: []string{"watching 40 entries of 2 paths, 7 directories as they change", "3 changes found since the agent started, the last at 2026-10-07T12:00:00Z", "1 of them not written down"}},
+		"what it cannot read": {stats: integrity.Stats{Paths: 1, Entries: 9, Walked: walked, Unlisted: integrity.Gap{Count: 2, Examples: []string{"/etc/ssl/private"}}, Missing: []string{"/usr/local/sbin"}},
+			said: []string{"directories it cannot list: 2, such as /etc/ssl/private", "paths that name nothing on this host: /usr/local/sbin"}},
+		"a path it cannot look at": {stats: integrity.Stats{Paths: 1, Walked: walked, Failure: fmt.Errorf("%w: /root/.ssh: %w", integrity.ErrUnobserved, fs.ErrPermission)},
+			said: []string{"the module cannot look at a path it was given: /root/.ssh"}, failing: true, recovery: "CAP_DAC_READ_SEARCH"},
+		"directories the kernel does not watch": {stats: integrity.Stats{Paths: 1, Walked: walked, Failure: fmt.Errorf("%w: %w", integrity.ErrUnwatched, inotify.ErrLimit)},
+			failing: true, recovery: "fs.inotify.max_user_watches"},
+	} {
+		reason, failing := watching(held.stats)
+		for _, said := range held.said {
+			if !strings.Contains(reason, said) {
+				t.Errorf("%s: the status says %q, without %q", name, reason, said)
+			}
+		}
+		if (failing != nil) != held.failing || held.failing && !strings.Contains(integrity.Recovery(failing), held.recovery) {
+			t.Errorf("%s: the status fails with %v and recovers with %q", name, failing, integrity.Recovery(failing))
+		}
 	}
 }
 

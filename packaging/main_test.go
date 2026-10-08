@@ -290,6 +290,9 @@ func TestTheServiceRunsTheAgentAsThePackageInstallsIt(t *testing.T) {
 	if settings.Modules["processes"].Enabled {
 		t.Errorf("the settings the package installs take stock of the processes, which the service hides from the agent until an operator shows it them: %v", settings.Modules)
 	}
+	if _, watching := settings.Modules["files"]; watching {
+		t.Errorf("the settings the package installs watch files, which an operator chooses and the service lets the agent read only in part: %v", settings.Modules)
+	}
 	if path.Dir(state) != "/var/lib" || !slices.Contains(directories, "d "+state+" 0700 "+account[1]+" "+account[1]+" -") {
 		t.Errorf("the installation is kept in %s, and the package creates %q", state, directories)
 	}
