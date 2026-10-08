@@ -449,6 +449,33 @@ func TestTheInventoryIsTakenEveryIntervalWithinBoundsAndTheAuthenticationOnNone(
 	}
 }
 
+func TestTheNetworkIsReadEveryIntervalWithinBoundsOfItsOwn(t *testing.T) {
+	for modules, want := range map[string]time.Duration{
+		`{"network": {"enabled": true}}`:                    time.Minute,
+		`{"network": {"enabled": true, "interval": "10s"}}`: 10 * time.Second,
+		`{"network": {"enabled": true, "interval": "1h"}}`:  time.Hour,
+	} {
+		settings, err := config.Load(configured(t, map[string]string{"modules": modules}))
+		if err != nil {
+			t.Fatalf("modules %s: %v", modules, err)
+		}
+		if held := settings.Modules["network"]; time.Duration(held.Interval) != want || !held.Enabled {
+			t.Errorf("modules %s read the network every %s, want %s", modules, time.Duration(held.Interval), want)
+		}
+	}
+	for modules, refusal := range map[string]string{
+		`{"network": {"enabled": true, "interval": "9s"}}`:                "modules.network.interval is 9s, and this agent takes between 10s and 1h",
+		`{"network": {"enabled": true, "interval": "61m"}}`:               "modules.network.interval is 61m, and this agent takes between 10s and 1h",
+		`{"network": {"enabled": true, "paths": ["/etc"]}}`:               "modules.network names paths, and only the files collector watches any",
+		`{"network": {"enabled": true, "interval": "1m", "extra": true}}`: "extra",
+	} {
+		_, err := config.Load(configured(t, map[string]string{"modules": modules}))
+		if !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), refusal) {
+			t.Errorf("modules %s were judged %v, want a refusal saying %q", modules, err, refusal)
+		}
+	}
+}
+
 func TestTheFilesCollectorWatchesThePathsItIsGivenLessWhatItLeavesOut(t *testing.T) {
 	settings, err := config.Load(configured(t, map[string]string{"modules": `{"files": {"enabled": true}}`}))
 	if err != nil {
