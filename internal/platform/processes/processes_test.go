@@ -2,6 +2,7 @@ package processes
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -169,6 +170,73 @@ func TestWhatProcfsDoesNotSayWholeIsUnreadable(t *testing.T) {
 	}
 	if _, err := list(t.Context(), filepath.Join(t.TempDir(), "absent"), 10); !errors.Is(err, ErrUnreadable) {
 		t.Errorf("an absent procfs lists processes: %v", err)
+	}
+}
+
+func TestVisitingHandsEachProcessItsOwnDirectoryInTheOrderOfItsPID(t *testing.T) {
+	planted := plant(t, "rw,hidepid=invisible",
+		described{pid: 300, parent: 1, user: 33, name: "worker", started: 30, executable: "/usr/sbin/worker"},
+		described{pid: 1, name: "init", started: 1},
+		described{pid: 42, parent: 1, user: 1000, name: "a) S 1 (b", started: 4},
+	)
+	planted.write("300/marker", "three hundred")
+	if err := os.MkdirAll(filepath.Join(planted.root, "301"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var visited []Process
+	var marked []string
+	refused, err := Visit(t.Context(), planted.root, 10, func(found Process, own *os.Root) error {
+		visited = append(visited, found)
+		content, _ := own.ReadFile("marker")
+		marked = append(marked, string(content))
+		return nil
+	})
+	want := []Process{
+		{PID: 1, Name: "init", StartedAt: at(1)},
+		{PID: 42, Parent: 1, Name: "a) S 1 (b", StartedAt: at(4)},
+		{PID: 300, Parent: 1, Name: "worker", StartedAt: at(30)},
+	}
+	if err != nil || refused != 0 || !slices.Equal(visited, want) || !slices.Equal(marked, []string{"", "", "three hundred"}) {
+		t.Errorf("procfs mounted to hide processes visits\n%+v\nreading %q, refusing %d, %v; want\n%+v", visited, marked, refused, err, want)
+	}
+
+	stopped := errors.New("stop here")
+	visited = nil
+	if _, err := Visit(t.Context(), planted.root, 10, func(found Process, _ *os.Root) error {
+		visited = append(visited, found)
+		return stopped
+	}); !errors.Is(err, stopped) || len(visited) != 1 {
+		t.Errorf("a visit asked to stop visits %d processes and returns %v", len(visited), err)
+	}
+	if _, err := Visit(t.Context(), planted.root, 2, func(Process, *os.Root) error { return nil }); !errors.Is(err, ErrTooMany) {
+		t.Errorf("four processes visited two at most return %v", err)
+	}
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := Visit(cancelled, planted.root, 10, func(Process, *os.Root) error { return nil }); !errors.Is(err, context.Canceled) {
+		t.Errorf("a cancelled visit returns %v", err)
+	}
+	planted.write("42/stat", "42 (cut) S 1\n")
+	if _, err := Visit(t.Context(), planted.root, 10, func(Process, *os.Root) error { return nil }); !errors.Is(err, ErrUnreadable) {
+		t.Errorf("a stat cut short visits as %v", err)
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("the superuser reads a directory whatever its mode")
+	}
+	planted.write("42/stat", fmt.Sprintf("42 (shown) S 1 42 1 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 1 0 %d 1 1\n", 4))
+	locked := filepath.Join(planted.root, "42")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	visited = nil
+	refused, err = Visit(t.Context(), planted.root, 10, func(found Process, _ *os.Root) error {
+		visited = append(visited, found)
+		return nil
+	})
+	if err != nil || refused != 1 || len(visited) != 2 {
+		t.Errorf("procfs refusing a process to the agent visits %+v, refusing %d, %v", visited, refused, err)
 	}
 }
 
