@@ -46,7 +46,7 @@ type probed struct {
 
 var errnos = map[syscall.Errno]string{
 	syscall.EPERM: "EPERM", syscall.EACCES: "EACCES", syscall.EROFS: "EROFS", syscall.ENOENT: "ENOENT",
-	syscall.EAFNOSUPPORT: "EAFNOSUPPORT", syscall.ENOSYS: "ENOSYS", syscall.EINVAL: "EINVAL", syscall.ENOEXEC: "ENOEXEC",
+	syscall.EAFNOSUPPORT: "EAFNOSUPPORT", syscall.ENOSYS: "ENOSYS", syscall.EINVAL: "EINVAL", syscall.ENOEXEC: "ENOEXEC", syscall.EFAULT: "EFAULT",
 }
 
 var signals = map[syscall.Signal]string{syscall.SIGSYS: "SIGSYS", syscall.SIGSEGV: "SIGSEGV", syscall.SIGILL: "SIGILL"}
@@ -55,6 +55,8 @@ const (
 	pidfdOpen  = 434
 	pidfdGetfd = 438
 )
+
+var processVMReadv = map[string]uintptr{"amd64": 310, "arm64": 270, "riscv64": 270, "loong64": 270}
 
 func probe(marker string) int {
 	mounts := mounted()
@@ -82,8 +84,10 @@ func probe(marker string) int {
 		"pidfd_getfd on itself":      descriptor(),
 		"setuid to its own uid":      ownUser(),
 		"32-bit system call":         compat(marker),
+		"descriptors of process 1":   list("/proc/1/fd"),
+		"memory of process 1":        memory(1),
 	}}
-	for _, path := range []string{"/", "/etc", "/usr", "/run", state, "/proc/sys", "/sys", "/sys/fs/cgroup"} {
+	for _, path := range []string{"/", "/etc", "/usr", "/run", state, "/proc", "/proc/sys", "/sys", "/sys/fs/cgroup"} {
 		found.Mounts[path] = "ro"
 		if mounts[containing(mounts, path)] {
 			found.Mounts[path] = "rw"
@@ -214,6 +218,22 @@ func descriptor() string {
 		return outcome(errno)
 	}
 	syscall.Close(int(copied))
+	return allowed
+}
+
+func memory(pid int) string {
+	held := make([]byte, 8)
+	local := syscall.Iovec{Base: &held[0], Len: uint64(len(held))}
+	remote := [2]uintptr{uintptr(os.Getpagesize()), uintptr(len(held))}
+	number, known := processVMReadv[runtime.GOARCH]
+	if !known {
+		return "process_vm_readv has no number on " + runtime.GOARCH
+	}
+	_, _, errno := syscall.Syscall6(number, uintptr(pid), uintptr(unsafe.Pointer(&local)), 1, uintptr(unsafe.Pointer(&remote)), 1, 0)
+	runtime.KeepAlive(held)
+	if errno != 0 {
+		return outcome(errno)
+	}
 	return allowed
 }
 
@@ -402,6 +422,8 @@ func (g *gate) confine(t *testing.T) {
 		"pidfd_getfd on itself":      {"EPERM", allowed},
 		"setuid to its own uid":      {"EPERM", allowed},
 		"32-bit system call":         {"SIGSYS", allowed},
+		"descriptors of process 1":   {"ENOENT", "EACCES"},
+		"memory of process 1":        {"EPERM", "EPERM"},
 		"user namespace":             {confined: "EPERM"},
 		"real-time scheduling":       {confined: "EPERM"},
 		"kernel log":                 {confined: "EPERM"},
