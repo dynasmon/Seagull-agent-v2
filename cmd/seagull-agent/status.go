@@ -19,6 +19,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/integrity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/network"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/renewal"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
@@ -42,6 +43,7 @@ type observing struct {
 	inventory      *inventory.Collector
 	processes      *inventory.Collector
 	files          *integrity.Collector
+	network        *network.Collector
 	renewer        *renewal.Renewer
 	delivery       *delivery.Delivery
 }
@@ -107,6 +109,12 @@ func (o *observing) collected(snapshot *status.Snapshot) status.Component {
 			held.Reason = status.Text(reason)
 			if failing != nil {
 				held.State, state, recovery = status.Degraded, status.Degraded, integrity.Recovery(failing)
+			}
+		case module.State == modules.Running && module.Name == network.Name && o.network != nil:
+			reason, failing := networking(o.network.Stats())
+			held.Reason = status.Text(reason)
+			if failing != nil {
+				held.State, state, recovery = status.Degraded, status.Degraded, network.Recovery(failing)
 			}
 		}
 		snapshot.Modules = append(snapshot.Modules, held)
@@ -213,6 +221,26 @@ func watching(held integrity.Stats) (string, error) {
 	}
 	if gaps := held.Coverage(); gaps != "" {
 		said = append(said, gaps)
+	}
+	return strings.Join(said, "; "), held.Failure
+}
+
+// What the network module says of what it watches: the namespaces, listeners
+// and flows it holds, what opened and closed, and what it cannot see. It is
+// failing when it cannot read its own namespace's sockets.
+func networking(held network.Stats) (string, error) {
+	said := []string{fmt.Sprintf("watching %d network namespaces: %d listeners and %d flows of %d connections", held.Namespaces, held.Listeners, held.Flows, held.Connections)}
+	if held.Observed.IsZero() {
+		said[0] = "reading the sockets of the host for the first time"
+	}
+	if held.Changes > 0 {
+		said = append(said, fmt.Sprintf("%d changes found since the agent started, the last at %s", held.Changes, held.Changed.UTC().Format(time.RFC3339)))
+	}
+	if held.Unlogged > 0 {
+		said = append(said, fmt.Sprintf("%d of them not written down, past what a minute takes", held.Unlogged))
+	}
+	if gaps := held.Coverage(); gaps != "" {
+		said = append(said, "not seeing "+gaps)
 	}
 	return strings.Join(said, "; "), held.Failure
 }
