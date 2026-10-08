@@ -10,10 +10,12 @@ import (
 	"testing"
 )
 
-// What procfs keeps of what a process was started with: its arguments and its
-// environment, which carry whatever whoever started it put there, a password
-// among them. The agent names neither file of any process, so it reads neither.
-var startedWith = []string{"cmdline", "environ"}
+// What procfs keeps of a process that is nobody's to read: the arguments and
+// the environment it was started with, which carry whatever whoever started it
+// put there, a password among them, and its memory, which an operator lets the
+// agent read when it lets it name the process that holds a socket. The agent
+// names none of these files of any process, so it reads none of them.
+var startedWith = []string{"cmdline", "environ", "mem"}
 
 func namesWhatAProcessWasStartedWith(file *ast.File) []token.Pos {
 	var found []token.Pos
@@ -41,6 +43,9 @@ func TestNamingWhatAProcessWasStartedWithIsRecognised(t *testing.T) {
 		"package p; import \"path/filepath\"; func f(pid string) string { return filepath.Join(\"/proc\", pid, `cmdline`) }": 1,
 		`package p; const said = "the agent sends no command line and reads no environment"`:                                 0,
 		`package p; import "os"; func f() ([]byte, error) { return os.ReadFile("/proc/self/stat") }`:                         0,
+		`package p; import "os"; func f(pid string) (*os.File, error) { return os.Open("/proc/" + pid + "/mem") }`:           1,
+		`package p; import "os"; func f() ([]byte, error) { return os.ReadFile("/proc/meminfo") }`:                           0,
+		`package p; import "os"; func f(root *os.Root) (string, error) { return root.Readlink("fd/3") }`:                     0,
 	}
 	for source, want := range cases {
 		file, err := parser.ParseFile(token.NewFileSet(), "p.go", source, parser.SkipObjectResolution)
@@ -65,7 +70,7 @@ func TestNoProductionCodeNamesWhatAProcessWasStartedWith(t *testing.T) {
 			t.Fatalf("parse %s: %v", relative(root, source), err)
 		}
 		for _, position := range namesWhatAProcessWasStartedWith(parsed) {
-			t.Errorf("%s:%d names the arguments or the environment of a process: the agent takes stock of what runs without what it was started with, which is nobody's to send",
+			t.Errorf("%s:%d names the arguments, the environment or the memory of a process: the agent takes stock of what runs without what it was started with or holds, which is nobody's to send",
 				relative(root, source), files.Position(position).Line)
 		}
 	}
