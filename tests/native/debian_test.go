@@ -70,6 +70,9 @@ func TestMain(m *testing.M) {
 	if name, ok := os.LookupEnv(namedVariable); ok {
 		os.Exit(named(name))
 	}
+	if sockets, ok := os.LookupEnv(socketsVariable); ok {
+		os.Exit(holding(sockets))
+	}
 	os.Exit(m.Run())
 }
 
@@ -101,6 +104,7 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "the service takes stock of what the host has and admits a kind again when it changed", run: g.inventory},
 		{name: "the agent takes stock of the processes once an operator has the service show it every process", run: g.processes},
 		{name: "the agent watches the files it is told to, reads what only root reads once an operator lets it, and writes down what changes", run: g.files},
+		{name: "the agent watches what the host listens on and talks to, and sees other namespaces and who holds a socket once an operator lets it", run: g.sockets},
 		{name: "purging deletes the installation, its settings and the service's", run: g.purge},
 		{name: "installing after a purge makes a new installation", run: g.fresh},
 	} {
@@ -125,6 +129,7 @@ type gate struct {
 	collects     bool
 	inventories  bool
 	running      bool
+	listening    bool
 	debugging    bool
 	watching     []string
 	excluded     []string
@@ -238,9 +243,15 @@ func (g *gate) write(t *testing.T) {
 	if _, watching := settings["modules"].(map[string]any)["files"]; watching {
 		t.Fatalf("the settings the package installs watch files, which an operator chooses: %v", settings["modules"])
 	}
+	if _, listening := settings["modules"].(map[string]any)["network"]; listening {
+		t.Fatalf("the settings the package installs watch the network, which an operator chooses: %v", settings["modules"])
+	}
 	modules := map[string]any{"authentication": map[string]any{"enabled": g.collects}, "inventory": map[string]any{"enabled": g.inventories}, "processes": map[string]any{"enabled": g.running}}
 	if len(g.watching) > 0 {
 		modules["files"] = map[string]any{"enabled": true, "paths": g.watching, "exclude": g.excluded}
+	}
+	if g.listening {
+		modules["network"] = map[string]any{"enabled": true, "interval": "10s"}
 	}
 	settings["modules"] = modules
 	if g.debugging {
