@@ -31,6 +31,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/integrity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/network"
 	"github.com/dynasmon/Seagull-agent-v2/internal/pki"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dumps"
@@ -212,7 +213,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 		return refused(err)
 	}
 	held.collection, held.files = collected.collection, collected.files
-	observed.collection, observed.authentication, observed.inventory, observed.processes, observed.files = collected.collection, collected.authentication, collected.inventory, collected.processes, collected.files
+	observed.collection, observed.authentication, observed.inventory, observed.processes, observed.files, observed.network = collected.collection, collected.authentication, collected.inventory, collected.processes, collected.files, collected.network
 	composed := append([]agentruntime.Component{held.component(asked), {Name: "collection", Policy: agentruntime.Optional, Run: collected.collection.Run}}, components...)
 	if isEnrolled {
 		client, err := platform(settings, chosen.authorities, credential)
@@ -292,13 +293,19 @@ func unstarted(stderr io.Writer, path string, err error) int {
 // inventory collector reads what the host shows any account, as the processes
 // collector does once the service lets procfs show the agent every process.
 // The files collector watches what that account may read, and reads what only
-// root may once an operator grants it CAP_DAC_READ_SEARCH, which is then no
-// more than it needs.
+// root may once an operator grants it CAP_DAC_READ_SEARCH, and the network
+// collector names the process holding a socket of another account once an
+// operator grants it that and CAP_SYS_PTRACE, which are then no more than they
+// need.
 func needed(settings config.Config) []string {
-	if settings.Modules[integrity.Name].Enabled {
-		return []string{"CAP_DAC_READ_SEARCH"}
+	var granted []string
+	if settings.Modules[integrity.Name].Enabled || settings.Modules[network.Name].Enabled {
+		granted = append(granted, "CAP_DAC_READ_SEARCH")
 	}
-	return nil
+	if settings.Modules[network.Name].Enabled {
+		granted = append(granted, "CAP_SYS_PTRACE")
+	}
+	return granted
 }
 
 func privileged(logger *slog.Logger, granted privileges.Privileges, needed []string) {
@@ -432,6 +439,7 @@ type collectors struct {
 	inventory      *inventory.Collector
 	processes      *inventory.Collector
 	files          *integrity.Collector
+	network        *network.Collector
 }
 
 func collect(installation *identity.Installation, active *config.Active, spooled *spool.Spool, governed *governor.Governor, logger *slog.Logger, state string) (collectors, error) {
@@ -480,17 +488,27 @@ func collect(installation *identity.Installation, active *config.Active, spooled
 	if err != nil {
 		return collectors{}, err
 	}
+	listening, err := network.New(network.Options{
+		Governor:  governed,
+		Directory: directory,
+		Logger:    logger,
+		Interval:  func() time.Duration { return time.Duration(active.Settings().Modules[network.Name].Interval) },
+	})
+	if err != nil {
+		return collectors{}, err
+	}
 	settings := active.Settings()
 	collection, err := modules.New(logger, modules.Policy{},
 		modules.Module{Name: authentication.Name, Enabled: slices.Contains(enabled(settings), authentication.Name), Collect: authenticating.Collect},
 		modules.Module{Name: inventory.Name, Enabled: slices.Contains(enabled(settings), inventory.Name), Collect: stocked[inventory.Name].Collect},
 		modules.Module{Name: inventory.Processes, Enabled: slices.Contains(enabled(settings), inventory.Processes), Collect: stocked[inventory.Processes].Collect},
 		modules.Module{Name: integrity.Name, Enabled: slices.Contains(enabled(settings), integrity.Name), Collect: watching.Collect},
+		modules.Module{Name: network.Name, Enabled: slices.Contains(enabled(settings), network.Name), Collect: listening.Collect},
 	)
 	if err != nil {
 		return collectors{}, err
 	}
-	return collectors{collection: collection, authentication: authenticating, inventory: stocked[inventory.Name], processes: stocked[inventory.Processes], files: watching}, nil
+	return collectors{collection: collection, authentication: authenticating, inventory: stocked[inventory.Name], processes: stocked[inventory.Processes], files: watching, network: listening}, nil
 }
 
 func enabled(settings config.Config) []string {

@@ -27,6 +27,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/integrity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/network"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/accounts"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dpkg"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/inotify"
@@ -35,6 +36,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/machine"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/processes"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/services"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/sockets"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	"github.com/dynasmon/Seagull-agent-v2/internal/status"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
@@ -497,6 +499,36 @@ func TestTheStatusSaysWhatTheFilesModuleCannotSeeAndWhatToDo(t *testing.T) {
 		}
 		if (failing != nil) != held.failing || held.failing && !strings.Contains(integrity.Recovery(failing), held.recovery) {
 			t.Errorf("%s: the status fails with %v and recovers with %q", name, failing, integrity.Recovery(failing))
+		}
+	}
+}
+
+func TestTheStatusSaysWhatTheNetworkModuleCannotSeeAndWhatToDo(t *testing.T) {
+	observed := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	for name, held := range map[string]struct {
+		stats    network.Stats
+		said     []string
+		failing  bool
+		recovery string
+	}{
+		"a first reading": {stats: network.Stats{}, said: []string{"reading the sockets of the host for the first time"}},
+		"what it watches and found": {stats: network.Stats{Observed: observed, Namespaces: 3, Listeners: 12, Flows: 40, Connections: 95, Changes: 7, Changed: observed, Unlogged: 2},
+			said: []string{"watching 3 network namespaces: 12 listeners and 40 flows of 95 connections", "7 changes found since the agent started, the last at 2026-10-08T12:00:00Z", "2 of them not written down"}},
+		"what procfs hides": {stats: network.Stats{Observed: observed, Namespaces: 1, Hidden: true},
+			said: []string{"not seeing the network namespaces other than the agent's own", "procfs hides the processes of other accounts"}},
+		"descriptors it may not read": {stats: network.Stats{Observed: observed, Namespaces: 2, Unread: 140, Untracked: 3},
+			said: []string{"the agent may not read the descriptors of 140 processes", "3 flows past the 16384 it keeps"}},
+		"its own namespace it cannot read": {stats: network.Stats{Observed: observed, Failure: fmt.Errorf("the agent's own network namespace: %w: more than 65536", sockets.ErrTooMany)},
+			said: []string{"the agent's own network namespace"}, failing: true, recovery: "more sockets than the module reads"},
+	} {
+		reason, failing := networking(held.stats)
+		for _, said := range held.said {
+			if !strings.Contains(reason, said) {
+				t.Errorf("%s: the status says %q, without %q", name, reason, said)
+			}
+		}
+		if (failing != nil) != held.failing || held.failing && !strings.Contains(network.Recovery(failing), held.recovery) {
+			t.Errorf("%s: the status fails with %v and recovers with %q", name, failing, network.Recovery(failing))
 		}
 	}
 }

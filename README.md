@@ -161,7 +161,7 @@ The service also confines the agent to what it uses of the host, which
 | Devices | `PrivateDevices=yes` | `null`, `zero`, `full`, `random`, `urandom`, `tty`, and `ptmx`, which opens pseudo-terminals |
 | Shared memory | `PrivateIPC=yes` and `InaccessiblePaths=-/dev/shm -/dev/mqueue` | no IPC object, shared memory or message queue that another process holds |
 | The kernel | `ProtectKernelTunables=yes`, `ProtectKernelModules=yes`, `ProtectKernelLogs=yes`, `ProtectControlGroups=yes`, `ProtectClock=yes` and `ProtectHostname=yes` | `/proc/sys`, `/sys` and the control groups to read; no module, kernel log, clock or host name |
-| Processes | `ProtectProc=invisible` | the processes of its own account, alone, in `/proc`, until an operator shows it every process for the [processes module](#processes) |
+| Processes | `ProtectProc=invisible` | the processes of its own account, alone, in `/proc`, until an operator shows it every process for the [processes module](#processes) or the [network module](#network) |
 | The network | `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX` | IPv4, IPv6 and local sockets: the inventory has `systemctl` reach systemd over the system bus, and reads the interfaces without a netlink socket, which the agent cannot open |
 | System calls | `SystemCallFilter=@system-service` and `SystemCallFilter=~@privileged`, `SystemCallArchitectures=native` and `SystemCallErrorNumber=EPERM` | the calls a system service makes, less those that need the superuser; any other fails with `EPERM`, and a call through the 32-bit entry ends the process |
 | Within those calls | `MemoryDenyWriteExecute=yes`, `LockPersonality=yes`, `RestrictNamespaces=yes`, `RestrictRealtime=yes` and `RestrictSUIDSGID=yes` | no memory both writable and executable, no other execution domain, no namespace, no real-time scheduling, no setuid or setgid file |
@@ -221,7 +221,8 @@ The evidence:
   override a ceiling, remove, reinstall, deliver the backlog once the emulated
   platform takes it, collect what the host's own sshd decides, write a
   diagnostics bundle beside the running agent, take stock of the host as it
-  changes, purge and install again. Until it delivers the platform answers every batch as the
+  changes and of the processes once the service shows them, watch files and
+  what the host listens on and talks to, purge and install again. Until it delivers the platform answers every batch as the
   recorded gateway does when its backbone does not take one. To collect, it
   installs openssh-server when the host has none, lets it take passwords, gives
   an account of its own a password and the loopback the address 203.0.113.10,
@@ -240,14 +241,15 @@ The evidence:
   netlink and Internet sockets, makes a user namespace, takes the 32-bit
   personality, maps memory both writable and executable, makes a setuid file,
   schedules in real time, reads the clock's discipline and the kernel's log,
-  calls `pidfd_getfd` on itself and `setuid` to its own account, and runs a
-  32-bit program, and it walks every filesystem that is not read-only for what
-  the account may write. In the service the account may write its
+  calls `pidfd_getfd` on itself and `setuid` to its own account, lists the
+  descriptors of process 1 and reads its memory with `process_vm_readv`, and
+  runs a 32-bit program, and it walks every filesystem that is not read-only for
+  what the account may write. In the service the account may write its
   installation, its `/tmp` and its `/var/tmp` and nothing else, finds no device
   but the seven the table names, and is refused everything else it tries but
   Internet and local sockets. Outside the service it is allowed each of those, unless
-  Ubuntu already refuses it, as it does the kernel's log and real-time
-  scheduling, and what it wrote to `/tmp` and `/var/tmp` in the service is not
+  Ubuntu already refuses it, as it does the kernel's log, real-time scheduling
+  and the descriptors and the memory of another account's process, and what it wrote to `/tmp` and `/var/tmp` in the service is not
   in the host's. The gate then reads the agent's own process: no capability,
   `no_new_privs`, a seccomp filter, and mount, UTS and IPC namespaces apart
   from the host's. Every later step runs under that confinement, collection,
@@ -384,12 +386,13 @@ The agent reads the file whole, or refuses it whole:
 | `transport.max_upload_bytes_per_second` | `1MiB` | `64KiB` to `1GiB`, and enough to connect and send a whole batch within `transport.request_timeout` |
 | `spool.max_bytes` | `512MiB` | `16MiB` to `64GiB`, and at least four batches |
 | `spool.max_age` | `72h` | `1h` to `720h`; events are kept `168h` at most |
-| `modules` | `{}` | `{"authentication": {"enabled": true}}`, to collect what sshd decides, `{"inventory": {"enabled": true}}`, to take stock of what the host has, `{"processes": {"enabled": true}}`, to take stock of the processes it runs, and `{"files": {"enabled": true}}`, to watch files: `authentication`, `files`, `inventory` and `processes` are the collectors this build has |
+| `modules` | `{}` | `{"authentication": {"enabled": true}}`, to collect what sshd decides, `{"inventory": {"enabled": true}}`, to take stock of what the host has, `{"processes": {"enabled": true}}`, to take stock of the processes it runs, `{"files": {"enabled": true}}`, to watch files, and `{"network": {"enabled": true}}`, to watch what it listens on and talks to: `authentication`, `files`, `inventory`, `network` and `processes` are the collectors this build has |
 | `modules.inventory.interval` | `1h` | `1m` to `24h`: how often the inventory takes stock; a collector that follows its source, as `authentication` does, takes none |
 | `modules.processes.interval` | `1h` | `1m` to `24h`: how often the processes module takes stock |
 | `modules.files.paths` | the paths [Files](#files) lists | 1 to 64 absolute paths to watch, none within `/proc`, `/sys`, `/dev`, `/tmp`, `/var/tmp` or the installation; a module other than `files` takes none |
 | `modules.files.exclude` | none | up to 256 absolute paths within those, or patterns a name matches, such as `*.swp`, to leave out |
 | `modules.files.interval` | `1h` | `1m` to `24h`: how often the files module walks every path again |
+| `modules.network.interval` | `1m` | `10s` to `1h`: how often the network module reads the sockets of the host |
 | `resources.memory_limit` | `256MiB` | `64MiB` to `8GiB` |
 | `resources.max_concurrent_scans` | `2` | 1 to 64 |
 | `resources.max_scan_bytes_per_second` | `8MiB` | `1MiB` to `1GiB` |
@@ -453,8 +456,9 @@ how long and how often the agent renews its credential, which collectors run,
 and where and in what batches it delivers what they collect. A reload applies
 `modules` whole: a collector it no longer names is stopped and the agent waits
 for it, and one it names again starts where it stopped, while a new
-`modules.inventory.interval` or `modules.processes.interval` takes effect after
-the round its module is waiting for, and new `modules.files.paths` or
+`modules.inventory.interval`, `modules.processes.interval` or
+`modules.network.interval` takes effect after the round its module is waiting
+for, and new `modules.files.paths` or
 `modules.files.exclude` are walked at once. A module this build does not have is refused, and so is `updates.enabled`: an
 agent that accepted either would be promising collection it cannot do or
 updates it cannot install.
@@ -503,8 +507,8 @@ for them. A panic inside a module is not recovered, as anywhere else in the
 agent.
 
 The composition root composes the collection with the collectors this build
-has, `authentication`, `inventory`, `processes` and `files`, each enabled when
-`modules` names it,
+has, `authentication`, `inventory`, `processes`, `files` and `network`, each
+enabled when `modules` names it,
 and the collection runs as an optional component: a collector that spent its
 budget leaves the agent delivering what the others admit.
 
@@ -821,7 +825,7 @@ record, is not admitted.
 | `name` | the name the kernel keeps for the process, as `stat` gives it: the first 15 bytes of its program's, unless the process chose another, as any process may. A name that is printable UTF-8 is sent as it is, any other quoted as Go quotes a string, such as `"\xff) S 1 ("`, so no name keeps the other processes out of the snapshot. A kernel worker's name ends in the work it was doing as it was read, such as `kworker/2:3-events`, so it changes from one snapshot to the next |
 | `user` | the account the process acts as, its effective uid in `status`, named as `/etc/passwd` names that uid first, and by the uid when it does not |
 | `started_at` | when the process started: the boot time `/proc/stat` gives, to the second, and the ticks since boot `stat` counts at USER_HZ, 100 a second on every architecture Go builds Linux for, so a process is the same item in every snapshot while the clock is not set |
-| `path` | the executable `/proc/<pid>/exe` links, of the processes of the agent's own account alone: procfs shows that link of another account's process only to whoever may trace it, which takes `CAP_SYS_PTRACE` |
+| `path` | the executable `/proc/<pid>/exe` links, of the processes of the agent's own account alone: procfs shows that link of another account's process only to whoever may trace it, which takes `CAP_SYS_PTRACE`, which the agent holds only with the drop-in of the [network module](#network) |
 | `command_line` | nothing: the agent opens neither the arguments nor the environment of any process, and an architecture test refuses production code that names either file |
 
 Each process is read through the directory `/proc` keeps of it, held open while
@@ -1092,6 +1096,231 @@ What it does not claim:
   walked as a directory, and its entries are watched twice;
 - patterns in paths: `/home/*/.ssh` is not a path, and each home is named.
 
+## Network
+
+The network module watches what the host listens on and what it talks to, and
+writes down in the agent's log what opens and what closes. It is off unless
+`modules` names `{"network": {"enabled": true}}`, which the settings the
+package installs do not, and it writes what it finds nowhere else: the
+contracts this build is made with have no record a listener or a connection
+travels in, and the platform takes none until it has one (BE-063 and BE-067),
+so the module admits nothing to the spool and delivers nothing.
+`tests/architecture` keeps `internal/modules/network` from reaching the spool,
+the protocol or the contracts until then.
+
+```json
+"modules": {"network": {"enabled": true, "interval": "30s"}}
+```
+
+| Setting | Default | What the agent takes |
+| --- | --- | --- |
+| `modules.network.interval` | `1m` | `10s` to `1h`: how often the module reads the sockets of the host |
+
+What it reads, every interval and as it starts:
+
+- the TCP and UDP sockets, over IPv4 and IPv6, the kernel lists in the tables
+  `tcp`, `tcp6`, `udp` and `udp6` procfs keeps of each network namespace,
+  which any account may read: for each, its local and remote address and port,
+  its state, the account the kernel keeps it for and its inode. The module
+  opens no socket, sends nothing anywhere and asks no resolver for a name: an
+  address stays an address;
+- the network namespace the agent runs in, the host's under the service the
+  package installs, through `/proc/self`, and each other one, of a container
+  or of a service started with `PrivateNetwork=`, through the first process
+  procfs lists in it, once procfs shows the agent the processes of other
+  accounts. A namespace no process runs in, such as one `ip netns add` keeps
+  alone, is not seen;
+- which processes hold a socket, from the links `/proc/<pid>/fd` keeps of each
+  process the agent may read: the socket's inode among a process's descriptors
+  names that process, by its PID, its name and when it started, each process
+  read through the directory `/proc` keeps of it, so a PID another process took
+  meanwhile names nobody. A socket several processes share is held by each of
+  them.
+
+What it writes down, at `info`:
+
+- **listeners**: a TCP socket in `LISTEN`, or a UDP socket bound and connected
+  to nobody, by protocol, address and port: `listener_opened`,
+  `listener_closed`, and `listener_changed` when the accounts its sockets
+  belong to change, or the names of the processes holding it when the module
+  read them both times, so a service started again is no change. The sockets
+  `SO_REUSEPORT` binds to one address and port are one listener, with their
+  count;
+- **flows**: the connections of one account with one remote address on one
+  service port, in one direction: `flow_started` when the module first sees
+  one, and `flow_ended` once three rounds in a row did not see it, so
+  connections a client opens now and then are one flow rather than many. A
+  connection is inbound when a listener of its namespace serves its local
+  port, and outbound otherwise; the service port is the local port of an
+  inbound connection and the remote port of an outbound one, so the ports a
+  client draws for each connection never make a flow of their own. A
+  connection keeps the direction and the account it had when the last round
+  saw it, so one the kernel finishes in `TIME_WAIT` stays in its flow;
+- **namespaces**: `network_namespace_seen` and `network_namespace_gone`, with
+  the listeners and the flows each holds. The kernel numbers a new namespace as
+  one that ended, so a namespace is told apart from the one before it by the
+  processes that run in it.
+
+| Field | What it says |
+| --- | --- |
+| `namespace` | the namespace: whether it is the agent's own, `host` when process 1 runs in it, which the agent knows once procfs shows it process 1, its `id`, `net:[…]` as `/proc/<pid>/ns/net` reads, of the agent's own and, once the agent may read them, of the others, and for another namespace the process it was read through, its name and when it started |
+| `origin` | `start` when the module found it as it started, against what it wrote down before it stopped, so it changed while the agent was not watching, and `interval` otherwise |
+| `protocol`, `address`, `port` | the listener |
+| `direction`, `remote`, `port` | the flow: `inbound` or `outbound`, the remote address, an IPv4 peer of an IPv6 socket written as IPv4, and the service port |
+| `accounts`, `account` | the accounts the sockets of a listener belong to, and the account of a flow, named as `/etc/passwd` names the uid first, and by the uid when it does not |
+| `association` | how far the module knows who holds it, as the next table says |
+| `processes` | the processes found holding it, as `name (pid N)`, at most eight and how many more; a name that is not printable text is quoted as Go quotes a string |
+| `sockets`, `connections`, `states` | how many sockets a listener has, how many connections a flow has, the most it had once it ended, and the states they were in |
+| `first`, `last` | when a flow was first and last seen |
+| `changes`, `before` | what changed of a listener and what it was |
+
+| `association` | What the module knows of who holds it |
+| --- | --- |
+| `processes` | the account the kernel keeps each socket for, and every process holding it that the agent can see: procfs showed it every process and it read the descriptors of each. An empty `processes` means none of them holds it, as for a socket the kernel holds, the NFS server's among them, or one held in another PID namespace |
+| `accounts` | the account alone: `processes` names those the agent found, which are its own under the service the package installs, and never a process guessed from a port or a name |
+| `none` | nothing: the kernel keeps a connection in `TIME_WAIT` for nobody, and the module never saw that connection before it closed |
+
+The account the kernel keeps a socket for is the account that opened it, and
+for a connection a listener accepted, the account that opened the listener: a
+listener the service manager opens for a service it starts, as for socket
+activation, belongs to root whatever account the service runs as.
+
+The service the package installs hides from the agent the processes of every
+account but its own (`ProtectProc=invisible`), so the module reads the
+namespace the agent runs in, names the account of each socket, and names the
+processes holding the agent's own sockets alone. It says so as
+`network_not_covered`, with what to do, and in the status. A drop-in shows it
+every process, and with them every namespace, as for the
+[processes module](#processes):
+
+```ini
+# /etc/systemd/system/seagull-agent.service.d/network.conf
+[Service]
+ProtectProc=default
+```
+
+and another lets it read which process holds each socket:
+
+```ini
+# /etc/systemd/system/seagull-agent.service.d/network.conf
+[Service]
+ProtectProc=default
+ReadOnlyPaths=/proc
+CapabilityBoundingSet=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+SystemCallFilter=~process_vm_readv process_vm_writev
+```
+
+each followed by `systemctl daemon-reload` and
+`systemctl restart seagull-agent`. procfs shows the descriptors of a process
+only in a directory closed to every other account, and the link to each only
+to whoever may trace the process, so naming the holder of another account's
+socket takes both `CAP_DAC_READ_SEARCH` and `CAP_SYS_PTRACE`: neither alone
+lists them. Together they let the agent read any file on the host and the
+memory of any process through `/proc/<pid>/mem`, which is why they are the
+operator's to grant: the drop-in keeps `/proc` read-only and takes away
+`process_vm_readv` and `process_vm_writev`, which `@system-service` otherwise
+allows, so the agent writes the memory of no process, and `ptrace` stays
+outside the calls the service allows. The agent itself reads neither: an
+architecture test refuses production code that names the `mem` file of a
+process. While the network module is enabled, `agent_privileges` counts the
+two capabilities as needed, and otherwise reports them as held beyond what the
+agent needs. Each drop-in widens what the next round sees, and what the module
+could not see before is the baseline, never a change.
+
+How it bounds what it does:
+
+- a round is one scan of the [governor](#resources): it waits for a slot, and
+  charges the scan budget with the bytes of the tables it reads, 1 KiB for
+  each process it looks at and 64 bytes for each descriptor;
+- a round looks at 65,536 processes, 256 namespaces, 65,536 sockets of all
+  namespaces together and 262,144 descriptors at most, and keeps 16,384 flows.
+  Past those, the module says what it does not see, a namespace it cannot read
+  whole keeps what the module last saw of it, and nothing it did not read is
+  reported as closed;
+- at most 1,000 changes a minute are written down, so a host that opens
+  connections by the thousand cannot crowd the rest of the agent out of the
+  journal: what is held back is counted in `network_changes_not_logged` and in
+  the status.
+
+What it wrote down is `collection/network.json` in the installation, private
+to the agent's account, the listeners and flows of every namespace and the
+boot the module saw them in, written after every round that changed them. As
+the module starts, it compares what it reads with that: a listener that opened
+or closed meanwhile is reported with `origin` `start`, and a flow the first
+round does not see ended. After the host booted again, the listeners of the
+agent's own namespace are compared, the flows of before the boot are gone and
+those of now are the baseline, and other namespaces are met anew. A file the
+module cannot read is replaced by what it reads then, with
+`network_state_lost`; one a newer agent wrote, or another account could
+change, stops the module, which says why.
+
+The status reports the module as running, with the namespaces, listeners,
+flows and connections it holds, what it found and when, and what it does not
+see, and as degraded when it cannot read the sockets of its own namespace.
+
+Reading the sockets of the 396 processes and 6 namespaces of the 8-processor,
+Linux 7.0 host this was developed on, three of them containers', took 34 ms of
+processor time a round, averaged over 50 rounds, most of it looking at each
+process; under the service the package installs, a round looks at the agent's
+own process alone, and in the native gate's container the first round took
+4 ms.
+
+The evidence:
+
+- `internal/platform/sockets` reads tables written as the kernel writes them,
+  over IPv4 and IPv6, a peer of an IPv6 socket that is IPv4, connections in
+  `TIME_WAIT` and not yet accepted, and lines the kernel would not write, which
+  it refuses, and a fuzz target holds that a line reads only as what it says;
+  it reads procfs trees the test builds, with namespaces whose processes share
+  a table as procfs shows it, a process ending as its namespace is read, a
+  descriptor it may not read and more than it reads, and the sockets this
+  host holds, held by the test;
+- `internal/modules/network` sees the sockets of a namespace as listeners and
+  flows, tells connections apart by direction, keeps a connection in
+  `TIME_WAIT` in its flow, ends a flow after three rounds without it, tells a
+  new namespace from one that ended, keeps what it could not read, counts the
+  flows past what it keeps, writes down at most 1,000 changes a minute, says
+  at start what changed while it was stopped, and refuses a state it could not
+  have written; a fuzz target holds what it reads back;
+- the agent, started by `cmd/seagull-agent`'s tests, writes down a listener
+  that opened while it was stopped, with the process holding it, and admits
+  nothing to the spool;
+- the [native gate](#installing) enables the module on the installed service:
+  it checks that the agent says it does not see other namespaces and how to
+  show them; that listeners of `nobody` over IPv4, IPv6 and UDP are reported
+  with their account and no process, that the connections between them are
+  reported as flows in both directions and as ended once they close; that a
+  listener in a namespace of its own is not seen until the drop-in shows every
+  process, and is then reported in its namespace; that, with the second
+  drop-in, the agent holds both capabilities as needed, lists the descriptors
+  of process 1, finds `process_vm_readv` refused and `/proc` read-only, and
+  reports the process holding a listener of `nobody`, in its namespace with
+  its identity.
+
+What it does not claim:
+
+- every connection: the module reads the tables once an interval, and a
+  connection that opens and closes between two rounds is never seen, unless
+  the host closed it first and the kernel still keeps it in `TIME_WAIT`, for a
+  minute, as a flow whose account is not known;
+- that the platform knows of a listener or a flow: nothing leaves the host;
+- what a connection carries: no packet is read, and no capture library or
+  privilege to capture is part of the agent;
+- raw, local and SCTP sockets, ICMP, and the name a remote address resolves to;
+- which process opened a connection that ended before the round, or a process
+  the agent may not read: the account says who the kernel keeps the socket for,
+  and the process is never guessed from a port, a name or the account;
+- the namespaces of a host the agent does not run in the namespaces of, such as
+  from a container of its own.
+
+eBPF was weighed and not built: a program the kernel runs at each connect and
+accept would see every connection as it happens, the short ones included, with
+the process making it, but loading one takes `CAP_BPF` and `CAP_PERFMON` or the
+superuser, a kernel built for it, and the `bpf` call the service's filter
+refuses, which is a privileged sensor of its own, kept apart from what the
+module needs.
+
 ## Privileges
 
 The agent is one process running as one account, and everything it does happens
@@ -1106,13 +1335,16 @@ is not one.
 | Reach the platform | an outgoing TLS connection, which needs no privilege |
 | Collect what sshd decides | read the system journal, as a member of `systemd-journal`, which the package makes the account and the service grants again |
 | Take stock of what the host has | read what the host shows any account: os-release, procfs, sysfs, the account files, dpkg's database through `dpkg-query`, and systemd's services through `systemctl`, which reaches systemd over the system bus, a local socket |
-| Take stock of the processes | read what procfs shows any account of every process, once the service shows the agent every process; the executable of another account's process takes `CAP_SYS_PTRACE`, which the agent is never given, so it goes without |
+| Take stock of the processes | read what procfs shows any account of every process, once the service shows the agent every process; the executable of another account's process takes `CAP_SYS_PTRACE`, which the agent holds only once an operator grants it for the network module, and goes without otherwise |
 | Watch files | read the names, owners, modes and times of what the paths it is given hold, and the content of what any account may read; `/home`, `/root` and the content of what only root reads take `CAP_DAC_READ_SEARCH` and `ProtectHome=read-only`, which an operator grants with a drop-in and the package never does |
+| Watch the network | read the socket tables procfs shows any account of the namespace the agent runs in, and of the others once the service shows the agent every process; the process holding a socket of another account takes `CAP_DAC_READ_SEARCH` and `CAP_SYS_PTRACE`, which an operator grants with a drop-in and the package never does |
 
-Nothing on that list needs the superuser or a helper of its own, and the one
-Linux capability on it is the operator's to grant, for the files module to read
-what only root reads: while that module is enabled the agent counts
-`CAP_DAC_READ_SEARCH` as needed, and otherwise as held beyond what it needs. A
+Nothing on that list needs the superuser or a helper of its own, and the Linux
+capabilities on it are the operator's to grant: `CAP_DAC_READ_SEARCH` for the
+files module to read what only root reads, and `CAP_DAC_READ_SEARCH` with
+`CAP_SYS_PTRACE` for the network module to name the process holding a socket.
+While a module that uses one is enabled the agent counts it as needed, and
+otherwise as held beyond what it needs. A
 collector that needs more names it there, and the packaging grants that
 much: a group where a group is enough, as for the journal, and a capability only
 where it is not. The same holds for what the service confines: a collector that
@@ -2556,8 +2788,8 @@ for the authentication collector while it collects, since when it waits for
 room in the spool and how often the journal dropped what it had not read yet,
 and, for the inventory, the kinds this host does not have, the kinds it does
 not admit and why, which degrades the collection, and the items the platform
-would hold as one, and, for the files module, what it watches, what it found
-and what it cannot see.
+would hold as one, and, for the files module and the network module, what each
+watches, what it found and what it cannot see.
 Then, for each stream, what waits and when the
 oldest record waiting was admitted, when the route last delivered and, while it
 fails, since when, how often, why and when it tries next; what the spool settled
@@ -2849,7 +3081,8 @@ What none of that claims:
   the inventory keeps what the host's own files and tools say it has, never a
   password, a command line or what a file holds, and the files module writes
   down the names, owners, modes, times and SHA-256 of what it watches, never
-  what a file holds;
+  what a file holds, and the network module the addresses, ports, accounts and
+  processes of the sockets it reads, never what a connection carries;
 - the spool keeps records as they are handed to it and never looks inside one,
   so what a record holds is decided by the collector that admits it. What the
   agent writes about a record is where it is in the spool and the identifier it
@@ -2905,6 +3138,9 @@ conventions:
   nor the contracts, directly or through another package: the contracts carry no
   record of a file change, so the files collector admits nothing and maps
   nothing to the wire until they do;
+- `internal/modules/network` reaches neither the spool, nor `internal/protocol`,
+  nor the contracts, directly or through another package, as the contracts carry
+  no record of a listener or a connection either;
 - no collector imports `os/exec`, `syscall`, `unsafe` or `golang.org/x/sys`
   itself: it reaches the operating system through an adapter under
   `internal/platform`, which owns the commands it runs and the calls it makes;
@@ -2944,9 +3180,9 @@ conventions:
   sends only to a platform it authenticated, over a client whose every bound it
   set;
 - production code reads nothing from the environment the agent was started in;
-- production code names neither the `cmdline` nor the `environ` file procfs
-  keeps of a process, so the agent reads the arguments and the environment of
-  no process;
+- production code names neither the `cmdline`, nor the `environ`, nor the `mem`
+  file procfs keeps of a process, so the agent reads the arguments, the
+  environment and the memory of no process, even once an operator lets it;
 - production code never recovers from a panic.
 
 The dependency rules are checked against the build graph Go computes for each

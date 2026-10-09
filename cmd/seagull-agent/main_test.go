@@ -27,6 +27,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -1711,6 +1712,90 @@ func outsideTemporary(t *testing.T) string {
 		}
 	}
 	return absolute
+}
+
+func TestAnAgentWatchingTheNetworkMayNameWhoHoldsASocketAndNothingMore(t *testing.T) {
+	watching := config.Config{Modules: config.Modules{"network": {Enabled: true}}}
+	for _, held := range []struct {
+		capabilities []string
+		settings     config.Config
+		level        string
+		beyond       []any
+	}{
+		{capabilities: []string{"CAP_DAC_READ_SEARCH", "CAP_SYS_PTRACE"}, settings: watching, level: "INFO"},
+		{capabilities: nil, settings: watching, level: "INFO"},
+		{capabilities: []string{"CAP_DAC_READ_SEARCH", "CAP_SYS_PTRACE", "CAP_NET_ADMIN"}, settings: watching, level: "WARN", beyond: []any{"CAP_NET_ADMIN"}},
+		{capabilities: []string{"CAP_SYS_PTRACE"}, settings: config.Config{Modules: config.Modules{"files": {Enabled: true}}}, level: "WARN", beyond: []any{"CAP_SYS_PTRACE"}},
+		{capabilities: []string{"CAP_DAC_READ_SEARCH", "CAP_SYS_PTRACE"}, settings: config.Config{Modules: config.Modules{"files": {Enabled: true}, "network": {Enabled: true}}}, level: "INFO"},
+	} {
+		var logs bytes.Buffer
+		privileged(slog.New(slog.NewJSONHandler(&logs, nil)), privileges.Privileges{User: 987, Group: 987, Capabilities: held.capabilities}, needed(held.settings))
+		reported, found := logged(t, logs.String(), "agent_privileges")
+		beyond, _ := reported["beyond"].([]any)
+		if !found || reported["level"] != held.level || !slices.Equal(beyond, held.beyond) {
+			t.Errorf("an agent holding %v with %v reported %v", held.capabilities, held.settings.Modules, reported)
+		}
+	}
+}
+
+func TestTheAgentWritesDownAListenerThatOpenedWhileItWasStopped(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the agent watches the network of linux hosts")
+	}
+	state := stateDirectory(t)
+	path := configured(t, state, map[string]string{"modules": `{"network": {"enabled": true}}`})
+	entries, stop := running(t, path)
+	if started := await(t, entries, "module_started"); started["module"] != "network" || started["state"] != "running" {
+		t.Errorf("the agent started %v", started)
+	}
+	if watched := await(t, entries, "network_watched"); watched["module"] != "network" || watched["namespaces"] == float64(0) {
+		t.Errorf("the agent took the baseline of the network as %v", watched)
+	}
+	if code, _ := stop(); code != 0 {
+		t.Fatalf("the agent exited with %d", code)
+	}
+	listening, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listening.Close()
+	port := float64(listening.Addr().(*net.TCPAddr).Port)
+	entries, stop = running(t, path)
+	var opened map[string]any
+	for opened == nil {
+		if said := await(t, entries, "listener_opened"); said["port"] == port {
+			opened = said
+		}
+	}
+	account, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accounts := fmt.Sprint(opened["accounts"]); opened["origin"] != "start" || opened["address"] != "127.0.0.1" || opened["protocol"] != "tcp" ||
+		(accounts != "["+account.Username+"]" && accounts != "["+account.Uid+"]") || !strings.Contains(fmt.Sprint(opened["processes"]), fmt.Sprintf("(pid %d)", os.Getpid())) {
+		t.Errorf("a listener opened while the agent was stopped was written down as %v", opened)
+	}
+	if code, _ := stop(); code != 0 {
+		t.Fatalf("the agent exited with %d", code)
+	}
+	if described, err := os.Stat(filepath.Join(state, collectionDirectory, "network.json")); err != nil || described.Mode().Perm() != 0o600 {
+		t.Errorf("the agent wrote down what it saw of the network as %v, %v", described, err)
+	}
+	root, err := os.OpenRoot(filepath.Join(state, spoolDirectory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	kept, err := spool.Open(root, spool.Limits{MaxBytes: 64 << 20}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer kept.Close()
+	for _, stream := range kept.Stats().Streams {
+		if stream.Outstanding > 0 {
+			t.Errorf("watching the network, the agent admitted %d records to %s", stream.Outstanding, stream.Stream)
+		}
+	}
 }
 
 func TestTheAgentWatchesTheFilesItIsToldToAndWritesDownWhatChanges(t *testing.T) {

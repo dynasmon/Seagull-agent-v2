@@ -181,6 +181,12 @@ var dependencyRules = []dependencyRule{
 		reason:     "the contracts carry no record of a file change, so the files collector admits nothing to the spool and maps nothing to the wire until they do",
 	},
 	{
+		packages:   "internal/modules/network",
+		forbidden:  []string{contractsPath, modulePath + "/internal/spool", modulePath + "/internal/protocol"},
+		transitive: true,
+		reason:     "the contracts carry no record of a listener or a connection, so the network collector admits nothing to the spool and maps nothing to the wire until they do",
+	},
+	{
 		packages: "internal/spool",
 		forbidden: append([]string{
 			contractsPath,
@@ -700,6 +706,25 @@ func TestTheOwnershipRulesRecogniseViolations(t *testing.T) {
 					modulePath + "/internal/platform/tree", modulePath + "/internal/secrets"},
 				Deps: []string{modulePath + "/internal/governor", modulePath + "/internal/platform/files", modulePath + "/internal/platform/inotify",
 					modulePath + "/internal/platform/tree", modulePath + "/internal/secrets", "crypto/sha256", "os", "syscall"},
+			},
+		},
+		{
+			name: "the network collector sending a flow as an authentication event",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/modules/network",
+				Imports:    []string{modulePath + "/internal/governor", modulePath + "/internal/spool", contractsPath + "/gen/go/seagull/event/v1"},
+				Deps:       []string{contractsPath + "/gen/go/seagull/event/v1", modulePath + "/internal/governor", modulePath + "/internal/spool", "google.golang.org/protobuf/proto"},
+			},
+			want: []string{contractsPath + "/gen/go/seagull/event/v1", modulePath + "/internal/spool"},
+		},
+		{
+			name: "the network collector reading sockets through its adapters",
+			pkg: buildPackage{
+				ImportPath: modulePath + "/internal/modules/network",
+				Imports: []string{modulePath + "/internal/governor", modulePath + "/internal/platform/accounts", modulePath + "/internal/platform/files",
+					modulePath + "/internal/platform/sockets", modulePath + "/internal/secrets"},
+				Deps: []string{modulePath + "/internal/governor", modulePath + "/internal/platform/accounts", modulePath + "/internal/platform/files",
+					modulePath + "/internal/platform/processes", modulePath + "/internal/platform/sockets", modulePath + "/internal/secrets", "net/netip", "os"},
 			},
 		},
 		{

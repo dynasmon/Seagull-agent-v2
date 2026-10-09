@@ -167,6 +167,61 @@ func listed(held *os.Root, most int) ([]uint32, error) {
 	}
 }
 
+// Visit hands each the processes procfs shows under root, in the order of
+// their PIDs, each read from its stat alone, its parent, its name and when it
+// started, and handed with the directory /proc keeps of it still open, so what
+// each reads there is of that process and of none that took its PID since.
+// Unlike List, it reads what procfs shows when it hides the rest, and counts
+// the processes procfs lists and refuses to read.
+func Visit(ctx context.Context, root string, most int, each func(Process, *os.Root) error) (int, error) {
+	held, err := os.OpenRoot(root)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %w", ErrUnreadable, err)
+	}
+	defer held.Close()
+	booted, err := boot(held)
+	if err != nil {
+		return 0, err
+	}
+	pids, err := listed(held, most)
+	if err != nil {
+		return 0, err
+	}
+	slices.Sort(pids)
+	refused := 0
+	for _, pid := range pids {
+		if err := ctx.Err(); err != nil {
+			return refused, err
+		}
+		err := within(held, pid, booted, each)
+		switch {
+		case errors.Is(err, errGone):
+		case errors.Is(err, ErrHidden):
+			refused++
+		case err != nil:
+			return refused, err
+		}
+	}
+	return refused, nil
+}
+
+func within(held *os.Root, pid uint32, booted time.Time, each func(Process, *os.Root) error) error {
+	own, err := held.OpenRoot(strconv.FormatUint(uint64(pid), 10))
+	if err != nil {
+		return judged(pid, err)
+	}
+	defer own.Close()
+	stat, err := content(own, "stat", maxStat)
+	if err != nil {
+		return judged(pid, err)
+	}
+	parent, name, started, err := stated(stat, pid)
+	if err != nil {
+		return fmt.Errorf("%w: process %d: %w", ErrUnreadable, pid, err)
+	}
+	return each(Process{PID: pid, Parent: parent, Name: name, StartedAt: began(booted, started)}, own)
+}
+
 func read(held *os.Root, pid uint32, booted time.Time) (Process, error) {
 	own, err := held.OpenRoot(strconv.FormatUint(uint64(pid), 10))
 	if err != nil {
@@ -190,8 +245,11 @@ func read(held *os.Root, pid uint32, booted time.Time) (Process, error) {
 		return Process{}, fmt.Errorf("%w: process %d: %w", ErrUnreadable, pid, err)
 	}
 	executable, _ := own.Readlink("exe")
-	since := time.Duration(started/hertz)*time.Second + time.Duration(started%hertz)*time.Second/time.Duration(hertz)
-	return Process{PID: pid, Parent: parent, Name: name, User: user, StartedAt: booted.Add(since), Executable: executable}, nil
+	return Process{PID: pid, Parent: parent, Name: name, User: user, StartedAt: began(booted, started), Executable: executable}, nil
+}
+
+func began(booted time.Time, ticks uint64) time.Time {
+	return booted.Add(time.Duration(ticks/hertz)*time.Second + time.Duration(ticks%hertz)*time.Second/time.Duration(hertz))
 }
 
 func judged(pid uint32, err error) error {
