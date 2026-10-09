@@ -40,3 +40,38 @@ func TestARequestNamesTheAgentAndProvesTheKeyAndNothingElse(t *testing.T) {
 		t.Fatal("the request carries the key")
 	}
 }
+
+func TestARequestKeptIsSentAgainOnlyWhenTheKeyMadeItForTheAgent(t *testing.T) {
+	keys := openKeys(t, keysDirectory(t))
+	key, other := create(t, keys), create(t, keys)
+	made, err := pki.Request(key, "web-01")
+	if err != nil {
+		t.Fatalf("make the request: %v", err)
+	}
+	if err := pki.MadeBy(made, key, "web-01"); err != nil {
+		t.Fatalf("the request the key made for the agent was refused: %v", err)
+	}
+	block, _ := pem.Decode(made)
+	tampered := append([]byte(nil), block.Bytes...)
+	tampered[len(tampered)-1] ^= 0xff
+	elsewhere, err := pki.Request(other, "web-01")
+	if err != nil {
+		t.Fatalf("make another key's request: %v", err)
+	}
+	renamed, err := pki.Request(key, "web-02")
+	if err != nil {
+		t.Fatalf("make a request for another agent: %v", err)
+	}
+	for name, kept := range map[string][]byte{
+		"another key's request":       elsewhere,
+		"a request for another agent": renamed,
+		"a broken signature":          pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: tampered}),
+		"two requests":                append(append([]byte(nil), made...), made...),
+		"a certificate":               pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: block.Bytes}),
+		"nothing":                     nil,
+	} {
+		if err := pki.MadeBy(kept, key, "web-01"); err == nil {
+			t.Errorf("%s was taken for the request the key made for the agent", name)
+		}
+	}
+}

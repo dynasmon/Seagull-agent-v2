@@ -1400,8 +1400,8 @@ certificate for an `agent_id` an operator registered, and once
 `installation.json` records it: that agent, the generation number, the
 `key_id` of its key, when that key was drawn, and what the certificate says.
 Until the platform issued the certificate the installation asked for, it
-records that request too: the agent it asked to be, the key it asked with and
-when. Once a renewal adopted the authorities the platform published, it records
+records that request too: the agent it asked to be, the key it asked with, when,
+and the request itself as it was sent. Once a renewal adopted the authorities the platform published, it records
 their digest, when they were adopted and the digest of the `server.trust_bundle`
 they took over from. It holds no key, token or
 other secret, and a field it does not declare, such as a key, makes the file
@@ -1555,8 +1555,8 @@ seagull-agent -config /etc/seagull-agent/agent.json enrollment import web-01.iss
   to prove the installation holds it. It asks for nothing else, and carries no
   private key: no code outside the key provider draws, writes or reads one, and
   `tests/architecture` holds that as a test;
-- asking again for the same agent prints the same request, with the same key,
-  so a request lost on its way costs nothing. Asking for another agent draws
+- asking again for the same agent prints the same request, byte for byte, with
+  the same key, so a request lost on its way costs nothing. Asking for another agent draws
   another key, since a key is only ever asked to be one agent, and so does
   asking again once the key of the request is gone or damaged, since a key
   nothing was issued to is no identity yet;
@@ -1704,8 +1704,11 @@ With which key:
   is not: replacing a certificate and rotating a key are two operations, and
   the key lifetime decides between them. A generation records when its key was
   drawn; one enrolled before it did is rotated at its next renewal;
-- the request is recorded, with its key, before it is sent, so a renewal whose
-  answer was lost is asked again with the same key and never draws another;
+- the request is recorded, with its key and as the bytes it is sent as, before
+  it is sent, so a renewal whose answer was lost is asked again with the very
+  same request and never draws another key. A request is signed at random, so
+  another holder of the key cannot make those bytes, and a platform can tell the
+  renewal it granted, asked again, from a copy asking with a request of its own;
 - the answer is verified as an imported one is, against the authorities that
   very answer publishes, which is sound because it arrived over a connection
   the agent authenticated with the authorities it trusts, from the platform its
@@ -2679,7 +2682,10 @@ A copy is the agent:
   platform's words and a `recovery`, and its [status](#status) shows the
   credential degraded. The same refusal follows a renewal whose answer was lost,
   when the platform issued the certificate and the agent never received it, and
-  nothing in the refusal tells the two apart. So the operator decides: a key that
+  nothing in the refusal tells the two apart. The agent asks again with the very
+  request it sent, which is what a platform would need to tell that renewal from
+  a copy, and neither recorded commit does: 6fae345 renews both and 2829b0d
+  refuses both. So the operator decides: a key that
   may have been copied, from a host that was imaged, restored or cloned, or a
   backup that left its owners' hands, is revoked with its agent and the
   installation replaced; otherwise the operator has the platform issue the

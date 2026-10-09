@@ -123,19 +123,15 @@ func New(options Options) (*Renewer, error) {
 
 // Renew asks for the next certificate once, now. It keeps the key of the
 // active generation while that key is younger than the key lifetime and draws
-// a new one otherwise, records the request before it is sent, and resumes a
-// request an earlier attempt did not see answered with the same key.
+// a new one otherwise, records the request before it is sent, and sends a
+// request an earlier attempt did not see answered again, byte for byte.
 func (r *Renewer) Renew(ctx context.Context) (Renewed, error) {
 	now := time.Now()
 	active, enrolled := r.options.Installation.Enrollment()
 	if !enrolled {
 		return Renewed{}, ErrNotEnrolled
 	}
-	key, rotated, err := r.key(active, now)
-	if err != nil {
-		return Renewed{}, err
-	}
-	requested, err := pki.Request(key, active.AgentID)
+	requested, rotated, err := r.request(active, now)
 	if err != nil {
 		return Renewed{}, err
 	}
@@ -164,12 +160,13 @@ func (r *Renewer) Renew(ctx context.Context) (Renewed, error) {
 	return renewed, nil
 }
 
-func (r *Renewer) key(active identity.Enrollment, now time.Time) (pki.Key, bool, error) {
+func (r *Renewer) request(active identity.Enrollment, now time.Time) ([]byte, bool, error) {
 	if pending, ok := r.options.Installation.Pending(); ok && pending.AgentID == active.AgentID {
 		key, err := r.options.Keys.Open(pending.KeyID)
 		switch {
 		case err == nil:
-			return key, pending.KeyID != active.KeyID, nil
+			requested, err := enrollment.Kept(r.options.Installation, pending, key)
+			return requested, pending.KeyID != active.KeyID, err
 		case !errors.Is(err, pki.ErrKeyMissing) && !errors.Is(err, pki.ErrKeyDamaged):
 			return nil, false, err
 		}
@@ -185,10 +182,14 @@ func (r *Renewer) key(active identity.Enrollment, now time.Time) (pki.Key, bool,
 	if err != nil {
 		return nil, false, err
 	}
-	if err := r.options.Installation.Ask(identity.Request{AgentID: active.AgentID, KeyID: key.ID(), RequestedAt: now.UTC()}); err != nil {
+	requested, err := pki.Request(key, active.AgentID)
+	if err != nil {
 		return nil, false, err
 	}
-	return key, rotated, nil
+	if err := r.options.Installation.Ask(identity.Request{AgentID: active.AgentID, KeyID: key.ID(), CSR: string(requested), RequestedAt: now.UTC()}); err != nil {
+		return nil, false, err
+	}
+	return requested, rotated, nil
 }
 
 // The authorities an answer publishes arrived over a connection the agent

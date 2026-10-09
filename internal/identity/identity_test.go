@@ -474,11 +474,14 @@ func TestAnInstallationAsksOnlyToBeAnAgentItMayBecome(t *testing.T) {
 	installation := open(t, directory)
 	undated := request("web-01", firstKey)
 	undated.RequestedAt = time.Time{}
+	unsigned := request("web-01", firstKey)
+	unsigned.CSR = "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"
 	for name, asked := range map[string]identity.Request{
-		"an agent the platform cannot name": request("-web-01", firstKey),
-		"no agent at all":                   request("", firstKey),
-		"a key that is not a digest":        request("web-01", "0123"),
-		"a request made at no moment":       undated,
+		"an agent the platform cannot name":     request("-web-01", firstKey),
+		"no agent at all":                       request("", firstKey),
+		"a key that is not a digest":            request("web-01", "0123"),
+		"a request made at no moment":           undated,
+		"a request kept as something it is not": unsigned,
 	} {
 		if err := installation.Ask(asked); !errors.Is(err, identity.ErrUnasked) {
 			t.Errorf("%s: asking returned %v", name, err)
@@ -520,6 +523,29 @@ func TestAnInstallationAsksOnlyToBeAnAgentItMayBecome(t *testing.T) {
 	reopened := open(t, directory)
 	if pending, ok := reopened.Pending(); !ok || pending != request("web-01", firstKey) {
 		t.Fatalf("after a restart the installation asks for %+v (%t)", pending, ok)
+	}
+}
+
+func TestARequestIsKeptAsItWasSentUntilItsCertificateIsActivated(t *testing.T) {
+	directory := stateDirectory(t)
+	installation := open(t, directory)
+	asked := request("web-01", firstKey)
+	asked.CSR = "-----BEGIN CERTIFICATE REQUEST-----\nMAA=\n-----END CERTIFICATE REQUEST-----\n"
+	if err := installation.Ask(asked); err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if err := installation.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	reopened := open(t, directory)
+	if pending, ok := reopened.Pending(); !ok || pending != asked {
+		t.Fatalf("after a restart the installation asks for %+v (%t)", pending, ok)
+	}
+	if err := reopened.Activate(enrollment("web-01", 1, firstKey)); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+	if pending, ok := reopened.Pending(); ok {
+		t.Fatalf("the installation still keeps %+v once it was issued", pending)
 	}
 }
 
@@ -1149,6 +1175,7 @@ func TestNothingTheStateHoldsDecidesHowLongARefusalIs(t *testing.T) {
 		"a request for an agent it cannot name": strings.Replace(requestingState, `"agent_id": "web-01"`, `"agent_id": "`+marker+`"`, 1),
 		"a request with a key that is not one":  strings.Replace(requestingState, secondKey, marker, 1),
 		"a request to become another agent":     strings.Replace(requestingState, `"agent_id": "web-01", "key_id"`, `"agent_id": "db-07", "key_id"`, 1),
+		"a request kept as something else":      strings.Replace(requestingState, `"requested_at"`, `"csr_pem": "`+marker+`", "requested_at"`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			directory := stateDirectory(t)

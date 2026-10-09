@@ -1,6 +1,7 @@
 package renewal_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -72,7 +73,7 @@ func TestARenewalRotatesAKeyAsOldAsItsLifetime(t *testing.T) {
 	}
 }
 
-func TestARenewalInterruptedBeforeItsAnswerIsResumedWithTheSameKey(t *testing.T) {
+func TestARenewalInterruptedBeforeItsAnswerIsAskedAgainWithTheSameRequest(t *testing.T) {
 	signing := authorityNamed(t, "Seagull agents")
 	serving := listen(t, signing)
 	held := enrolled(t, signing, "web-01", time.Hour)
@@ -94,6 +95,9 @@ func TestARenewalInterruptedBeforeItsAnswerIsResumedWithTheSameKey(t *testing.T)
 	seen := serving.renewals()
 	if next := held.active(t); next.Generation != 2 || next.KeyID != pending.KeyID || len(seen) != 2 || seen[0].requested != seen[1].requested {
 		t.Fatalf("after resuming, generation %d holds key %s; the platform saw %+v", next.Generation, next.KeyID, seen)
+	}
+	if !bytes.Equal(seen[0].request, seen[1].request) {
+		t.Fatal("the renewal asked again with another request than the one whose answer was lost")
 	}
 }
 

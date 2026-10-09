@@ -134,7 +134,13 @@ func installed(ctx context.Context, path string, bundle *diagnostics.Bundle) {
 	case !found:
 		bundle.Installation = diagnostics.Missed(state, fmt.Errorf("%s holds no installation yet", state), recovery(path, state, identity.ErrNoInstallation))
 	default:
-		bundle.Installation = diagnostics.Took(state, recorded)
+		told := recorded
+		if recorded.Request != nil {
+			pending := *recorded.Request
+			pending.CSR = ""
+			told.Request = &pending
+		}
+		bundle.Installation = diagnostics.Took(state, told)
 	}
 	var trusted []*x509.Certificate
 	bundle.Authorities, trusted = vouched(path, settings, recorded)

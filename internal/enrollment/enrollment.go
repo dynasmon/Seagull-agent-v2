@@ -42,8 +42,8 @@ type Imported struct {
 
 // Request asks for a certificate as agentID with a key drawn for it, and
 // records the request before it returns it. Asking again for the same agent
-// makes the same request with the same key, so a request lost on its way to
-// the platform costs nothing; asking for another agent draws another key, as
+// makes the same request, byte for byte, so a request lost on its way to the
+// platform costs nothing; asking for another agent draws another key, as
 // does asking again once the key of the request is gone, since a key nothing
 // was issued for yet is no identity.
 func Request(installation *identity.Installation, keys pki.KeyProvider, agentID string, now time.Time) (Asked, error) {
@@ -55,7 +55,7 @@ func Request(installation *identity.Installation, keys pki.KeyProvider, agentID 
 		key, err := keys.Open(pending.KeyID)
 		switch {
 		case err == nil:
-			signed, err := pki.Request(key, agentID)
+			signed, err := Kept(installation, pending, key)
 			if err != nil {
 				return Asked{}, err
 			}
@@ -73,10 +73,29 @@ func Request(installation *identity.Installation, keys pki.KeyProvider, agentID 
 	if err != nil {
 		return Asked{}, err
 	}
-	if err := installation.Ask(identity.Request{AgentID: agentID, KeyID: key.ID(), RequestedAt: now.UTC()}); err != nil {
+	if err := installation.Ask(identity.Request{AgentID: agentID, KeyID: key.ID(), CSR: string(signed), RequestedAt: now.UTC()}); err != nil {
 		return Asked{}, err
 	}
 	return Asked{AgentID: agentID, KeyID: key.ID(), Request: signed, Abandoned: abandoned}, nil
+}
+
+// Kept is the request to send for a pending request whose key the installation
+// holds: the bytes it kept, when that key made them to be the agent, since the
+// same bytes tell a request asked again from anybody else holding the key; and
+// otherwise a request made anew, kept before it is returned.
+func Kept(installation *identity.Installation, pending identity.Request, key pki.Key) ([]byte, error) {
+	if pki.MadeBy([]byte(pending.CSR), key, pending.AgentID) == nil {
+		return []byte(pending.CSR), nil
+	}
+	signed, err := pki.Request(key, pending.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	pending.CSR = string(signed)
+	if err := installation.Ask(pending); err != nil {
+		return nil, err
+	}
+	return signed, nil
 }
 
 // Import activates the certificate the platform issued for the pending

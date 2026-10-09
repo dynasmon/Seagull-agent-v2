@@ -160,6 +160,7 @@ type renewed struct {
 	agent     string
 	presented string
 	requested string
+	request   []byte
 }
 
 // A renewal listener set up as the recorded platform's is: TLS 1.3, a
@@ -289,7 +290,7 @@ func (p *platform) renew(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusServiceUnavailable, "certificate_not_signed", err.Error())
 		return
 	}
-	p.seen = append(p.seen, renewed{agent: agent, presented: presentedKey, requested: requestedKey})
+	p.seen = append(p.seen, renewed{agent: agent, presented: presentedKey, requested: requestedKey, request: asked.GetCsrPem()})
 	if p.lose {
 		if hijacker, ok := w.(http.Hijacker); ok {
 			if connection, _, err := hijacker.Hijack(); err == nil {
