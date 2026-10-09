@@ -182,6 +182,31 @@ func TestABundleSaysWhatTheAgentIsAndLastSaidAndNothingThatAuthenticatesIt(t *te
 	}
 }
 
+func TestABundleNamesTheRequestPendingWithoutHoldingIt(t *testing.T) {
+	state := stateDirectory(t)
+	path := configured(t, state, nil)
+	journalStandIn(t, nil, nil)
+	notes(t, nil)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-config", path, "enrollment", "request", "web-01"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("ask for a certificate: exit code %d: %s", code, stderr.String())
+	}
+	bundle, content, _ := bundled(t, path, filepath.Join(shared(t), "bundle.json"))
+	var installation identity.Record
+	if err := json.Unmarshal(bundle.Installation.Held, &installation); err != nil || installation.Request == nil ||
+		installation.Request.AgentID != "web-01" || installation.Request.KeyID == "" || installation.Request.CSR != "" {
+		t.Fatalf("the bundle holds the installation %s: %v", bundle.Installation.Held, err)
+	}
+	if strings.Contains(string(content), "CERTIFICATE REQUEST") {
+		t.Fatal("the bundle holds the request as it was encoded")
+	}
+	for line := range strings.Lines(stdout.String()) {
+		if line = strings.TrimSpace(line); len(line) > 16 && !strings.HasPrefix(line, "-----") && strings.Contains(string(content), line) {
+			t.Fatal("the bundle holds the request the installation sent")
+		}
+	}
+}
+
 func TestABundleIsWrittenBesideARunningAgentWithoutHoldingItBack(t *testing.T) {
 	state := stateDirectory(t)
 	path := configured(t, state, nil)
