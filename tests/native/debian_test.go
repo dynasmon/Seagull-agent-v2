@@ -105,6 +105,7 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "the agent takes stock of the processes once an operator has the service show it every process", run: g.processes},
 		{name: "the agent watches the files it is told to, reads what only root reads once an operator lets it, and writes down what changes", run: g.files},
 		{name: "the agent watches what the host listens on and talks to, and sees other namespaces and who holds a socket once an operator lets it", run: g.sockets},
+		{name: "the agent runs on a policy an operator signed off the platform and refuses one nobody it trusts signed", run: g.policies},
 		{name: "purging deletes the installation, its settings and the service's", run: g.purge},
 		{name: "installing after a purge makes a new installation", run: g.fresh},
 	} {
@@ -133,6 +134,7 @@ type gate struct {
 	debugging    bool
 	watching     []string
 	excluded     []string
+	signers      string
 }
 
 func open(t *testing.T) *gate {
@@ -256,6 +258,9 @@ func (g *gate) write(t *testing.T) {
 	settings["modules"] = modules
 	if g.debugging {
 		settings["logging"] = map[string]any{"level": "debug"}
+	}
+	if g.signers != "" {
+		settings["policy"] = map[string]any{"signers": g.signers, "interval": "1m"}
 	}
 	rewritten, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {

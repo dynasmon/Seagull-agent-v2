@@ -47,6 +47,7 @@ type platform struct {
 	renewal   *httptest.Server
 	renewals  atomic.Int32
 	renewed   atomic.Pointer[string]
+	handed    atomic.Pointer[[]byte]
 	taking    atomic.Bool
 	mu        sync.Mutex
 	stored    map[string][]string
@@ -264,6 +265,10 @@ func (p *platform) renew(w http.ResponseWriter, r *http.Request) {
 	refuse := func(status int, code string) {
 		encoded, _ := proto.Marshal(&controlv1.Refusal{Code: code, Detail: "refused by the emulated platform"})
 		answer(status, encoded)
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/agents/policy" && r.TLS != nil && len(r.TLS.VerifiedChains) > 0 {
+		p.policy(w, r)
+		return
 	}
 	if r.Method != http.MethodPost || r.URL.Path != "/v1/agents/certificate" || r.TLS == nil || len(r.TLS.VerifiedChains) == 0 {
 		refuse(http.StatusNotFound, "not_found")
