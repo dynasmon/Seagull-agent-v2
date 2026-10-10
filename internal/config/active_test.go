@@ -47,8 +47,11 @@ func TestAReloadThatChangesWhatTheAgentSettledAsItStartedIsRefused(t *testing.T)
 		},
 		"how much of an answer it reads": func(settings *config.Config) { settings.Transport.MaxResponseBytes = 128 << 10 },
 		"whom it trusts":                 func(settings *config.Config) { settings.Server.TrustBundle = "/etc/seagull-agent/other-ca.pem" },
-		"the log it writes":              func(settings *config.Config) { settings.Logging.Format = "text" },
-		"how long it stops":              func(settings *config.Config) { settings.Resources.ShutdownTimeout = config.Duration(0) },
+		"whose policies it takes": func(settings *config.Config) {
+			settings.Policy.Signers = "/etc/seagull-agent/policy-signers.pem"
+		},
+		"the log it writes": func(settings *config.Config) { settings.Logging.Format = "text" },
+		"how long it stops": func(settings *config.Config) { settings.Resources.ShutdownTimeout = config.Duration(0) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			active := config.Activate(started)
