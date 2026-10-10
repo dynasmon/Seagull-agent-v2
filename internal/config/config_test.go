@@ -4,8 +4,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -57,6 +59,7 @@ func TestTheSettingsTheFileLeavesOutAreTheOnesTheAgentDocuments(t *testing.T) {
 		},
 		Logging: config.Logging{Level: "info", Format: "json"},
 		Updates: config.Updates{Enabled: false},
+		Policy:  config.Policy{Interval: config.Duration(5 * time.Minute)},
 	}
 	if !reflect.DeepEqual(settings, want) {
 		t.Fatalf("the agent runs on\n%+v\nand the settings it leaves out are\n%+v", settings, want)
@@ -439,7 +442,13 @@ func TestTheInventoryIsTakenEveryIntervalWithinBoundsAndTheAuthenticationOnNone(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(printed), `"interval": "1h"`) || strings.Count(string(printed), `"interval"`) != 1 {
+	var shown struct {
+		Modules map[string]map[string]any `json:"modules"`
+	}
+	if err := json.Unmarshal(printed, &shown); err != nil {
+		t.Fatal(err)
+	}
+	if _, followed := shown.Modules["authentication"]["interval"]; followed || shown.Modules["inventory"]["interval"] != "1h" {
 		t.Errorf("the printed configuration shows the intervals as:\n%s", printed)
 	}
 	active := config.Activate(settings)
@@ -758,4 +767,120 @@ func TestNothingTheConfigurationHoldsDecidesHowLongARefusalIs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAPolicyIsAcceptedUnderTheP256KeysTheSignersFileHoldsAndNothingElse(t *testing.T) {
+	directory := trusted(t)
+	first, second := signerKey(t), signerKey(t)
+	held := write(t, directory, "policy-signers.pem", string(append(publicPEM(t, &first.PublicKey), publicPEM(t, &second.PublicKey)...)))
+	settings, err := config.Load(configured(t, map[string]string{"policy": fmt.Sprintf(`{"signers": %q, "interval": "15m"}`, held)}))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	keys, err := settings.Policy.Keys()
+	if err != nil || len(keys) != 2 || !keys[0].Equal(&first.PublicKey) || !keys[1].Equal(&second.PublicKey) {
+		t.Fatalf("the signers file was read as %d keys: %v", len(keys), err)
+	}
+	if settings.Policy.Interval != config.Duration(15*time.Minute) {
+		t.Fatalf("the agent asks for its policy every %s", settings.Policy.Interval)
+	}
+
+	unsigned, err := config.Load(configured(t, nil))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if keys, err := unsigned.Policy.Keys(); err != nil || keys != nil {
+		t.Fatalf("a configuration naming no signers holds %d keys: %v", len(keys), err)
+	}
+
+	wider, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, refused := range map[string]struct {
+		content, says string
+	}{
+		"no key":             {content: "", says: "holds no key"},
+		"a P-384 key":        {content: string(publicPEM(t, &wider.PublicKey)), says: "not ECDSA over P-256"},
+		"an RSA key":         {content: string(publicPEM(t, &other.PublicKey)), says: "not ECDSA over P-256"},
+		"a certificate":      {content: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signed(t, true)})), says: "a signer is named by its PUBLIC KEY"},
+		"one key twice":      {content: string(append(publicPEM(t, &first.PublicKey), publicPEM(t, &first.PublicKey)...)), says: "one key twice"},
+		"text":               {content: "not a key", says: "not PEM"},
+		"a broken key block": {content: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte{0x30}})), says: "not a public key"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := trusted(t)
+			path := write(t, directory, "policy-signers.pem", refused.content)
+			_, err := config.Load(configured(t, map[string]string{"policy": fmt.Sprintf(`{"signers": %q}`, path)}))
+			if !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), "policy.signers") || !strings.Contains(err.Error(), refused.says) {
+				t.Fatalf("signers holding %s were judged %v", name, err)
+			}
+		})
+	}
+
+	exposed := write(t, trusted(t), "policy-signers.pem", string(publicPEM(t, &first.PublicKey)))
+	if err := os.Chmod(exposed, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(configured(t, map[string]string{"policy": fmt.Sprintf(`{"signers": %q}`, exposed)})); !errors.Is(err, config.ErrInvalid) ||
+		!strings.Contains(err.Error(), "who may tell the agent how to run") {
+		t.Fatalf("signers another account can change were judged %v", err)
+	}
+	for _, interval := range []string{`"59s"`, `"25h"`} {
+		if _, err := config.Load(configured(t, map[string]string{"policy": `{"interval": ` + interval + `}`})); !errors.Is(err, config.ErrInvalid) ||
+			!strings.Contains(err.Error(), "policy.interval") {
+			t.Fatalf("asking every %s was judged %v", interval, err)
+		}
+	}
+	if _, err := config.Load(configured(t, map[string]string{"policy": `{"signers": "policy-signers.pem"}`})); !errors.Is(err, config.ErrInvalid) {
+		t.Fatalf("a relative signers path was judged %v", err)
+	}
+}
+
+func TestTheConfigurationAPolicyWouldMakeIsValidatedLikeTheFile(t *testing.T) {
+	settings, err := config.Load(configured(t, map[string]string{"modules": `{"inventory": {"enabled": true}}`}))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	candidate := settings
+	candidate.Modules = maps.Clone(settings.Modules)
+	candidate.Modules["files"] = config.Module{Enabled: true}
+	candidate.Logging.Level = "debug"
+	made, err := config.Validated(candidate)
+	if err != nil {
+		t.Fatalf("a configuration within every bound was refused: %v", err)
+	}
+	if len(made.Modules["files"].Paths) == 0 || made.Modules["files"].Interval != config.Duration(time.Hour) {
+		t.Fatalf("what the candidate left out was not filled in: %+v", made.Modules["files"])
+	}
+	if _, present := settings.Modules["files"]; present {
+		t.Fatal("validating a candidate changed the configuration it was made from")
+	}
+
+	candidate.Spool.MaxBytes = 1 << 20
+	if _, err := config.Validated(candidate); !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), "spool.max_bytes") {
+		t.Fatalf("a candidate outside a bound was judged %v", err)
+	}
+}
+
+func signerKey(t *testing.T) *ecdsa.PrivateKey {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("draw a signer key: %v", err)
+	}
+	return key
+}
+
+func publicPEM(t *testing.T, key any) []byte {
+	t.Helper()
+	der, err := x509.MarshalPKIXPublicKey(key)
+	if err != nil {
+		t.Fatalf("encode a public key: %v", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
 }
