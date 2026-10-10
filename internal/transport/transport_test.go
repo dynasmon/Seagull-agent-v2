@@ -863,3 +863,69 @@ func (p *platform) requests() []request {
 	defer p.mu.Unlock()
 	return slices.Clone(p.seen)
 }
+
+func TestAskingNamesWhatTheAgentHoldsAndSendsNothingElse(t *testing.T) {
+	agents := authorityNamed(t, "Seagull agents")
+	const holding = `"4f1d"`
+	listener := serve(t, authorityNamed(t, "Seagull platform"), agents, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method != http.MethodGet:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		case r.Header.Get("If-None-Match") == holding:
+			w.Header().Set("ETag", holding)
+			w.WriteHeader(http.StatusNotModified)
+		default:
+			w.Header().Set("ETag", `"9c02"`)
+			w.Header().Set("Content-Type", protobuf)
+			w.Write([]byte("the newer one"))
+		}
+	})
+	key := agentKey(t)
+	client := compose(t, listener.trusted, &held{credential: transport.Credential{Chain: agents.agent(t, "web-01", key.Public()), Signer: key}})
+
+	unchanged, err := client.Get(t.Context(), transport.Request{URL: listener.URL + "/v1/agents/policy", Unchanged: holding})
+	if err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if unchanged.Status != http.StatusNotModified || len(unchanged.Body) != 0 || unchanged.Tag != holding {
+		t.Fatalf("asking with what the agent holds was answered %+v", unchanged)
+	}
+	changed, err := client.Get(t.Context(), transport.Request{URL: listener.URL + "/v1/agents/policy"})
+	if err != nil {
+		t.Fatalf("ask: %v", err)
+	}
+	if changed.Status != http.StatusOK || string(changed.Body) != "the newer one" || changed.Tag != `"9c02"` {
+		t.Fatalf("asking with nothing held was answered %+v", changed)
+	}
+
+	seen := listener.requests()
+	if len(seen) != 2 || seen[0].agent != "web-01" || len(seen[0].body) != 0 {
+		t.Fatalf("the platform saw %+v", seen)
+	}
+	if names := slices.Sorted(maps.Keys(seen[0].headers)); !slices.Equal(names, []string{"If-None-Match", "User-Agent"}) {
+		t.Errorf("asking with what the agent holds sent %v", seen[0].headers)
+	}
+	if names := slices.Sorted(maps.Keys(seen[1].headers)); !slices.Equal(names, []string{"User-Agent"}) {
+		t.Errorf("asking with nothing held sent %v", seen[1].headers)
+	}
+}
+
+func TestARequestBoundsItsReplyOtherThanTheTransportDoes(t *testing.T) {
+	agents := authorityNamed(t, "Seagull agents")
+	listener := serve(t, authorityNamed(t, "Seagull platform"), agents, func(w http.ResponseWriter, r *http.Request) {
+		w.Write(bytes.Repeat([]byte("a"), 128<<10))
+	})
+	key := agentKey(t)
+	client := compose(t, listener.trusted, &held{credential: transport.Credential{Chain: agents.agent(t, "web-01", key.Public()), Signer: key}})
+	asked := listener.URL + "/v1/agents/policy"
+
+	for _, most := range []int64{1 << 10, 0} {
+		if _, err := client.Get(t.Context(), transport.Request{URL: asked, Most: most}); !errors.Is(err, transport.ErrReplyTooLarge) {
+			t.Fatalf("a reply over a bound of %d bytes returned %v", most, err)
+		}
+	}
+	reply, err := client.Get(t.Context(), transport.Request{URL: asked, Most: 256 << 10})
+	if err != nil || len(reply.Body) != 128<<10 {
+		t.Fatalf("a reply within the request's bound, above the transport's, returned %d bytes and %v", len(reply.Body), err)
+	}
+}
