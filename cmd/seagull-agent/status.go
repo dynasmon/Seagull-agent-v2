@@ -21,6 +21,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/network"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
+	"github.com/dynasmon/Seagull-agent-v2/internal/policy"
 	"github.com/dynasmon/Seagull-agent-v2/internal/renewal"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	"github.com/dynasmon/Seagull-agent-v2/internal/status"
@@ -46,6 +47,7 @@ type observing struct {
 	network        *network.Collector
 	renewer        *renewal.Renewer
 	delivery       *delivery.Delivery
+	follower       *policy.Follower
 }
 
 func (o *observing) snapshot() status.Snapshot {
@@ -69,6 +71,7 @@ func (o *observing) snapshot() status.Snapshot {
 		delivering,
 		o.credential(&snapshot, active, enrolled, now),
 		o.resources(&snapshot),
+		o.configuration.policied(o.follower, now),
 	}
 	return snapshot
 }

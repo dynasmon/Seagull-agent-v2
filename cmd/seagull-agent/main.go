@@ -36,6 +36,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dumps"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
+	"github.com/dynasmon/Seagull-agent-v2/internal/policy"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/renewal"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
@@ -147,7 +148,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	memory(logger, withheld)
 	resources(logger, settings)
 	state := settings.Identity.StateDirectory
-	held := &configuration{logger: logger, path: path, active: config.Activate(settings), level: level, applied: began}
+	held := &configuration{logger: logger, path: path, active: config.Activate(settings), local: settings, offers: make(chan offering), level: level, applied: began}
 	refused := func(err error) int {
 		logger.Error("agent_not_started", slog.Any("error", err), slog.String("recovery", recovery(path, state, err)))
 		return 1
@@ -195,6 +196,12 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	}
 	posture := keys.Posture()
 	started = append(started, slog.String("key_provider", posture.Provider), slog.Bool("key_exportable", posture.Exportable), slog.String("trust", chosen.source))
+	if isEnrolled && settings.Policy.Signers != "" {
+		if err := held.hold(installation, enrolled.AgentID, began); err != nil {
+			return refused(err)
+		}
+		settings = held.active.Settings()
+	}
 	spooled, err := openSpool(installation, settings, logger)
 	if err != nil {
 		return refused(err)
@@ -253,6 +260,22 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 		}
 		composed = append(composed, agentruntime.Component{Name: "delivery", Policy: agentruntime.Essential, Run: delivered.Run})
 		observed.delivery = delivered
+		if held.policies != nil {
+			follower, err := policy.New(policy.Options{
+				Client:   client,
+				URL:      settings.Server.RenewalURL,
+				Tag:      held.asking,
+				Offered:  held.offer,
+				Every:    func() time.Duration { return time.Duration(held.active.Settings().Policy.Interval) },
+				Logger:   logger,
+				Recovery: func(err error) string { return recovery(path, state, err) },
+			})
+			if err != nil {
+				return refused(err)
+			}
+			composed = append(composed, agentruntime.Component{Name: "policy", Policy: agentruntime.Optional, Run: follower.Run})
+			observed.follower = follower
+		}
 	}
 	kept, err := installation.Directory(statusDirectory)
 	if err != nil {
@@ -361,6 +384,9 @@ type configuration struct {
 	logger     *slog.Logger
 	path       string
 	active     *config.Active
+	local      config.Config
+	policies   *policies
+	offers     chan offering
 	level      *slog.LevelVar
 	spool      *spool.Spool
 	governor   *governor.Governor
@@ -384,7 +410,13 @@ func (c *configuration) component(asked <-chan os.Signal) agentruntime.Component
 				case <-ctx.Done():
 					return nil
 				case <-asked:
-					if err := c.reload(); err != nil {
+					if err := c.reload(); err != nil && ctx.Err() == nil {
+						return err
+					}
+				case offered := <-c.offers:
+					refused, err := c.adopt(offered.served)
+					offered.answer <- refused
+					if err != nil && ctx.Err() == nil {
 						return err
 					}
 				}
@@ -393,8 +425,27 @@ func (c *configuration) component(asked <-chan os.Signal) agentruntime.Component
 	}
 }
 
+func (c *configuration) offer(ctx context.Context, served []byte) error {
+	offered := offering{served: served, answer: make(chan error, 1)}
+	select {
+	case c.offers <- offered:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-offered.answer:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (c *configuration) reload() error {
-	candidate, err := config.Load(c.path)
+	local, err := config.Load(c.path)
+	candidate, commit := local, func() {}
+	if err == nil && c.policies != nil {
+		candidate, commit, err = c.over(local)
+	}
 	if err == nil {
 		err = c.active.Reload(candidate)
 	}
@@ -408,6 +459,22 @@ func (c *configuration) reload() error {
 			slog.String("recovery", hint))
 		return nil
 	}
+	c.mu.Lock()
+	c.local = local
+	commit()
+	c.mu.Unlock()
+	if err := c.activate(candidate); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.refused, c.applied = nil, time.Now()
+	c.mu.Unlock()
+	c.logger.Info("configuration_reloaded", slog.String("config", c.path), slog.String("log_level", candidate.Logging.Level))
+	resources(c.logger, candidate)
+	return nil
+}
+
+func (c *configuration) activate(candidate config.Config) error {
 	apply(candidate, c.level)
 	if c.spool != nil {
 		c.spool.Limit(limits(candidate))
@@ -425,11 +492,6 @@ func (c *configuration) reload() error {
 	if c.files != nil {
 		c.files.Rescope()
 	}
-	c.mu.Lock()
-	c.refused, c.applied = nil, time.Now()
-	c.mu.Unlock()
-	c.logger.Info("configuration_reloaded", slog.String("config", c.path), slog.String("log_level", candidate.Logging.Level))
-	resources(c.logger, candidate)
 	return nil
 }
 
@@ -1117,6 +1179,20 @@ func recovery(path, state string, err error) string {
 		return "check that server.ingest_url in " + path + " names the platform's ingest listener, and run an agent release that platform takes"
 	}
 	switch {
+	case errors.Is(err, policy.ErrUnsigned):
+		return "have the policy signed by a key policy.signers in " + path + " holds the public half of, or add the key that signed it there and have the agent read its configuration again"
+	case errors.Is(err, policy.ErrNotNamed):
+		return "publish a policy that names this agent by the identifier the platform issued it"
+	case errors.Is(err, policy.ErrOlder):
+		return "publish what the policy should say under a revision newer than the one the agent applied: a policy never goes back"
+	case errors.Is(err, policy.ErrExpired):
+		return "sign the policy again with a later expires_at and publish it under a newer revision"
+	case errors.Is(err, policy.ErrInapplicable):
+		return "publish a policy whose settings fit within the configuration the agent reads from " + path + ", or correct that file and have the agent read it again"
+	case errors.Is(err, policy.ErrMalformed):
+		return "publish a policy this agent release reads, signed as the contract describes"
+	case errors.Is(err, policy.ErrDamaged), errors.Is(err, policy.ErrNewer):
+		return "nothing: the agent runs on its configuration file alone, and applies the next policy the platform hands it, whatever revision it holds"
 	case errors.Is(err, config.ErrInvalid):
 		return "correct " + path + ", which " + reading + " reads without starting the agent"
 	case errors.Is(err, config.ErrNewer):
