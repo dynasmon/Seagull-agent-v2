@@ -55,6 +55,8 @@ type platform struct {
 	batches   [][]byte
 	inventory []*inventoryv1.Record
 	stocked   [][]byte
+	reports   []*agentv1.Status
+	statused  [][]byte
 }
 
 func emulate(t *testing.T) *platform {
@@ -186,6 +188,15 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 		w.Write(encoded)
 	}
 	content, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
+	var reported agentv1.StatusBatch
+	if err == nil && r.Method == http.MethodPost && r.URL.Path == "/v1/status" && proto.Unmarshal(content, &reported) == nil && len(reported.GetReports()) > 0 {
+		p.mu.Lock()
+		p.reports = append(p.reports, reported.GetReports()...)
+		p.statused = append(p.statused, content)
+		p.mu.Unlock()
+		answer(http.StatusOK, &ingestv1.BatchAck{Accepted: true, Durable: true, Received: uint32(len(reported.GetReports()))})
+		return
+	}
 	var ids []string
 	var collected []*eventv1.Event
 	var stocked []*inventoryv1.Record
@@ -233,6 +244,21 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 	}
 	p.mu.Unlock()
 	answer(http.StatusOK, &ingestv1.BatchAck{Accepted: true, Durable: true, Received: uint32(len(ids))})
+}
+
+// What the agent said of itself, in the order the platform took it: status
+// travels on a topic of its own, so the emulated backbone takes it whether or
+// not it takes telemetry.
+func (p *platform) told() []*agentv1.Status {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.reports)
+}
+
+func (p *platform) statusBatches() [][]byte {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.statused)
 }
 
 func (p *platform) holds(path string) []string {
