@@ -266,7 +266,7 @@ func TestTheServiceRunsTheAgentAsThePackageInstallsIt(t *testing.T) {
 		"LimitCORE":               "0",
 		"MemorySwapMax":           "0",
 		"MemoryPressureWatch":     "off",
-		"Restart":                 "on-failure",
+		"Restart":                 "always",
 	} {
 		if got := service[name]; got != want {
 			t.Errorf("the unit sets %s=%q, want %q", name, got, want)
