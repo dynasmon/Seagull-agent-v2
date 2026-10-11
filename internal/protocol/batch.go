@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
@@ -20,13 +21,15 @@ const ContentType = "application/x-protobuf"
 var ErrMalformed = errors.New("the record is not a well-formed message of its route")
 
 // A Route is where the platform takes one kind of record, and the shape of the
-// batches it takes them in: an event is one record of the events route, and
-// what one asset has of one kind is one record of the inventory route.
+// batches it takes them in: an event is one record of the events route, what
+// one asset has of one kind is one record of the inventory route, and what the
+// agent says of itself at one moment is one record of the status route.
 type Route int
 
 const (
 	Events Route = iota + 1
 	Inventory
+	Status
 )
 
 func (r Route) String() string {
@@ -35,6 +38,8 @@ func (r Route) String() string {
 		return "events"
 	case Inventory:
 		return "inventory"
+	case Status:
+		return "status"
 	default:
 		return fmt.Sprintf("route(%d)", int(r))
 	}
@@ -73,6 +78,15 @@ var shapes = map[Route]shape{
 		record:   func() proto.Message { return &inventoryv1.Record{} },
 		refusing: "invalid_record",
 		maxAge:   MaxInventoryAge,
+	},
+	Status: {
+		path:     "/v1/status",
+		batchID:  number(&agentv1.StatusBatch{}, "batch_id"),
+		version:  number(&agentv1.StatusBatch{}, "protocol_version"),
+		records:  number(&agentv1.StatusBatch{}, "reports"),
+		record:   func() proto.Message { return &agentv1.Status{} },
+		refusing: "invalid_report",
+		maxAge:   MaxEventAge,
 	},
 }
 
