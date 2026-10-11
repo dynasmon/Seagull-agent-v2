@@ -57,9 +57,10 @@ func TestTheSettingsTheFileLeavesOutAreTheOnesTheAgentDocuments(t *testing.T) {
 			MaxConcurrentUploads:  1,
 			ShutdownTimeout:       config.Duration(10 * time.Second),
 		},
-		Logging: config.Logging{Level: "info", Format: "json"},
-		Updates: config.Updates{Enabled: false},
-		Policy:  config.Policy{Interval: config.Duration(5 * time.Minute)},
+		Logging:   config.Logging{Level: "info", Format: "json"},
+		Updates:   config.Updates{Enabled: false},
+		Policy:    config.Policy{Interval: config.Duration(5 * time.Minute)},
+		Reporting: config.Reporting{Interval: config.Duration(time.Minute)},
 	}
 	if !reflect.DeepEqual(settings, want) {
 		t.Fatalf("the agent runs on\n%+v\nand the settings it leaves out are\n%+v", settings, want)
@@ -883,4 +884,19 @@ func publicPEM(t *testing.T, key any) []byte {
 		t.Fatalf("encode a public key: %v", err)
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
+}
+
+func TestTheAgentReportsWithinTheIntervalsThePlatformJudgesLatenessBy(t *testing.T) {
+	for written, want := range map[string]time.Duration{`"10s"`: 10 * time.Second, `"5m"`: 5 * time.Minute, `"1h"`: time.Hour} {
+		settings, err := config.Load(configured(t, map[string]string{"reporting": `{"interval": ` + written + `}`}))
+		if err != nil || time.Duration(settings.Reporting.Interval) != want {
+			t.Errorf("reporting every %s reads as %s: %v", written, settings.Reporting.Interval, err)
+		}
+	}
+	for _, written := range []string{`"9s"`, `"61m"`, `"-1m"`, `60`} {
+		if _, err := config.Load(configured(t, map[string]string{"reporting": `{"interval": ` + written + `}`})); !errors.Is(err, config.ErrInvalid) ||
+			!strings.Contains(err.Error(), "reporting.interval") {
+			t.Errorf("reporting every %s was answered %v", written, err)
+		}
+	}
 }
