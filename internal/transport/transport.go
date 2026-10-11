@@ -44,6 +44,8 @@ type Request struct {
 	ContentType string
 	Body        io.Reader
 	Length      int64
+	Unchanged   string
+	Most        int64
 }
 
 type Reply struct {
@@ -52,6 +54,7 @@ type Reply struct {
 	Body        []byte
 	Date        time.Time
 	RetryAfter  time.Duration
+	Tag         string
 	Peer        []*x509.Certificate
 }
 
@@ -152,11 +155,21 @@ func anchors(authorities []*x509.Certificate) (*x509.CertPool, error) {
 	return roots, nil
 }
 
-// Post sends a request as the enrolled agent, and returns whatever the
+// Post and Get send a request as the enrolled agent, and return whatever the
 // platform answered it with: a refusal is a reply like any other. Nothing is
 // sent without a usable credential, and nothing is sent to a platform the
-// agent did not authenticate. Post never follows a redirect.
+// agent did not authenticate. Neither follows a redirect. A request may name
+// what the agent already holds, so the platform can answer that nothing
+// changed, and may bound its reply other than the transport does.
 func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
+	return c.send(ctx, http.MethodPost, request)
+}
+
+func (c *Client) Get(ctx context.Context, request Request) (Reply, error) {
+	return c.send(ctx, http.MethodGet, request)
+}
+
+func (c *Client) send(ctx context.Context, method string, request Request) (Reply, error) {
 	target, err := secured(request.URL)
 	if err != nil {
 		return Reply{}, err
@@ -168,23 +181,32 @@ func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
 	defer cancel()
 	var connected atomic.Bool
 	traced := httptrace.WithClientTrace(bounded, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
-	sent, err := http.NewRequestWithContext(traced, http.MethodPost, target.String(), body(request.Body))
+	sent, err := http.NewRequestWithContext(traced, method, target.String(), body(request.Body))
 	if err != nil {
 		return Reply{}, fmt.Errorf("send to %s: %w", target.Redacted(), err)
 	}
 	sent.ContentLength = request.Length
-	sent.Header.Set("Content-Type", request.ContentType)
+	if request.ContentType != "" {
+		sent.Header.Set("Content-Type", request.ContentType)
+	}
+	if request.Unchanged != "" {
+		sent.Header.Set("If-None-Match", request.Unchanged)
+	}
 	response, err := c.current.Load().transport.RoundTrip(sent)
 	if err != nil {
 		return Reply{}, failure(ctx, target, connected.Load(), err)
 	}
 	defer response.Body.Close()
-	content, err := io.ReadAll(io.LimitReader(response.Body, c.options.MaxResponseBytes+1))
+	most := c.options.MaxResponseBytes
+	if request.Most > 0 {
+		most = request.Most
+	}
+	content, err := io.ReadAll(io.LimitReader(response.Body, most+1))
 	if err != nil {
 		return Reply{}, failure(ctx, target, true, err)
 	}
-	if int64(len(content)) > c.options.MaxResponseBytes {
-		return Reply{}, fmt.Errorf("%w: %s answered with more than %d bytes", ErrReplyTooLarge, target.Redacted(), c.options.MaxResponseBytes)
+	if int64(len(content)) > most {
+		return Reply{}, fmt.Errorf("%w: %s answered with more than %d bytes", ErrReplyTooLarge, target.Redacted(), most)
 	}
 	var peer []*x509.Certificate
 	if response.TLS != nil {
@@ -197,6 +219,7 @@ func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
 		Body:        content,
 		Date:        date,
 		RetryAfter:  asked(response.Header.Get("Retry-After"), date),
+		Tag:         response.Header.Get("ETag"),
 		Peer:        peer,
 	}, nil
 }

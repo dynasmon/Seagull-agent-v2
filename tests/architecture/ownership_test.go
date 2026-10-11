@@ -155,6 +155,26 @@ var dependencyRules = []dependencyRule{
 		reason:     "the link keeps whether a listener answers and when it is tried again: what travels to the listener, what an answer means and whose records wait on it belong to delivery and renewal, and a failure is known to it by what the transport reported",
 	},
 	{
+		packages: "internal/policy",
+		forbidden: []string{
+			modulePath + "/internal/identity",
+			modulePath + "/internal/pki",
+			modulePath + "/internal/enrollment",
+			modulePath + "/internal/renewal",
+			modulePath + "/internal/delivery",
+			modulePath + "/internal/spool",
+			modulePath + "/internal/modules",
+			modulePath + "/internal/governor",
+		},
+		transitive: true,
+		reason:     "a policy is verified under the keys the agent is handed, judged against the agent it names and laid over the configuration the agent read: it holds no key of the installation, reaches no collector, spool or delivery, and is applied by the composition root",
+	},
+	{
+		packages:  "internal/policy",
+		forbidden: []string{"crypto/tls"},
+		reason:    "a policy is asked for through the transport alone, which authenticates the platform and presents the agent's credential; the policy decides what an answer means",
+	},
+	{
 		packages:   "internal/status",
 		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
 		allowed:    []string{modulePath + "/internal/secrets", modulePath + "/internal/platform/files"},

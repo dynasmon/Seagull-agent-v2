@@ -2,6 +2,8 @@ package config
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -38,6 +40,8 @@ const (
 	maxConfigBytes  = 64 << 10
 	maxBundleBytes  = 1 << 20
 	maxCertificates = 64
+	maxSignersBytes = 64 << 10
+	maxSigners      = 64
 	maxPathBytes    = 4 << 10
 	batchesSpooled  = 4
 	maxGroups       = 8
@@ -79,6 +83,7 @@ type Config struct {
 	Resources Resources `json:"resources"`
 	Logging   Logging   `json:"logging"`
 	Updates   Updates   `json:"updates"`
+	Policy    Policy    `json:"policy"`
 }
 
 // Where the installation lives and what holds its keys. It does not name the
@@ -171,6 +176,11 @@ type Updates struct {
 	Enabled bool `json:"enabled"`
 }
 
+type Policy struct {
+	Signers  string   `json:"signers"`
+	Interval Duration `json:"interval"`
+}
+
 func (l Logging) Severity() slog.Level { return levels[l.Level] }
 
 func defaults() Config {
@@ -196,6 +206,7 @@ func defaults() Config {
 			ShutdownTimeout:       Duration(10 * time.Second),
 		},
 		Logging: Logging{Level: "info", Format: JSONLogs},
+		Policy:  Policy{Interval: Duration(5 * time.Minute)},
 	}
 }
 
@@ -377,6 +388,7 @@ func (c *Config) validate() error {
 		c.Resources.validate(),
 		c.Logging.validate(),
 		c.Updates.validate(),
+		c.Policy.validate(),
 	)
 	if state := c.Identity.StateDirectory; filepath.IsAbs(state) {
 		for _, path := range c.Modules[watcher].Paths {
@@ -561,6 +573,34 @@ func (u *Updates) validate() []error {
 	return nil
 }
 
+func (p *Policy) validate() []error {
+	found := problems(duration("policy.interval", p.Interval, Duration(time.Minute), Duration(24*time.Hour)))
+	if p.Signers != "" {
+		if _, err := signers("policy.signers", p.Signers); err != nil {
+			found = append(found, err)
+		}
+	}
+	return found
+}
+
+func (p Policy) Keys() ([]*ecdsa.PublicKey, error) {
+	if p.Signers == "" {
+		return nil, nil
+	}
+	return signers("policy.signers", p.Signers)
+}
+
+// Validated returns the configuration the agent would run on were candidate
+// the file it read, with what it leaves out filled in, or why it would refuse
+// it.
+func Validated(candidate Config) (Config, error) {
+	settings := candidate.clone()
+	if err := settings.validate(); err != nil {
+		return Config{}, err
+	}
+	return settings, nil
+}
+
 func problems(found ...error) []error {
 	return slices.DeleteFunc(found, func(err error) bool { return err == nil })
 }
@@ -615,8 +655,33 @@ func (s Server) Authorities() ([]*x509.Certificate, error) {
 }
 
 func bundle(name, path string) ([]*x509.Certificate, error) {
-	if err := absolute(name, path,
-		"the certificates the agent verifies the platform with", "/etc/seagull-agent/platform-ca.pem"); err != nil {
+	content, err := trustedFile(name, path, "the certificates the agent verifies the platform with",
+		"/etc/seagull-agent/platform-ca.pem", "which platform the agent trusts", maxBundleBytes)
+	if err != nil {
+		return nil, err
+	}
+	held, err := authorities(content)
+	if err != nil {
+		return nil, fmt.Errorf("%s names %s, which %v", name, secrets.Bounded(path), err)
+	}
+	return held, nil
+}
+
+func signers(name, path string) ([]*ecdsa.PublicKey, error) {
+	content, err := trustedFile(name, path, "the public keys a signed policy is accepted under",
+		"/etc/seagull-agent/policy-signers.pem", "who may tell the agent how to run", maxSignersBytes)
+	if err != nil {
+		return nil, err
+	}
+	held, err := publicKeys(content)
+	if err != nil {
+		return nil, fmt.Errorf("%s names %s, which %v", name, secrets.Bounded(path), err)
+	}
+	return held, nil
+}
+
+func trustedFile(name, path, what, example, decides string, limit int64) ([]byte, error) {
+	if err := absolute(name, path, what, example); err != nil {
 		return nil, err
 	}
 	described, err := os.Lstat(path)
@@ -630,15 +695,44 @@ func bundle(name, path string) ([]*x509.Certificate, error) {
 		return nil, fmt.Errorf("%s names %s, which is not a regular file", name, named)
 	}
 	if err := files.Trusted(described); err != nil {
-		return nil, fmt.Errorf("%s names %s, and it %v: whoever changes it decides which platform the agent trusts", name, named, err)
+		return nil, fmt.Errorf("%s names %s, and it %v: whoever changes it decides %s", name, named, err, decides)
 	}
-	content, err := contents(path, described, maxBundleBytes)
+	content, err := contents(path, described, limit)
 	if err != nil {
 		return nil, fmt.Errorf("%s names %s, which %v", name, named, err)
 	}
-	held, err := authorities(content)
-	if err != nil {
-		return nil, fmt.Errorf("%s names %s, which %v", name, named, err)
+	return content, nil
+}
+
+func publicKeys(content []byte) ([]*ecdsa.PublicKey, error) {
+	var held []*ecdsa.PublicKey
+	for rest := content; len(bytes.TrimSpace(rest)) > 0; {
+		if len(held) == maxSigners {
+			return nil, fmt.Errorf("holds more than %d keys", maxSigners)
+		}
+		block, remainder := pem.Decode(rest)
+		switch {
+		case block == nil:
+			return nil, errors.New("holds something that is not PEM")
+		case block.Type != "PUBLIC KEY":
+			return nil, fmt.Errorf("holds a %s block, and a signer is named by its PUBLIC KEY", secrets.Shown(block.Type))
+		}
+		parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("holds a block that is not a public key: %s", secrets.Bounded(err.Error()))
+		}
+		key, signs := parsed.(*ecdsa.PublicKey)
+		switch {
+		case !signs || key.Curve != elliptic.P256():
+			return nil, errors.New("holds a key that is not ECDSA over P-256, the one curve a policy is signed with")
+		case slices.ContainsFunc(held, func(other *ecdsa.PublicKey) bool { return other.Equal(key) }):
+			return nil, errors.New("holds one key twice")
+		}
+		held = append(held, key)
+		rest = remainder
+	}
+	if len(held) == 0 {
+		return nil, errors.New("holds no key")
 	}
 	return held, nil
 }

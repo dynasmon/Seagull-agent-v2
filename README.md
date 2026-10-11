@@ -101,6 +101,21 @@ rotates its key once it is older than `identity.key_lifetime`, follows the
 authorities the platform publishes when it rotates its own, and asks again with
 the very same request when the answer to a renewal was lost.
 
+### Signed policy
+
+An agent can be told how to run by a policy an operator signs off the platform:
+the platform hands it on the listener the agent renews on, and the agent applies
+it only when a key `policy.signers` holds the public half of signed it, it names
+the agent, it has not expired and its revision is no lower than the one the
+agent holds. A policy sets the log level, which modules collect and how often,
+what the files module watches, and budgets, which only ever lower the ceilings
+of `agent.json`; it never reaches the platform the agent talks to, what it
+trusts, its identity or its timeouts. The policy in force is kept in the
+installation and verified again at every start and on SIGHUP, so retiring a key
+from `policy.signers` withdraws what it signed; one that expires stays in force
+and is reported until a newer one arrives. `status` says which revision the
+agent runs on, and every policy applied or refused is in the journal.
+
 ### Status and diagnostics
 
 The running agent writes its status every 30 seconds, and `status` prints it,
@@ -214,8 +229,8 @@ every problem without starting the agent. The file holds no secret, and only
 root or the agent's account may write it. On SIGHUP the agent validates the
 whole file before it replaces its configuration, and keeps the one it has when
 it refuses the new one; the state directory, the key provider, the `server`
-settings, the connect and request timeouts, the reply bound, the log format
-and the shutdown timeout take a restart.
+settings, the connect and request timeouts, the reply bound, the log format,
+the shutdown timeout and the `policy.signers` file named take a restart.
 
 | Setting | Default | What it decides |
 |---|---|---|
@@ -229,6 +244,8 @@ and the shutdown timeout take a restart.
 | `resources.memory_limit` | `256MiB` | the target of the garbage collector |
 | `resources.max_scan_bytes_per_second` | `8MiB` | the pace of scans and hashing |
 | `logging.level`, `logging.format` | `info`, `json` | what the log says, and how |
+| `policy.signers` | none | the PEM public keys, ECDSA P-256, a signed policy is accepted under; none asks for no policy |
+| `policy.interval` | `5m` | how often the agent asks for the policy that names it |
 
 `transport.*` sets the timeouts, the batch sizes, within the platform's
 ceilings, and the upload bandwidth; `resources.*` also bounds the scans and
@@ -295,6 +312,7 @@ old agent when it was enrolled.
 | `/var/lib/seagull-agent/spool/` | Durable `events` and `inventory` streams |
 | `/var/lib/seagull-agent/collection/` | Collector checkpoints and baselines |
 | `/var/lib/seagull-agent/status/status.json` | What the agent last said of itself |
+| `/var/lib/seagull-agent/policy/policy.json` | The signed policy applied last, and the revision no later one goes below |
 | `/var/lib/seagull-agent/replaced/` | Installations set aside by `installation replace` |
 
 The state directory is private to the agent's account and locked while the
@@ -315,10 +333,11 @@ refusal of the agent itself is an exclusion that waits for an operator. Reply
 fields the contracts do not declare are ignored.
 
 Compatibility is claimed only with the backend commits recorded under
-[`tests/compatibility/testdata`](tests/compatibility/testdata): 6fae345, 2829b0d
-and 0656b2a, whose ingest gateway, control plane and pipeline were driven with
-what this agent sends. The suite fails when `go.mod` pins contracts no recorded
-platform was built with, or when a recorded answer reads differently.
+[`tests/compatibility/testdata`](tests/compatibility/testdata): 6fae345, 2829b0d,
+0656b2a and fdd814d, whose ingest gateway, control plane and pipeline were driven
+with what this agent sends; fdd814d also handed it the signed policies it
+applies. The suite fails when `go.mod` pins contracts no recorded platform was
+built with, or when a recorded answer reads differently.
 
 ## Build and test
 
