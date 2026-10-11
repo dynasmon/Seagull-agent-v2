@@ -35,6 +35,7 @@ var (
 	ErrUnreadable = errors.New("what the host says of itself cannot be read")
 	keyPattern    = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 	cpuPattern    = regexp.MustCompile(`^cpu[0-9]+$`)
+	bootPattern   = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
 
 type Release struct {
@@ -64,6 +65,20 @@ type Hardware struct {
 	Memory uint64
 	Vendor string
 	Model  string
+}
+
+// Boot is the kernel's identifier of the boot the host is in, which nothing
+// but starting the host again changes.
+func Boot() (string, error) {
+	content, err := files.Read(filepath.Join(proc, "sys", "kernel", "random", "boot_id"), maxValue)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", ErrUnreadable, secrets.Bounded(err.Error()))
+	}
+	written := strings.TrimSpace(string(content))
+	if !bootPattern.MatchString(written) {
+		return "", fmt.Errorf("%w: the boot is named %s", ErrUnreadable, secrets.Shown(written))
+	}
+	return written, nil
 }
 
 func Distribution() (Release, error) {
