@@ -34,6 +34,20 @@ func (s Snapshot) Print(w io.Writer, now time.Time) error {
 	}
 	line("%s, installation %s, process %d started %s", agent, shown(s.Agent.InstallationID), s.Agent.Process, stamp(s.Agent.StartedAt))
 	line("%s", shown(s.Agent.Build))
+	if previous := s.Agent.Previous; previous != nil {
+		rebooted := ""
+		if previous.Rebooted {
+			rebooted = "; the host started again since"
+		}
+		switch previous.Ending {
+		case EndingStopped:
+			line("the run before stopped %s: %s%s", stamp(previous.SeenAt), shown(previous.Reason), rebooted)
+		case EndingInterrupted:
+			line("the run before ended without saying so: it last wrote its status %s%s", stamp(previous.SeenAt), rebooted)
+		case EndingUnknown:
+			line("how the run before ended is not known: it left no status this agent reads")
+		}
+	}
 	line("")
 	for _, component := range s.Components {
 		said := shown(component.Name) + ": " + string(component.State)
