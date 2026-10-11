@@ -175,6 +175,23 @@ var dependencyRules = []dependencyRule{
 		reason:    "a policy is asked for through the transport alone, which authenticates the platform and presents the agent's credential; the policy decides what an answer means",
 	},
 	{
+		packages:  "internal/reporting",
+		forbidden: []string{modulePath},
+		allowed: []string{
+			modulePath + "/internal/link",
+			modulePath + "/internal/protocol",
+			modulePath + "/internal/secrets",
+			modulePath + "/internal/transport",
+		},
+		transitive: true,
+		reason:     "reporting sends what it is handed to say of the agent and keeps nothing but the count of its reports: what the agent is, its keys, its collectors and its spool belong to the composition root that builds each report",
+	},
+	{
+		packages:  "internal/reporting",
+		forbidden: []string{"crypto/tls"},
+		reason:    "a report travels through the transport alone, which authenticates the platform and presents the agent's credential",
+	},
+	{
 		packages:   "internal/status",
 		forbidden:  append([]string{modulePath, contractsPath}, networkPackages...),
 		allowed:    []string{modulePath + "/internal/secrets", modulePath + "/internal/platform/files"},
