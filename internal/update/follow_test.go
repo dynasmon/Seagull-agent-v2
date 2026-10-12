@@ -110,6 +110,7 @@ func (e estate) follow(t *testing.T, version string, catalog *updatev1.Catalog, 
 		Journal: func() (update.Journal, bool, error) { return update.ReadJournal(held.installer) },
 		Running: running("v0.2.0"),
 		Every:   func() time.Duration { return 15 * time.Minute },
+		Watch:   10 * time.Millisecond,
 		Policy:  link.Policy{Retry: time.Second, RetryLongest: time.Minute, Hold: time.Minute, HoldLongest: time.Hour},
 		Logger:  slog.New(slog.NewJSONHandler(held.log, nil)),
 		Now:     func() time.Time { return written },
@@ -171,6 +172,41 @@ func TestAnAgentWaitsForTheInstallerAndSaysWhatItDoes(t *testing.T) {
 	followed.follower.Ask(t.Context())
 	if state := followed.follower.State(); state.Stage != update.Checking || state.Version != "v0.3.0" || len(entries(t, followed.staged)) != 0 {
 		t.Fatalf("while the installer checked a release the agent stood at %+v and staged %v", state, entries(t, followed.staged))
+	}
+}
+
+func TestAnAgentSaysHowTheInstallerEndedAsSoonAsItEndsWithoutAskingAgain(t *testing.T) {
+	land := newEstate(t)
+	current, next, catalog := pair(t)
+	followed := land.follow(t, "v0.3.0", catalog, map[string][]byte{"current": current, "next": next})
+	if err := update.KeepJournal(followed.installer, update.Journal{Stage: update.Checking, Version: "v0.3.0", Catalog: 7, Since: written}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	stopped := make(chan error, 1)
+	go func() { stopped <- followed.follower.Run(ctx) }()
+	standsAt := func(stage update.Stage) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); followed.follower.State().Stage != stage; {
+			if time.Now().After(deadline) {
+				cancel()
+				t.Fatalf("the agent stands at %+v, and the installer's journal is at %s", followed.follower.State(), stage)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	standsAt(update.Checking)
+	if err := update.KeepJournal(followed.installer, update.Journal{Stage: update.RolledBack, Version: "v0.3.0", Catalog: 7, Since: written,
+		Failure: update.Unhealthy, Reason: "it did not run as it should"}); err != nil {
+		t.Fatal(err)
+	}
+	standsAt(update.RolledBack)
+	cancel()
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	if len(followed.platform.asked) != 1 {
+		t.Fatalf("while the installer worked the agent asked the platform for %v", followed.platform.asked)
 	}
 }
 
