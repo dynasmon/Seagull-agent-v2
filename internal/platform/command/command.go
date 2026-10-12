@@ -48,13 +48,18 @@ func (f *Failure) Unwrap() error { return f.Err }
 
 // Output runs program to its end and returns what it wrote to its standard
 // output. A program the host does not have is ErrAbsent, and one that writes
-// more than most bytes is stopped and reported as ErrTooLong.
+// more than most bytes is stopped and reported as ErrTooLong. OutputIn does the
+// same in the environment the agent fixes, never in one the host hands it.
 func Output(ctx context.Context, program string, arguments []string, most int64) ([]byte, error) {
+	return OutputIn(ctx, program, arguments, nil, most)
+}
+
+func OutputIn(ctx context.Context, program string, arguments, environment []string, most int64) ([]byte, error) {
 	name := filepath.Base(program)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	command := exec.CommandContext(ctx, program, arguments...)
-	command.Env = []string{}
+	command.Env = append([]string{}, environment...)
 	command.WaitDelay = stopping
 	written := &bounded{most: most, exceeded: cancel}
 	said := &complaint{}
