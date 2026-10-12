@@ -16,11 +16,11 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	"github.com/dynasmon/Seagull-agent-v2/internal/dsse"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	policyv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/policy/v1"
 )
@@ -79,18 +79,6 @@ func KeyID(key *ecdsa.PublicKey) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
-func PAE(payloadType string, payload []byte) []byte {
-	encoded := make([]byte, 0, len(payloadType)+len(payload)+32)
-	encoded = append(encoded, "DSSEv1 "...)
-	encoded = strconv.AppendInt(encoded, int64(len(payloadType)), 10)
-	encoded = append(encoded, ' ')
-	encoded = append(encoded, payloadType...)
-	encoded = append(encoded, ' ')
-	encoded = strconv.AppendInt(encoded, int64(len(payload)), 10)
-	encoded = append(encoded, ' ')
-	return append(encoded, payload...)
-}
-
 type Verified struct {
 	Policy   *policyv1.Policy
 	Envelope []byte
@@ -122,7 +110,7 @@ func (v *Verifier) Verify(served []byte) (Verified, error) {
 		return Verified{}, fmt.Errorf("%w: it carries %d signatures, and a policy carries at most %d", ErrMalformed, len(signatures), MaxSignatures)
 	}
 
-	digest := sha256.Sum256(PAE(PayloadType, payload))
+	digest := sha256.Sum256(dsse.PAE(PayloadType, payload))
 	var signedBy []string
 	for _, signature := range signatures {
 		for _, candidate := range v.keys {

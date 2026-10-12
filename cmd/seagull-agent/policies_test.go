@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
+	"github.com/dynasmon/Seagull-agent-v2/internal/dsse"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/policy"
 	"github.com/dynasmon/Seagull-agent-v2/internal/status"
@@ -139,7 +140,7 @@ func sealedPolicy(t *testing.T, held *policyv1.Policy, keys ...*ecdsa.PrivateKey
 	if err != nil {
 		t.Fatalf("encode the policy: %v", err)
 	}
-	digest := sha256.Sum256(policy.PAE(policy.PayloadType, payload))
+	digest := sha256.Sum256(dsse.PAE(policy.PayloadType, payload))
 	envelope := &policyv1.SignedPolicy{Payload: payload, PayloadType: policy.PayloadType}
 	for _, key := range keys {
 		signature, err := ecdsa.SignASN1(rand.Reader, key, digest[:])
