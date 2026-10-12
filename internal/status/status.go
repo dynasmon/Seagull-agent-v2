@@ -83,11 +83,45 @@ type Snapshot struct {
 }
 
 type Agent struct {
-	Build          Text      `json:"build"`
-	Process        int       `json:"process"`
-	StartedAt      time.Time `json:"started_at"`
-	InstallationID Text      `json:"installation_id"`
-	AgentID        Text      `json:"agent_id,omitempty"`
+	Build          Text        `json:"build"`
+	Process        int         `json:"process"`
+	StartedAt      time.Time   `json:"started_at"`
+	InstallationID Text        `json:"installation_id"`
+	AgentID        Text        `json:"agent_id,omitempty"`
+	Boot           Text        `json:"boot,omitempty"`
+	Configuration  Text        `json:"configuration_sha256,omitempty"`
+	PolicyRevision uint64      `json:"policy_revision,omitempty"`
+	Privileges     *Privileges `json:"privileges,omitempty"`
+	Previous       *Previous   `json:"previous,omitempty"`
+}
+
+// What the process may do on its host, as the kernel told it when it started.
+type Privileges struct {
+	User         int    `json:"user"`
+	Group        int    `json:"group"`
+	Groups       []int  `json:"groups"`
+	Capabilities []Text `json:"capabilities"`
+	NoNewPrivs   bool   `json:"no_new_privs"`
+	Seccomp      Text   `json:"seccomp"`
+}
+
+type Ending string
+
+const (
+	EndingNone        Ending = "none"
+	EndingStopped     Ending = "stopped"
+	EndingInterrupted Ending = "interrupted"
+	EndingUnknown     Ending = "unknown"
+)
+
+// How the run before this one ended, as the snapshot it left says: stopped
+// when it said so, interrupted when it last said it was running, which a kill,
+// a crash and a host that lost power all leave behind.
+type Previous struct {
+	Ending   Ending    `json:"ending"`
+	SeenAt   time.Time `json:"seen_at,omitzero"`
+	Reason   Text      `json:"reason,omitempty"`
+	Rebooted bool      `json:"rebooted,omitempty"`
 }
 
 type Component struct {
@@ -181,4 +215,21 @@ func Worst(components []Component) State {
 func (s Snapshot) Fresh(now time.Time) bool {
 	every := time.Duration(max(s.EverySeconds, 1)) * time.Second
 	return s.State != Stopped && now.Sub(s.WrittenAt) <= 3*every
+}
+
+// Before reads how the run before ended from what it left in the status, read
+// as the agent starts and before it writes its own: nothing written means the
+// installation never ran, and a status it cannot read says nothing at all.
+func Before(left Snapshot, unread error, boot string) Previous {
+	switch {
+	case errors.Is(unread, ErrUnwritten):
+		return Previous{Ending: EndingNone}
+	case unread != nil:
+		return Previous{Ending: EndingUnknown}
+	}
+	previous := Previous{Ending: EndingInterrupted, SeenAt: left.WrittenAt, Rebooted: left.Agent.Boot != "" && boot != "" && string(left.Agent.Boot) != boot}
+	if left.State == Stopped {
+		previous.Ending, previous.Reason = EndingStopped, left.Reason
+	}
+	return previous
 }

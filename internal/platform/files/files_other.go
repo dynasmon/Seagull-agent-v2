@@ -29,3 +29,7 @@ func Trusted(fs.FileInfo) error {
 func Owner(fs.FileInfo) (int, error) {
 	return 0, fmt.Errorf("cannot tell who owns it on %s: %w", runtime.GOOS, errors.ErrUnsupported)
 }
+
+func Protected(path string) error {
+	return fmt.Errorf("cannot tell who may change %s on %s: %w", path, runtime.GOOS, errors.ErrUnsupported)
+}

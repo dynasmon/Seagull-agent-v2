@@ -119,7 +119,12 @@ agent runs on, and every policy applied or refused is in the journal.
 ### Status and diagnostics
 
 The running agent writes its status every 30 seconds, and `status` prints it,
-exiting with 0 only while the agent runs as it should. `diagnostics BUNDLE`
+exiting with 0 only while the agent runs as it should, with how the run before
+it ended. Once enrolled, it also tells the platform how it runs every
+`reporting.interval`, on a stream of its own beside what it delivers, and once
+more as it stops: each report stands on its own, so the agent sends its newest
+and keeps no backlog, and the platform judges an agent active, late, silent or
+stopped by when its reports arrive. `diagnostics BUNDLE`
 writes a JSON bundle for troubleshooting that holds no key, no certificate or
 request as encoded and no record of the spool. Every command that changes the
 installation, and every bundle, is recorded in the system journal, attributed
@@ -246,6 +251,7 @@ the shutdown timeout and the `policy.signers` file named take a restart.
 | `logging.level`, `logging.format` | `info`, `json` | what the log says, and how |
 | `policy.signers` | none | the PEM public keys, ECDSA P-256, a signed policy is accepted under; none asks for no policy |
 | `policy.interval` | `5m` | how often the agent asks for the policy that names it |
+| `reporting.interval` | `1m` | how often the agent tells the platform how it runs, between `10s` and `1h` |
 
 `transport.*` sets the timeouts, the batch sizes, within the platform's
 ceilings, and the upload bandwidth; `resources.*` also bounds the scans and
@@ -278,6 +284,39 @@ drop-in under `/etc/systemd/system/seagull-agent.service.d/` followed by
 `CAP_DAC_READ_SEARCH` lets the agent read any file on the host, keys included,
 which is why the package never grants it. Modules share one process, so a
 drop-in loosens the agent as a whole.
+
+## Self-protection
+
+The agent runs only when root alone can change what decides it: its
+executable, its configuration, `server.trust_bundle`, `policy.signers` and the
+directory that holds its installation, with every directory above them. When
+another account could change one of them, its own included, the agent refuses
+to start and says which and why, so taking over its account does not change
+what it runs after it starts again; `config check` says the same without
+starting it. The service starts the agent again however it ended, unless the
+service manager was asked to stop it: 5 seconds after the first exit, then
+further apart up to 5 minutes, which systemd keeps counting until the service
+is stopped or the host starts again.
+
+As it starts, the agent logs how the run before it ended, `stopped` as it was
+asked or `interrupted` by a kill, a crash or the host losing power, and how
+long it was not running, then as `agent_changed` what differs from what that
+run said of itself: its build, its settings, the policy in force, the
+collectors that run and what it may do on the host. A collector stopped, a
+privilege gained or a policy gone is a warning. The same facts travel in every
+report, with a count of the reports the installation sent and the boot of its
+host: the platform tells an agent somebody stopped from one that went quiet,
+and the count and the boot are what tell a copy of an installation from the
+original.
+
+None of this holds against root. Root can stop or remove the agent, change or
+replace any of its files, read its key, and erase the journal these lines are
+in; what the agent says of its build, its settings and its privileges is its
+word, never an attestation. Accounts other than root cannot change any of it,
+read the installation, signal the agent or stop the service, as the native
+gate checks. An agent that stops reporting is late and then silent, never
+disabled or revoked for it, and a copied key is still found at renewal, as
+[Identity and renewal](#identity-and-renewal) describes.
 
 ## Upgrade and removal
 
@@ -313,6 +352,7 @@ old agent when it was enrolled.
 | `/var/lib/seagull-agent/collection/` | Collector checkpoints and baselines |
 | `/var/lib/seagull-agent/status/status.json` | What the agent last said of itself |
 | `/var/lib/seagull-agent/policy/policy.json` | The signed policy applied last, and the revision no later one goes below |
+| `/var/lib/seagull-agent/reporting/sequence.json` | The count of the reports the installation sent, which never goes back |
 | `/var/lib/seagull-agent/replaced/` | Installations set aside by `installation replace` |
 
 The state directory is private to the agent's account and locked while the
@@ -334,9 +374,10 @@ fields the contracts do not declare are ignored.
 
 Compatibility is claimed only with the backend commits recorded under
 [`tests/compatibility/testdata`](tests/compatibility/testdata): 6fae345, 2829b0d,
-0656b2a and fdd814d, whose ingest gateway, control plane and pipeline were driven
-with what this agent sends; fdd814d also handed it the signed policies it
-applies. The suite fails when `go.mod` pins contracts no recorded platform was
+0656b2a, fdd814d and 46ca9c7, whose ingest gateway, control plane and pipeline
+were driven with what this agent sends; fdd814d and 46ca9c7 also handed it the
+signed policies it applies, and 46ca9c7 took and kept the status reports an
+installed agent sent in the native gate. The suite fails when `go.mod` pins contracts no recorded platform was
 built with, or when a recorded answer reads differently.
 
 ## Build and test

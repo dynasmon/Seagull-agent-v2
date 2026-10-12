@@ -23,6 +23,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/policy"
 	"github.com/dynasmon/Seagull-agent-v2/internal/renewal"
+	"github.com/dynasmon/Seagull-agent-v2/internal/reporting"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	"github.com/dynasmon/Seagull-agent-v2/internal/status"
 )
@@ -48,6 +49,10 @@ type observing struct {
 	renewer        *renewal.Renewer
 	delivery       *delivery.Delivery
 	follower       *policy.Follower
+	reporter       *reporting.Reporter
+	boot           string
+	granted        *status.Privileges
+	previous       *status.Previous
 }
 
 func (o *observing) snapshot() status.Snapshot {
@@ -57,7 +62,14 @@ func (o *observing) snapshot() status.Snapshot {
 		Process:        os.Getpid(),
 		StartedAt:      o.began.UTC(),
 		InstallationID: status.Text(o.installation.ID()),
+		Boot:           status.Text(o.boot),
+		Privileges:     o.granted,
+		Previous:       o.previous,
 	}}
+	if encoded, err := o.configuration.active.Settings().Encode(); err == nil {
+		snapshot.Agent.Configuration = status.Text(digested(encoded))
+	}
+	_, snapshot.Agent.PolicyRevision, _ = o.configuration.inForce()
 	active, enrolled := o.installation.Enrollment()
 	if enrolled {
 		snapshot.Agent.AgentID = status.Text(active.AgentID)
@@ -72,8 +84,26 @@ func (o *observing) snapshot() status.Snapshot {
 		o.credential(&snapshot, active, enrolled, now),
 		o.resources(&snapshot),
 		o.configuration.policied(o.follower, now),
+		o.reported(enrolled),
 	}
 	return snapshot
+}
+
+func (o *observing) reported(enrolled bool) status.Component {
+	if o.reporter == nil {
+		reason := "the installation is not enrolled, so it reports nothing to the platform"
+		if enrolled {
+			reason = "the installation was enrolled after the agent started, and it reports once it starts again"
+		}
+		return status.Component{Name: "reporting", State: status.Disabled, Reason: status.Text(reason)}
+	}
+	held := o.reporter.State()
+	if held.Attempts == 0 {
+		return status.Component{Name: "reporting", State: status.Running, Since: held.Reported.UTC()}
+	}
+	return status.Component{Name: "reporting", State: status.Degraded, Since: held.Failing.UTC(),
+		Reason:   status.Text(fmt.Sprintf("the platform has not taken what the agent reports of itself since %s, %d attempts: %s", held.Failing.UTC().Format(time.RFC3339), held.Attempts, held.Reason)),
+		Recovery: status.Text(held.Recovery)}
 }
 
 func (c *configuration) observed() status.Component {

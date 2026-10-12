@@ -67,6 +67,7 @@ const childArguments = "SEAGULL_AGENT_TEST_ARGUMENTS"
 
 func TestMain(m *testing.M) {
 	noted = func(journal.Note) error { return nil }
+	guarded = func(string, config.Config) error { return nil }
 	if arguments, ok := os.LookupEnv(childArguments); ok {
 		os.Exit(run(strings.Fields(arguments), os.Stdout, os.Stderr))
 	}
@@ -86,8 +87,8 @@ func TestTheVersionFlagPrintsTheBuildIdentityApartFromTheWireVersions(t *testing
 	if platform := runtime.GOOS + "/" + runtime.GOARCH; fields[3] != platform {
 		t.Fatalf("build identity names %s, the binary runs on %s", fields[3], platform)
 	}
-	want := fmt.Sprintf("protocol_version %d\nevent_schema_version %d\ninventory_schema_version %d\n",
-		protocol.Version, protocol.EventSchemaVersion, protocol.InventorySchemaVersion)
+	want := fmt.Sprintf("protocol_version %d\nevent_schema_version %d\ninventory_schema_version %d\nstatus_schema_version %d\n",
+		protocol.Version, protocol.EventSchemaVersion, protocol.InventorySchemaVersion, protocol.StatusSchemaVersion)
 	if spoken != want {
 		t.Fatalf("printed the wire versions as %q, want %q", spoken, want)
 	}
@@ -107,6 +108,7 @@ func TestTheAgentLogsWhatItIsAsItStarts(t *testing.T) {
 		"protocol_version":         float64(protocol.Version),
 		"event_schema_version":     float64(protocol.EventSchemaVersion),
 		"inventory_schema_version": float64(protocol.InventorySchemaVersion),
+		"status_schema_version":    float64(protocol.StatusSchemaVersion),
 		"installation_id":          created["installation_id"],
 		"key_provider":             "filesystem",
 		"key_exportable":           true,
@@ -547,8 +549,19 @@ func TestAnEnrolledAgentDeliversWhatItsSpoolHoldsAsItRuns(t *testing.T) {
 	signing := listening(t, trustBundle(path))
 	var mu sync.Mutex
 	var received, agents []string
+	var reports []*agentv1.Status
 	ingest := signing.serving(t, &served{}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
+		var reported agentv1.StatusBatch
+		if err == nil && r.URL.Path == "/v1/status" && proto.Unmarshal(body, &reported) == nil {
+			mu.Lock()
+			reports = append(reports, reported.GetReports()...)
+			mu.Unlock()
+			acknowledged, _ := proto.Marshal(&ingestv1.BatchAck{Accepted: true, Durable: true, Received: uint32(len(reported.GetReports()))})
+			w.Header().Set("Content-Type", "application/x-protobuf")
+			w.Write(acknowledged)
+			return
+		}
 		var batch ingestv1.EventBatch
 		if err != nil || r.URL.Path != "/v1/events" || proto.Unmarshal(body, &batch) != nil {
 			http.Error(w, "not a batch of events", http.StatusBadRequest)
@@ -595,7 +608,7 @@ func TestAnEnrolledAgentDeliversWhatItsSpoolHoldsAsItRuns(t *testing.T) {
 			t.Fatalf("the platform received %v within 10s", received)
 		}
 		mu.Lock()
-		delivered = len(received) == len(ids)
+		delivered = len(received) == len(ids) && len(reports) > 0
 		mu.Unlock()
 	}
 	code, rest := stop()
@@ -604,13 +617,17 @@ func TestAnEnrolledAgentDeliversWhatItsSpoolHoldsAsItRuns(t *testing.T) {
 			components = append(components, entry["component"], entry["policy"])
 		}
 	}
-	if code != 0 || !slices.Equal(components, []any{"configuration", "essential", "collection", "optional", "renewal", "optional", "delivery", "essential", "status", "optional"}) {
+	if code != 0 || !slices.Equal(components, []any{"configuration", "essential", "collection", "optional", "renewal", "optional", "delivery", "essential", "reporting", "optional", "status", "optional"}) {
 		t.Fatalf("the agent exited with %d after running %v", code, components)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	if !slices.Equal(received, ids) || slices.ContainsFunc(agents, func(agent string) bool { return agent != "web-01" }) {
 		t.Fatalf("the platform received %v from %v", received, agents)
+	}
+	if len(reports) < 2 || reports[0].GetSequence() != 1 || reports[len(reports)-1].GetCondition() != agentv1.Status_CONDITION_STOPPED ||
+		reports[0].GetRun().GetPreviousEnding() != agentv1.Status_ENDING_NONE || reports[0].GetConfiguration().GetDigestSha256() == "" {
+		t.Fatalf("the platform was told %d reports, the first %+v", len(reports), reports[0])
 	}
 	opened, _ := logged(t, serveStopped(t, path), "spool_opened")
 	if events, _ := opened["events"].(map[string]any); events["outstanding"] != float64(0) || events["delivered"] != float64(3) {

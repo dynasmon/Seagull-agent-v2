@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	ErrLocked   = errors.New("another process holds the lock")
-	ErrTooLarge = errors.New("the file holds more than the agent reads of it")
+	ErrLocked      = errors.New("another process holds the lock")
+	ErrTooLarge    = errors.New("the file holds more than the agent reads of it")
+	ErrUnprotected = errors.New("an account other than root can change it")
 )
 
 // Read returns what the regular file at path holds, when that is at most most

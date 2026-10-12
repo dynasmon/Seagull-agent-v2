@@ -282,3 +282,16 @@ func keeping(kept []policy.Kept) string {
 	}
 	return "; its own configuration keeps " + strings.Join(written, ", ")
 }
+
+func (c *configuration) inForce() (string, uint64, time.Time) {
+	if c.policies == nil {
+		return "", 0, time.Time{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.policies.applied == nil {
+		return "", 0, time.Time{}
+	}
+	applied := c.policies.applied.Policy
+	return applied.GetPolicyId(), applied.GetRevision(), applied.GetExpiresAt().AsTime()
+}

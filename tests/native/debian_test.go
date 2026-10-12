@@ -106,6 +106,8 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "the agent watches the files it is told to, reads what only root reads once an operator lets it, and writes down what changes", run: g.files},
 		{name: "the agent watches what the host listens on and talks to, and sees other namespaces and who holds a socket once an operator lets it", run: g.sockets},
 		{name: "the agent runs on a policy an operator signed off the platform and refuses one nobody it trusts signed", run: g.policies},
+		{name: "the agent tells the platform how it runs and how the run before it ended", run: g.reports},
+		{name: "no account but root changes what decides the agent, and what root changes is told", run: g.tamper},
 		{name: "purging deletes the installation, its settings and the service's", run: g.purge},
 		{name: "installing after a purge makes a new installation", run: g.fresh},
 	} {
@@ -985,7 +987,7 @@ func snapshot(t *testing.T) map[string]string {
 		if err != nil {
 			return err
 		}
-		if path == filepath.Join(state, "status") {
+		if path == filepath.Join(state, "status") || path == filepath.Join(state, "reporting") {
 			return filepath.SkipDir
 		}
 		described, err := entry.Info()

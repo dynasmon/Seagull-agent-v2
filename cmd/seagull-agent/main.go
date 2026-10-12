@@ -35,10 +35,13 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/pki"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/ceilings"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dumps"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/machine"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
 	"github.com/dynasmon/Seagull-agent-v2/internal/policy"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/renewal"
+	"github.com/dynasmon/Seagull-agent-v2/internal/reporting"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
@@ -53,6 +56,7 @@ const (
 	spoolDirectory        = "spool"
 	statusDirectory       = "status"
 	collectionDirectory   = "collection"
+	reportingDirectory    = "reporting"
 	statusEvery           = 30 * time.Second
 )
 
@@ -141,6 +145,9 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	if err != nil {
 		return unstarted(stderr, path, err)
 	}
+	if err := guarded(path, settings); err != nil {
+		return unstarted(stderr, path, err)
+	}
 	level := new(slog.LevelVar)
 	logger := logging(stderr, settings, level)
 	apply(settings, level)
@@ -164,6 +171,12 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	defer installation.Close()
 	if installation.Created() {
 		logger.Info("installation_created", slog.String("installation_id", installation.ID()), slog.String("state", state))
+	}
+	boot, _ := machine.Boot()
+	left, unread := status.Read(filepath.Join(state, statusDirectory))
+	previous := status.Before(left, unread, boot)
+	if installation.Created() {
+		previous = status.Previous{Ending: status.EndingNone}
 	}
 	keys, err := openKeys(installation, settings.Identity.KeyProvider)
 	if err != nil {
@@ -214,7 +227,8 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 		return refused(err)
 	}
 	held.governor = governed
-	observed := &observing{began: began, path: path, state: state, installation: installation, spool: spooled, governor: governed, configuration: held}
+	observed := &observing{began: began, path: path, state: state, installation: installation, spool: spooled, governor: governed, configuration: held,
+		boot: boot, granted: holds(granted), previous: &previous}
 	collected, err := collect(installation, held.active, spooled, governed, logger, state)
 	if err != nil {
 		return refused(err)
@@ -276,6 +290,24 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 			composed = append(composed, agentruntime.Component{Name: "policy", Policy: agentruntime.Optional, Run: follower.Run})
 			observed.follower = follower
 		}
+		reports, err := installation.Directory(reportingDirectory)
+		if err != nil {
+			return refused(err)
+		}
+		reporter, err := reporting.New(reporting.Options{
+			Client:    client,
+			URL:       settings.Server.IngestURL,
+			Directory: reports,
+			Report:    observed.report,
+			Every:     func() time.Duration { return time.Duration(held.active.Settings().Reporting.Interval) },
+			Logger:    logger,
+			Recovery:  func(err error) string { return recovery(path, state, err) },
+		})
+		if err != nil {
+			return refused(err)
+		}
+		composed = append(composed, agentruntime.Component{Name: "reporting", Policy: agentruntime.Optional, Run: reporter.Run})
+		observed.reporter = reporter
 	}
 	kept, err := installation.Directory(statusDirectory)
 	if err != nil {
@@ -293,6 +325,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	}
 	trust(logger, chosen, unread)
 	logger.Info("agent_starting", started...)
+	resumed(logger, previous, left, unread == nil, observed.snapshot(), time.Now())
 	if err := agent.Run(ctx); err != nil {
 		keeper.Stopped("the agent stopped as it could not run on: " + err.Error())
 		logger.Error("agent_stopped", slog.Any("error", err))
@@ -329,6 +362,15 @@ func needed(settings config.Config) []string {
 		granted = append(granted, "CAP_SYS_PTRACE")
 	}
 	return granted
+}
+
+func holds(granted privileges.Privileges) *status.Privileges {
+	held := &status.Privileges{User: granted.User, Group: granted.Group, Groups: granted.Groups, Capabilities: []status.Text{},
+		NoNewPrivs: granted.NoNewPrivs, Seccomp: status.Text(granted.Seccomp)}
+	for _, capability := range granted.Capabilities {
+		held.Capabilities = append(held.Capabilities, status.Text(capability))
+	}
+	return held
 }
 
 func privileged(logger *slog.Logger, granted privileges.Privileges, needed []string) {
@@ -789,6 +831,9 @@ func backlog(logger *slog.Logger, held spool.Stats) {
 
 func check(path string, stdout, stderr io.Writer) int {
 	settings, err := config.Load(path)
+	if err == nil {
+		err = guarded(path, settings)
+	}
 	if err != nil {
 		return refuse(path, "", err, stderr)
 	}
@@ -1193,6 +1238,8 @@ func recovery(path, state string, err error) string {
 		return "publish a policy this agent release reads, signed as the contract describes"
 	case errors.Is(err, policy.ErrDamaged), errors.Is(err, policy.ErrNewer):
 		return "nothing: the agent runs on its configuration file alone, and applies the next policy the platform hands it, whatever revision it holds"
+	case errors.Is(err, files.ErrUnprotected):
+		return "let root alone own and change what the agent names here, and every directory above it, as the package installs them: the agent does not run on what any other account, its own included, could change"
 	case errors.Is(err, config.ErrInvalid):
 		return "correct " + path + ", which " + reading + " reads without starting the agent"
 	case errors.Is(err, config.ErrNewer):
@@ -1290,5 +1337,6 @@ func wireVersions() []wireVersion {
 		{name: "protocol_version", version: protocol.Version},
 		{name: "event_schema_version", version: protocol.EventSchemaVersion},
 		{name: "inventory_schema_version", version: protocol.InventorySchemaVersion},
+		{name: "status_schema_version", version: protocol.StatusSchemaVersion},
 	}
 }

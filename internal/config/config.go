@@ -84,6 +84,7 @@ type Config struct {
 	Logging   Logging   `json:"logging"`
 	Updates   Updates   `json:"updates"`
 	Policy    Policy    `json:"policy"`
+	Reporting Reporting `json:"reporting"`
 }
 
 // Where the installation lives and what holds its keys. It does not name the
@@ -181,6 +182,13 @@ type Policy struct {
 	Interval Duration `json:"interval"`
 }
 
+// How often the agent tells the platform how it runs. The platform judges how
+// late an agent is against the interval each report announces, so a long one
+// costs how soon an agent that stopped is noticed.
+type Reporting struct {
+	Interval Duration `json:"interval"`
+}
+
 func (l Logging) Severity() slog.Level { return levels[l.Level] }
 
 func defaults() Config {
@@ -205,8 +213,9 @@ func defaults() Config {
 			MaxConcurrentUploads:  1,
 			ShutdownTimeout:       Duration(10 * time.Second),
 		},
-		Logging: Logging{Level: "info", Format: JSONLogs},
-		Policy:  Policy{Interval: Duration(5 * time.Minute)},
+		Logging:   Logging{Level: "info", Format: JSONLogs},
+		Policy:    Policy{Interval: Duration(5 * time.Minute)},
+		Reporting: Reporting{Interval: Duration(time.Minute)},
 	}
 }
 
@@ -389,6 +398,7 @@ func (c *Config) validate() error {
 		c.Logging.validate(),
 		c.Updates.validate(),
 		c.Policy.validate(),
+		problems(duration("reporting.interval", c.Reporting.Interval, Duration(10*time.Second), Duration(time.Hour))),
 	)
 	if state := c.Identity.StateDirectory; filepath.IsAbs(state) {
 		for _, path := range c.Modules[watcher].Paths {

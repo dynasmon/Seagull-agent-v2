@@ -163,3 +163,18 @@ func TestThisHostIsDescribed(t *testing.T) {
 		t.Errorf("this host is made of %+v, %v", hardware, err)
 	}
 }
+
+func TestTheBootIsWhatTheKernelNamesIt(t *testing.T) {
+	proc, _ := hardwareAt(t)
+	if _, err := Boot(); !errors.Is(err, ErrUnreadable) {
+		t.Errorf("a host that names no boot answered %v", err)
+	}
+	place(t, filepath.Join(proc, "sys/kernel/random/boot_id"), "not a boot\n")
+	if _, err := Boot(); !errors.Is(err, ErrUnreadable) {
+		t.Errorf("a boot named otherwise than the kernel names one answered %v", err)
+	}
+	place(t, filepath.Join(proc, "sys/kernel/random/boot_id"), "5f0c4a59-0c1a-4a8e-8f53-1b2c3d4e5f60\n")
+	if boot, err := Boot(); err != nil || boot != "5f0c4a59-0c1a-4a8e-8f53-1b2c3d4e5f60" {
+		t.Errorf("the boot is %q: %v", boot, err)
+	}
+}
