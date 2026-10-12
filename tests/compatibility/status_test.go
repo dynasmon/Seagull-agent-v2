@@ -91,7 +91,7 @@ func TestEveryReportTheInstalledAgentSentIsOneThePlatformAdmits(t *testing.T) {
 
 func TestWhatARecordedPlatformAnswersTheStatusOfAnInstalledAgentIsWhatTheAgentReads(t *testing.T) {
 	_, batches := statusTold(t)
-	for _, recorded := range statusRecordings(t) {
+	for _, recorded := range statusRecordings(t, "status.json") {
 		t.Run(filepath.Base(recorded.directory), func(t *testing.T) {
 			accepted, refusals := 0, map[string]bool{}
 			for _, sent := range recorded.Exchanges {
@@ -131,6 +131,73 @@ func TestWhatARecordedPlatformAnswersTheStatusOfAnInstalledAgentIsWhatTheAgentRe
 				if !refusals[name] {
 					t.Errorf("no %s was recorded", name)
 				}
+			}
+		})
+	}
+}
+
+// What the installed agent reported while it was updated to a signed release
+// and back from one that did not run, and what a recorded platform answered.
+type updatesScenario struct {
+	RecordedAt     time.Time `json:"recorded_at"`
+	InstallationID string    `json:"installation_id"`
+	AgentID        string    `json:"agent_id"`
+	Reports        []struct {
+		Batch    string `json:"batch"`
+		Sequence uint64 `json:"sequence"`
+		Stage    string `json:"stage"`
+		Version  string `json:"version"`
+		Failure  string `json:"failure"`
+	} `json:"reports"`
+}
+
+func TestARecordedPlatformAdmitsWhatTheInstalledAgentReportedOfItsUpdates(t *testing.T) {
+	scenario, batches := updatesTold(t)
+	stages := map[agentv1.Status_Update_Stage]bool{}
+	var last uint64
+	for index, batch := range batches {
+		var held agentv1.StatusBatch
+		if err := proto.Unmarshal(batch, &held); err != nil || len(held.GetReports()) != 1 {
+			t.Fatalf("report %d is not one batch of one report: %v", index, err)
+		}
+		report, told := held.GetReports()[0], scenario.Reports[index]
+		update := report.GetUpdate()
+		if err := protocol.CheckStatus(report); err != nil || report.GetInstallationId() != scenario.InstallationID || report.GetSequence() <= last ||
+			update.GetStage().String() != told.Stage || update.GetVersion() != told.Version || update.GetFailure().String() != told.Failure {
+			t.Errorf("report %d says %v of its update as sequence %d after %d: %v", index, update, report.GetSequence(), last, err)
+		}
+		stages[update.GetStage()] = true
+		last = report.GetSequence()
+	}
+	if !stages[agentv1.Status_Update_STAGE_INSTALLED] || !stages[agentv1.Status_Update_STAGE_ROLLED_BACK] {
+		t.Errorf("the installed agent reported no update both installed and gone back from: %v", stages)
+	}
+	for _, recorded := range statusRecordings(t, "update-status.json") {
+		t.Run(filepath.Base(recorded.directory), func(t *testing.T) {
+			accepted := 0
+			for _, sent := range recorded.Exchanges {
+				index := 0
+				if _, err := fmt.Sscanf(sent.Name, "update-status-%03d", &index); err != nil || index >= len(batches) {
+					t.Fatalf("nothing says what the agent does after %s", sent.Name)
+				}
+				request, reply := recorded.read(t, sent.Name+".request.pb"), recorded.read(t, sent.Name+".reply.pb")
+				if !bytes.Equal(request, batches[index]) {
+					t.Errorf("%s is not what the installed agent sent", sent.Name)
+				}
+				records := protocol.Status.Records(request)
+				var report agentv1.Status
+				if len(records) != 1 || proto.Unmarshal(records[0], &report) != nil {
+					t.Fatalf("%s holds no report the agent reads", sent.Name)
+				}
+				verdict := protocol.Status.Judge([]protocol.Sent{{Record: records[0], Admitted: report.GetReportedAt().AsTime()}},
+					protocol.Answer{Status: sent.Status, ContentType: protocol.ContentType, Body: reply, Date: recorded.RecordedAt})
+				if verdict.Outcome != protocol.Durable {
+					t.Errorf("%s, answered %d, reads as %s: %v", sent.Name, sent.Status, verdict.Outcome, verdict.Reason)
+				}
+				accepted++
+			}
+			if accepted != len(batches) {
+				t.Errorf("%d of the %d reports the agent sent of its updates were recorded", accepted, len(batches))
 			}
 		})
 	}
@@ -190,11 +257,34 @@ func statusTold(t *testing.T) (statusScenario, [][]byte) {
 	return scenario, batches
 }
 
-func statusRecordings(t *testing.T) []statusRecording {
+func updatesTold(t *testing.T) (updatesScenario, [][]byte) {
 	t.Helper()
-	manifests, err := filepath.Glob(filepath.Join("testdata", "*", "status.json"))
+	var scenario updatesScenario
+	content, err := os.ReadFile(filepath.Join("testdata", "update-status", "scenario.json"))
+	if err == nil {
+		decoder := json.NewDecoder(bytes.NewReader(content))
+		decoder.DisallowUnknownFields()
+		err = decoder.Decode(&scenario)
+	}
+	if err != nil || len(scenario.Reports) == 0 {
+		t.Fatalf("read what the installed agent reported of its updates: %v", err)
+	}
+	batches := make([][]byte, 0, len(scenario.Reports))
+	for _, report := range scenario.Reports {
+		batch, err := os.ReadFile(filepath.Join("testdata", "update-status", report.Batch))
+		if err != nil {
+			t.Fatal(err)
+		}
+		batches = append(batches, batch)
+	}
+	return scenario, batches
+}
+
+func statusRecordings(t *testing.T, named string) []statusRecording {
+	t.Helper()
+	manifests, err := filepath.Glob(filepath.Join("testdata", "*", named))
 	if err != nil || len(manifests) == 0 {
-		t.Fatalf("no platform was recorded answering what the agent reported: %v", err)
+		t.Fatalf("no platform was recorded answering what the agent reported in %s: %v", named, err)
 	}
 	var found []statusRecording
 	for _, manifest := range manifests {
