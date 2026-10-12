@@ -218,6 +218,9 @@ func (c *Client) send(ctx context.Context, method string, request Request) (Repl
 			return Reply{}, fmt.Errorf("%w: %s answered with more than %d bytes", ErrReplyTooLarge, target.Redacted(), most)
 		}
 	} else {
+		if request.Into != nil {
+			most = c.options.MaxResponseBytes
+		}
 		content, err = io.ReadAll(io.LimitReader(response.Body, most+1))
 		if err != nil {
 			return Reply{}, failure(ctx, target, true, err)
