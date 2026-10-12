@@ -10,6 +10,8 @@ import (
 	"runtime"
 )
 
+const NoFollow = 0
+
 func Lock(file *os.File) error {
 	return fmt.Errorf("lock %s on %s: %w", file.Name(), runtime.GOOS, errors.ErrUnsupported)
 }
