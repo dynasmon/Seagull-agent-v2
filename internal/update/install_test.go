@@ -320,3 +320,32 @@ func TestAnInstallationThatCannotGoBackEitherEndsFailedAndSaysWhy(t *testing.T) 
 		})
 	}
 }
+
+func TestAnInstallerWithNoStagingAreaStillTakesAnInterruptedInstallationToItsEnd(t *testing.T) {
+	land := newEstate(t)
+	installing := land.installing(t, "v0.3.0")
+	staging := update.OpenStaging(installing.staged)
+	for _, content := range [][]byte{installing.current, installing.next} {
+		if err := staging.Take(releaseFor("staged", content), installing.held); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := update.KeepJournal(installing.held, update.Journal{Stage: update.Checking, Version: "v0.3.0", Previous: "v0.2.0", PreviousState: 1,
+		Target: update.PackageName(digest(installing.next)), Fallback: update.PackageName(digest(installing.current)), Started: written, Since: written}); err != nil {
+		t.Fatal(err)
+	}
+	installer, err := update.NewInstaller(update.InstallerOptions{
+		Directory: installing.held, Anchor: land.anchor, Running: running("v0.2.0"),
+		Generation: func() uint32 { return 1 }, Packages: installing.manager, Health: installing.health.check,
+		Logger: slog.New(slog.NewJSONHandler(io.Discard, nil)), Now: func() time.Time { return written },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.Run(t.Context()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if journal := installing.journal(t); journal.Stage != update.Installed {
+		t.Fatalf("an installer with no staging area ended at %+v", journal)
+	}
+}
