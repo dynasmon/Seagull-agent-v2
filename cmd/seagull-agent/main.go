@@ -71,6 +71,7 @@ const usage = `Usage:
   seagull-agent -config FILE installation replace         replace the installation with a new one that is not enrolled
   seagull-agent -config FILE status                       print what the agent last said of itself, and exit with 0 only while it runs as it should
   seagull-agent -config FILE diagnostics BUNDLE           write what helps troubleshoot the agent, and nothing that authenticates it, into the new file BUNDLE
+  seagull-agent -config FILE update install               install the release the agent staged, as root from seagull-agent-update.service, and exit
   seagull-agent -version                                  print the build identity and the wire versions it speaks, and exit
 
 A running agent reads its configuration again when it receives SIGHUP, and
@@ -125,6 +126,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return replace(*path, stdout, stderr)
 	case configured && slices.Equal(flags.Args(), []string{"status"}):
 		return report(*path, stdout, stderr)
+	case configured && slices.Equal(flags.Args(), []string{"update", "install"}):
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return installRelease(ctx, *path, stderr)
 	case configured && flags.NArg() == 2 && flags.Arg(0) == "diagnostics":
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
@@ -308,6 +313,15 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 		}
 		composed = append(composed, agentruntime.Component{Name: "reporting", Policy: agentruntime.Optional, Run: reporter.Run})
 		observed.reporter = reporter
+		if settings.Updates.Enabled {
+			follower, err := followUpdates(installation, settings, client, func() time.Duration { return time.Duration(held.active.Settings().Updates.Interval) },
+				logger, func(err error) string { return recovery(path, state, err) })
+			if err != nil {
+				return refused(err)
+			}
+			composed = append(composed, agentruntime.Component{Name: "update", Policy: agentruntime.Optional, Run: follower.Run})
+			observed.updater = follower
+		}
 	}
 	kept, err := installation.Directory(statusDirectory)
 	if err != nil {
