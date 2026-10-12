@@ -15,12 +15,13 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"regexp"
 	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/deb"
 )
 
 //go:embed linux deb
@@ -33,7 +34,6 @@ const (
 	maintainer  = "Nathan <nathanmblima@gmail.com>"
 	homepage    = "https://github.com/dynasmon/Seagull-agent-v2"
 	depends     = "systemd (>= 254), procps"
-	revision    = "1"
 	agentPath   = "usr/bin/seagull-agent"
 )
 
@@ -60,8 +60,6 @@ var architectures = map[string]struct{ setting, baseline string }{
 	"amd64": {setting: "GOAMD64", baseline: "v1"},
 	"arm64": {setting: "GOARM64", baseline: "v8.0"},
 }
-
-var semantic = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
 
 type release struct {
 	version      string
@@ -132,7 +130,7 @@ func describe(built *debug.BuildInfo) (release, error) {
 	case settings["vcs.modified"] != "false":
 		return release{}, errors.New("it was built from changes no commit holds")
 	}
-	version, err := debianVersion(built.Main.Version)
+	version, err := deb.Version(built.Main.Version)
 	if err != nil {
 		return release{}, err
 	}
@@ -146,18 +144,6 @@ func describe(built *debug.BuildInfo) (release, error) {
 // The version dpkg orders packages by. A pre-release, which is what the
 // pseudo-version of a commit is too, follows a tilde, so dpkg sorts it before
 // the release it leads to, as Go does.
-func debianVersion(stamped string) (string, error) {
-	parts := semantic.FindStringSubmatch(stamped)
-	if parts == nil {
-		return "", fmt.Errorf("it was built as %q, which names no release or commit of the agent", stamped)
-	}
-	upstream := strings.Join(parts[1:4], ".")
-	if parts[4] != "" {
-		upstream += "~" + strings.ReplaceAll(parts[4], "-", ".")
-	}
-	return upstream + "-" + revision, nil
-}
-
 // The package holds the same bytes whenever the same commit is packaged: every
 // file and directory has the mode given here whatever the umask, root owns
 // them, and dpkg-deb dates them no later than the commit.

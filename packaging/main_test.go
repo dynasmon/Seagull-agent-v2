@@ -29,51 +29,6 @@ import (
 
 var committed = time.Date(2026, 9, 26, 0, 43, 46, 0, time.UTC)
 
-func TestAPackageIsVersionedAsGoStampedTheAgent(t *testing.T) {
-	versioned := map[string]string{
-		"v0.1.0":                               "0.1.0-1",
-		"v1.2.3-rc.1":                          "1.2.3~rc.1-1",
-		"v0.0.0-20260926004346-7d7db5969ad5":   "0.0.0~20260926004346.7d7db5969ad5-1",
-		"v0.1.1-0.20260926004346-7d7db5969ad5": "0.1.1~0.20260926004346.7d7db5969ad5-1",
-	}
-	for stamped, want := range versioned {
-		if got, err := debianVersion(stamped); err != nil || got != want {
-			t.Errorf("an agent built as %s is packaged as %q (%v), want %q", stamped, got, err, want)
-		}
-	}
-	for _, stamped := range []string{"", "(devel)", "v0.0.0-20260926004346-7d7db5969ad5+dirty", "0.1.0", "v0.1", "v01.2.3", "v1.2.3-", "v1.2.3-rc..1"} {
-		if got, err := debianVersion(stamped); err == nil {
-			t.Errorf("an agent built as %q is packaged as %q", stamped, got)
-		}
-	}
-}
-
-func TestDpkgOrdersPackagesAsGoOrdersTheVersionsOfTheirAgents(t *testing.T) {
-	if _, err := exec.LookPath("dpkg"); err != nil {
-		t.Skip("dpkg compares Debian versions, and this host has none")
-	}
-	ascending := []string{
-		"v0.0.0-20260101000000-aaaaaaaaaaaa",
-		"v0.0.0-20260201000000-000000000000",
-		"v0.1.0-rc.1",
-		"v0.1.0-rc.2",
-		"v0.1.0",
-		"v0.1.1-0.20260301000000-bbbbbbbbbbbb",
-		"v0.1.1",
-		"v0.10.0",
-		"v1.0.0-beta",
-		"v1.0.0",
-	}
-	for i := 1; i < len(ascending); i++ {
-		older, _ := debianVersion(ascending[i-1])
-		newer, _ := debianVersion(ascending[i])
-		if err := exec.Command("dpkg", "--compare-versions", older, "lt", newer).Run(); err != nil {
-			t.Errorf("dpkg does not order %s (%s) before %s (%s): upgrading from one to the other would go backwards",
-				older, ascending[i-1], newer, ascending[i])
-		}
-	}
-}
-
 func TestOnlyAPortableLinuxBuildOfACommitIsPackaged(t *testing.T) {
 	want := release{version: "0.0.0~20260926004346.7d7db5969ad5-1", architecture: "amd64", committed: committed}
 	if described, err := describe(built(nil)); err != nil || described != want {
