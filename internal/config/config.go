@@ -37,18 +37,19 @@ const (
 )
 
 const (
-	maxConfigBytes  = 64 << 10
-	maxBundleBytes  = 1 << 20
-	maxCertificates = 64
-	maxSignersBytes = 64 << 10
-	maxSigners      = 64
-	maxPathBytes    = 4 << 10
-	batchesSpooled  = 4
-	maxGroups       = 8
-	maxWatchedPaths = 64
-	maxExcluded     = 256
-	maxNameBytes    = 255
-	watcher         = "files"
+	maxConfigBytes     = 64 << 10
+	maxBundleBytes     = 1 << 20
+	maxCertificates    = 64
+	maxSignersBytes    = 64 << 10
+	maxUpdateRootBytes = 1088 << 10
+	maxSigners         = 64
+	maxPathBytes       = 4 << 10
+	batchesSpooled     = 4
+	maxGroups          = 8
+	maxWatchedPaths    = 64
+	maxExcluded        = 256
+	maxNameBytes       = 255
+	watcher            = "files"
 )
 
 var (
@@ -173,8 +174,14 @@ type Logging struct {
 	Format string `json:"format"`
 }
 
+// Whether the agent installs the releases the platform hands it, and the root
+// every release is verified under. The root is provisioned out of band, the way
+// the trust in the platform is, and only root may change it: whoever does
+// decides which releases the agent installs.
 type Updates struct {
-	Enabled bool `json:"enabled"`
+	Enabled  bool     `json:"enabled"`
+	Root     string   `json:"root"`
+	Interval Duration `json:"interval"`
 }
 
 type Policy struct {
@@ -214,6 +221,7 @@ func defaults() Config {
 			ShutdownTimeout:       Duration(10 * time.Second),
 		},
 		Logging:   Logging{Level: "info", Format: JSONLogs},
+		Updates:   Updates{Interval: Duration(15 * time.Minute)},
 		Policy:    Policy{Interval: Duration(5 * time.Minute)},
 		Reporting: Reporting{Interval: Duration(time.Minute)},
 	}
@@ -577,10 +585,28 @@ func (l *Logging) validate() []error {
 }
 
 func (u *Updates) validate() []error {
-	if u.Enabled {
-		return []error{errors.New("updates.enabled is true, and this build installs no update")}
+	found := problems(duration("updates.interval", u.Interval, Duration(time.Minute), Duration(24*time.Hour)))
+	switch {
+	case u.Enabled && u.Root == "":
+		found = append(found, errors.New("updates.enabled is true, and updates.root names no root to verify a release under"))
+	case u.Root != "":
+		if _, err := updateRoot("updates.root", u.Root); err != nil {
+			found = append(found, err)
+		}
 	}
-	return nil
+	return found
+}
+
+func (u Updates) Anchor() ([]byte, error) {
+	if u.Root == "" {
+		return nil, nil
+	}
+	return updateRoot("updates.root", u.Root)
+}
+
+func updateRoot(name, path string) ([]byte, error) {
+	return trustedFile(name, path, "the update root a release is verified under",
+		"/etc/seagull-agent/update-root.pb", "which releases the agent installs", maxUpdateRootBytes)
 }
 
 func (p *Policy) validate() []error {

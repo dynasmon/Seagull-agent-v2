@@ -58,7 +58,7 @@ func TestTheSettingsTheFileLeavesOutAreTheOnesTheAgentDocuments(t *testing.T) {
 			ShutdownTimeout:       config.Duration(10 * time.Second),
 		},
 		Logging:   config.Logging{Level: "info", Format: "json"},
-		Updates:   config.Updates{Enabled: false},
+		Updates:   config.Updates{Enabled: false, Interval: config.Duration(15 * time.Minute)},
 		Policy:    config.Policy{Interval: config.Duration(5 * time.Minute)},
 		Reporting: config.Reporting{Interval: config.Duration(time.Minute)},
 	}
@@ -367,10 +367,10 @@ func TestAConfigurationWrittenForAnotherReleaseIsRefusedRatherThanGuessed(t *tes
 	}
 }
 
-func TestThisBuildConfiguresTheCollectorItHasAndInstallsNoUpdate(t *testing.T) {
+func TestThisBuildConfiguresTheCollectorItHasAndUpdatesOnlyUnderARoot(t *testing.T) {
 	for name, sections := range map[string]map[string]string{
-		"a collector it does not have": {"modules": `{"auth": {"enabled": true}}`},
-		"an update it cannot install":  {"updates": `{"enabled": true}`},
+		"a collector it does not have":              {"modules": `{"auth": {"enabled": true}}`},
+		"an update with no root to verify it under": {"updates": `{"enabled": true}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := config.Load(configured(t, sections))
@@ -379,6 +379,9 @@ func TestThisBuildConfiguresTheCollectorItHasAndInstallsNoUpdate(t *testing.T) {
 			}
 			if name == "a collector it does not have" && !strings.Contains(err.Error(), "modules.auth is configured, and this build collects with authentication") {
 				t.Errorf("the refusal does not name the collector this build has: %v", err)
+			}
+			if name != "a collector it does not have" && !strings.Contains(err.Error(), "updates.root") {
+				t.Errorf("the refusal does not name the root an update is verified under: %v", err)
 			}
 		})
 	}
@@ -839,6 +842,45 @@ func TestAPolicyIsAcceptedUnderTheP256KeysTheSignersFileHoldsAndNothingElse(t *t
 	}
 	if _, err := config.Load(configured(t, map[string]string{"policy": `{"signers": "policy-signers.pem"}`})); !errors.Is(err, config.ErrInvalid) {
 		t.Fatalf("a relative signers path was judged %v", err)
+	}
+}
+
+func TestAnUpdateIsVerifiedUnderARootOnlyRootMayChange(t *testing.T) {
+	root := write(t, trusted(t), "update-root.pb", "the envelope of a root")
+	settings, err := config.Load(configured(t, map[string]string{"updates": fmt.Sprintf(`{"enabled": true, "root": %q, "interval": "1h"}`, root)}))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	held, err := settings.Updates.Anchor()
+	if err != nil || string(held) != "the envelope of a root" || settings.Updates.Interval != config.Duration(time.Hour) {
+		t.Fatalf("the root was read as %q every %s: %v", held, settings.Updates.Interval, err)
+	}
+	unconfigured, err := config.Load(configured(t, nil))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if held, err := unconfigured.Updates.Anchor(); err != nil || held != nil {
+		t.Fatalf("a configuration naming no root holds %q: %v", held, err)
+	}
+
+	exposed := write(t, trusted(t), "update-root.pb", "the envelope of a root")
+	if err := os.Chmod(exposed, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	for name, refused := range map[string]struct {
+		updates, says string
+	}{
+		"a root another account can change": {fmt.Sprintf(`{"enabled": true, "root": %q}`, exposed), "which releases the agent installs"},
+		"a root that is not there":          {fmt.Sprintf(`{"enabled": true, "root": %q}`, filepath.Join(trusted(t), "absent.pb")), "there is no such file"},
+		"a relative root":                   {`{"enabled": true, "root": "update-root.pb"}`, "updates.root"},
+		"asking every 59 seconds":           {`{"interval": "59s"}`, "updates.interval"},
+		"asking every 25 hours":             {`{"interval": "25h"}`, "updates.interval"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := config.Load(configured(t, map[string]string{"updates": refused.updates})); !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), refused.says) {
+				t.Fatalf("judged %v", err)
+			}
+		})
 	}
 }
 
