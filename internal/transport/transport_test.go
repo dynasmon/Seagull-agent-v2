@@ -929,3 +929,67 @@ func TestARequestBoundsItsReplyOtherThanTheTransportDoes(t *testing.T) {
 		t.Fatalf("a reply within the request's bound, above the transport's, returned %d bytes and %v", len(reply.Body), err)
 	}
 }
+
+func TestASuccessfulReplyIsWrittenWhereTheCallerKeepsItAndARefusalIsHeld(t *testing.T) {
+	agents := authorityNamed(t, "Seagull agents")
+	content := bytes.Repeat([]byte("p"), 160<<10)
+	listener := serve(t, authorityNamed(t, "Seagull platform"), agents, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/agents/update/packages/absent" {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("no such package"))
+			return
+		}
+		w.Write(content)
+	})
+	key := agentKey(t)
+	client := compose(t, listener.trusted, &held{credential: transport.Credential{Chain: agents.agent(t, "web-01", key.Public()), Signer: key}})
+
+	var kept bytes.Buffer
+	reply, err := client.Get(t.Context(), transport.Request{URL: listener.URL + "/v1/agents/update/packages/present", Most: 256 << 10, Into: &kept})
+	if err != nil || reply.Status != http.StatusOK || len(reply.Body) != 0 || !bytes.Equal(kept.Bytes(), content) {
+		t.Fatalf("a package beyond the transport's own bound was answered %d with %d bytes held and %d kept: %v", reply.Status, len(reply.Body), kept.Len(), err)
+	}
+
+	kept.Reset()
+	reply, err = client.Get(t.Context(), transport.Request{URL: listener.URL + "/v1/agents/update/packages/absent", Most: 256 << 10, Into: &kept})
+	if err != nil || reply.Status != http.StatusNotFound || string(reply.Body) != "no such package" || kept.Len() != 0 {
+		t.Fatalf("a refusal was answered %d with %q held and %d bytes kept: %v", reply.Status, reply.Body, kept.Len(), err)
+	}
+
+	if _, err := client.Get(t.Context(), transport.Request{URL: listener.URL + "/v1/agents/update/packages/present", Most: 1 << 10, Into: io.Discard}); !errors.Is(err, transport.ErrReplyTooLarge) {
+		t.Fatalf("a reply written elsewhere was read past its bound: %v", err)
+	}
+}
+
+type refusing struct{}
+
+func (refusing) Write([]byte) (int, error) { return 0, errors.New("no space left on device") }
+
+func TestAReplyThatCannotBeKeptIsNotAFailureOfThePlatform(t *testing.T) {
+	agents := authorityNamed(t, "Seagull agents")
+	listener := serve(t, authorityNamed(t, "Seagull platform"), agents, func(w http.ResponseWriter, r *http.Request) {
+		w.Write(bytes.Repeat([]byte("p"), 4<<10))
+	})
+	key := agentKey(t)
+	client := compose(t, listener.trusted, &held{credential: transport.Credential{Chain: agents.agent(t, "web-01", key.Public()), Signer: key}})
+
+	_, err := client.Get(t.Context(), transport.Request{URL: listener.URL + "/v1/agents/update/packages/present", Most: 8 << 10, Into: refusing{}})
+	if !errors.Is(err, transport.ErrUnwritten) || errors.Is(err, transport.ErrUnanswered) || errors.Is(err, transport.ErrUnreachable) {
+		t.Fatalf("a write that failed was reported as %v", err)
+	}
+}
+
+func TestARequestMayTakeLongerThanTheTransportWaits(t *testing.T) {
+	agents := authorityNamed(t, "Seagull agents")
+	listener := serve(t, authorityNamed(t, "Seagull platform"), agents, func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2500 * time.Millisecond)
+		w.Write([]byte("slow"))
+	})
+	key := agentKey(t)
+	client := compose(t, listener.trusted, &held{credential: transport.Credential{Chain: agents.agent(t, "web-01", key.Public()), Signer: key}})
+
+	reply, err := client.Get(t.Context(), transport.Request{URL: listener.URL + "/v1/agents/update/packages/slow", Within: 5 * time.Second})
+	if err != nil || string(reply.Body) != "slow" {
+		t.Fatalf("a request given longer than the transport waits returned %q: %v", reply.Body, err)
+	}
+}
