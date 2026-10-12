@@ -46,6 +46,8 @@ type Request struct {
 	Length      int64
 	Unchanged   string
 	Most        int64
+	Into        io.Writer
+	Within      time.Duration
 }
 
 type Reply struct {
@@ -160,7 +162,9 @@ func anchors(authorities []*x509.Certificate) (*x509.CertPool, error) {
 // sent without a usable credential, and nothing is sent to a platform the
 // agent did not authenticate. Neither follows a redirect. A request may name
 // what the agent already holds, so the platform can answer that nothing
-// changed, and may bound its reply other than the transport does.
+// changed, may bound its reply other than the transport does, may be given
+// longer than the transport waits, and may have a successful reply written
+// where the caller keeps it rather than held whole.
 func (c *Client) Post(ctx context.Context, request Request) (Reply, error) {
 	return c.send(ctx, http.MethodPost, request)
 }
@@ -177,7 +181,7 @@ func (c *Client) send(ctx context.Context, method string, request Request) (Repl
 	if err := c.present(); err != nil {
 		return Reply{}, err
 	}
-	bounded, cancel := context.WithTimeout(ctx, c.options.RequestTimeout)
+	bounded, cancel := context.WithTimeout(ctx, max(c.options.RequestTimeout, request.Within))
 	defer cancel()
 	var connected atomic.Bool
 	traced := httptrace.WithClientTrace(bounded, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
@@ -201,12 +205,26 @@ func (c *Client) send(ctx context.Context, method string, request Request) (Repl
 	if request.Most > 0 {
 		most = request.Most
 	}
-	content, err := io.ReadAll(io.LimitReader(response.Body, most+1))
-	if err != nil {
-		return Reply{}, failure(ctx, target, true, err)
-	}
-	if int64(len(content)) > most {
-		return Reply{}, fmt.Errorf("%w: %s answered with more than %d bytes", ErrReplyTooLarge, target.Redacted(), most)
+	var content []byte
+	if request.Into != nil && response.StatusCode == http.StatusOK {
+		kept := &writing{into: request.Into}
+		copied, err := io.Copy(kept, io.LimitReader(response.Body, most+1))
+		switch {
+		case kept.err != nil:
+			return Reply{}, fmt.Errorf("%w: %v", ErrUnwritten, kept.err)
+		case err != nil:
+			return Reply{}, failure(ctx, target, true, err)
+		case copied > most:
+			return Reply{}, fmt.Errorf("%w: %s answered with more than %d bytes", ErrReplyTooLarge, target.Redacted(), most)
+		}
+	} else {
+		content, err = io.ReadAll(io.LimitReader(response.Body, most+1))
+		if err != nil {
+			return Reply{}, failure(ctx, target, true, err)
+		}
+		if int64(len(content)) > most {
+			return Reply{}, fmt.Errorf("%w: %s answered with more than %d bytes", ErrReplyTooLarge, target.Redacted(), most)
+		}
 	}
 	var peer []*x509.Certificate
 	if response.TLS != nil {
@@ -309,4 +327,17 @@ func reachable(target *url.URL) string {
 		return net.JoinHostPort(target.Hostname(), "443")
 	}
 	return target.Host
+}
+
+type writing struct {
+	into io.Writer
+	err  error
+}
+
+func (w *writing) Write(written []byte) (int, error) {
+	count, err := w.into.Write(written)
+	if err != nil && w.err == nil {
+		w.err = err
+	}
+	return count, err
 }

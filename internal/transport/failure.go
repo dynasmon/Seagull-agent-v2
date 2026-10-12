@@ -20,6 +20,7 @@ var (
 	ErrUnreachable     = errors.New("the platform could not be reached")
 	ErrUnanswered      = errors.New("the platform took the request and did not answer it")
 	ErrReplyTooLarge   = errors.New("the platform's reply is larger than the agent reads")
+	ErrUnwritten       = errors.New("what the platform answered could not be written where the agent keeps it")
 )
 
 // What the platform aborts a handshake with when it does not accept the
