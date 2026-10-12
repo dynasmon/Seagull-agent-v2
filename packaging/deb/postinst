@@ -6,13 +6,17 @@ if [ "$1" = configure ]; then
 	systemd-tmpfiles --create seagull-agent.conf
 fi
 
-# A first installation starts nothing: the agent runs once an operator has
-# configured and enrolled it and enabled the service. An upgrade, or a
-# reinstallation after a removal, restarts a service that is enabled or running.
+# A first installation starts nothing but the watch on what the agent stages,
+# which installs nothing until an operator enables updates: the agent runs once
+# an operator has configured and enrolled it and enabled the service. An
+# upgrade, or a reinstallation after a removal, restarts a service that is
+# enabled or running.
 if [ -d /run/systemd/system ]; then
 	case "$1" in
 	configure | abort-upgrade | abort-deconfigure | abort-remove)
 		systemctl --system daemon-reload >/dev/null || true
+		systemctl --system enable seagull-agent-update.path >/dev/null 2>&1 || true
+		deb-systemd-invoke start seagull-agent-update.path >/dev/null || true
 		if [ -n "$2" ]; then
 			deb-systemd-invoke restart seagull-agent.service >/dev/null || true
 		fi
