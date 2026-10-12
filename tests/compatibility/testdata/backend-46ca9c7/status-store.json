@@ -1,0 +1,28 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "46ca9c7edd60a4812c516fa307b443d2364c241b",
+    "contracts": "v0.16.0",
+    "broker": "redpandadata/redpanda:v24.2.20",
+    "store": "clickhouse/clickhouse-server:24.8"
+  },
+  "recorded_at": "2026-10-12T16:10:49.573882862Z",
+  "alone": {
+    "admitted": 53,
+    "current_rows": 1,
+    "sequence": 53,
+    "condition": "CONDITION_STOPPED",
+    "previous_ending": "ENDING_INTERRUPTED",
+    "installation_id": "132eafc2-d974-4153-afa8-7ae6dbec6a2b",
+    "liveness": "LIVENESS_STOPPED"
+  },
+  "replayed": {
+    "admitted": 106,
+    "current_rows": 1,
+    "sequence": 53,
+    "condition": "CONDITION_STOPPED",
+    "previous_ending": "ENDING_INTERRUPTED",
+    "installation_id": "132eafc2-d974-4153-afa8-7ae6dbec6a2b",
+    "liveness": "LIVENESS_STOPPED"
+  }
+}
