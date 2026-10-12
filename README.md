@@ -420,8 +420,9 @@ agent's identity, and a copied key is revoked with its agent.
 
 ## Compatibility
 
-This build speaks protocol 1, event schema 1 and inventory schema 1, as
-`seagull-agent -version` prints, from the contracts release `go.mod` pins. The
+This build speaks protocol 1, event schema 1, inventory schema 1 and status
+schema 1, as `seagull-agent -version` prints, and reads update metadata of
+schema 1, from the contracts release `go.mod` pins. The
 agent negotiates nothing before it sends; the platform's answer to a batch is
 where it learns what the platform accepts. A refused version, or a refused value
 its contracts declare, is an incompatibility that holds the records rather than
@@ -431,10 +432,12 @@ fields the contracts do not declare are ignored.
 
 Compatibility is claimed only with the backend commits recorded under
 [`tests/compatibility/testdata`](tests/compatibility/testdata): 6fae345, 2829b0d,
-0656b2a, fdd814d and 46ca9c7, whose ingest gateway, control plane and pipeline
-were driven with what this agent sends; fdd814d and 46ca9c7 also handed it the
-signed policies it applies, and 46ca9c7 took and kept the status reports an
-installed agent sent in the native gate. The suite fails when `go.mod` pins contracts no recorded platform was
+0656b2a, fdd814d, 46ca9c7 and 6b85c4b, whose ingest gateway, control plane and
+pipeline were driven with what this agent sends; fdd814d, 46ca9c7 and 6b85c4b
+also handed it the signed policies it applies, 46ca9c7 and 6b85c4b took and kept
+the status reports an installed agent sent in the native gate, and 6b85c4b
+handed it the signed releases it installs and took what it reported while it was
+updated. The suite fails when `go.mod` pins contracts no recorded platform was
 built with, or when a recorded answer reads differently.
 
 ## Build and test
