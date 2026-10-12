@@ -107,6 +107,7 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "the agent watches what the host listens on and talks to, and sees other namespaces and who holds a socket once an operator lets it", run: g.sockets},
 		{name: "the agent runs on a policy an operator signed off the platform and refuses one nobody it trusts signed", run: g.policies},
 		{name: "the agent tells the platform how it runs and how the run before it ended", run: g.reports},
+		{name: "the agent runs the signed release the platform asks for, installed as root, and goes back from one that does not run", run: g.updates},
 		{name: "no account but root changes what decides the agent, and what root changes is told", run: g.tamper},
 		{name: "purging deletes the installation, its settings and the service's", run: g.purge},
 		{name: "installing after a purge makes a new installation", run: g.fresh},
@@ -134,6 +135,7 @@ type gate struct {
 	running      bool
 	listening    bool
 	debugging    bool
+	updating     bool
 	watching     []string
 	excluded     []string
 	signers      string
@@ -153,7 +155,7 @@ func open(t *testing.T) *gate {
 	if status, _ := exec.Command("dpkg-query", "--show", "--showformat=${db:Status-Status}", packageName).Output(); len(status) > 0 && string(status) != "not-installed" {
 		t.Fatalf("%s is %s on this host: the gate purges what it installs, so it runs only where it is not", packageName, status)
 	}
-	for _, left := range []string{state, settingsDir, overrides} {
+	for _, left := range []string{state, settingsDir, overrides, installerState} {
 		if _, err := os.Lstat(left); err == nil {
 			t.Fatalf("%s exists on this host: the gate purges it, so remove it first", left)
 		}
@@ -198,6 +200,12 @@ func (g *gate) install(t *testing.T) {
 	owns(t, settingsDir, 0, 0, fs.ModeDir|0o755)
 	if enabled, active := answer("systemctl", "is-enabled", unit), answer("systemctl", "is-active", unit); enabled != "disabled" || active != "inactive" {
 		t.Errorf("a first installation leaves the service %s and %s, and it starts nothing until an operator enables it", enabled, active)
+	}
+	if enabled, active := answer("systemctl", "is-enabled", watchUnit), answer("systemctl", "is-active", watchUnit); enabled != "enabled" || active != "active" {
+		t.Errorf("a first installation leaves the watch on what the agent stages %s and %s", enabled, active)
+	}
+	if active := answer("systemctl", "is-active", installerUnit); active != "inactive" {
+		t.Errorf("a first installation leaves the installer %s, with nothing staged", active)
 	}
 	if changed := run(t, "dpkg", "--verify", packageName); changed != "" {
 		t.Errorf("the installed files are not what the package holds:\n%s", changed)
@@ -263,6 +271,9 @@ func (g *gate) write(t *testing.T) {
 	}
 	if g.signers != "" {
 		settings["policy"] = map[string]any{"signers": g.signers, "interval": "1m"}
+	}
+	if g.updating {
+		settings["updates"] = map[string]any{"enabled": true, "root": updateRootPath, "interval": "1m", "check_within": "2m"}
 	}
 	rewritten, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -429,15 +440,17 @@ func (g *gate) override(t *testing.T) {
 
 func (g *gate) remove(t *testing.T) {
 	apt(t, "remove", packageName)
-	if active := answer("systemctl", "is-active", unit); active != "inactive" {
-		t.Errorf("after the removal the service is %s", active)
+	for _, stopped := range []string{unit, watchUnit} {
+		if active := answer("systemctl", "is-active", stopped); active != "inactive" {
+			t.Errorf("after the removal %s is %s", stopped, active)
+		}
 	}
 	for _, removed := range []string{agentPath, unitPath} {
 		if _, err := os.Lstat(removed); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("the removal left %s: %v", removed, err)
 		}
 	}
-	for _, kept := range []string{configuration, bundle, wants} {
+	for _, kept := range []string{configuration, bundle, wants, watchWants} {
 		if _, err := os.Lstat(kept); err != nil {
 			t.Errorf("the removal took %s: %v", kept, err)
 		}
@@ -697,7 +710,7 @@ func (g *gate) reported(t *testing.T, running bool) string {
 
 func (g *gate) purge(t *testing.T) {
 	apt(t, "purge", packageName)
-	for _, purged := range []string{state, settingsDir, wants, overrides, agentPath, unitPath} {
+	for _, purged := range []string{state, settingsDir, wants, overrides, agentPath, unitPath, installerState, watchWants} {
 		if _, err := os.Lstat(purged); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("the purge left %s: %v", purged, err)
 		}
