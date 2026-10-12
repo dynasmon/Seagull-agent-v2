@@ -47,9 +47,9 @@ type Installer struct {
 }
 
 func NewInstaller(options InstallerOptions) (*Installer, error) {
-	if options.Staging == nil || options.Directory == nil || options.Anchor == nil || options.Generation == nil ||
+	if options.Directory == nil || options.Anchor == nil || options.Generation == nil ||
 		options.Packages == nil || options.Health == nil || options.Logger == nil {
-		return nil, errors.New("install updates: a staging area, a directory of its own, the provisioned root, the generation of the state, a package manager, a health check and a logger are all needed")
+		return nil, errors.New("install updates: a directory of its own, the provisioned root, the generation of the state, a package manager, a health check and a logger are all needed")
 	}
 	if options.Now == nil {
 		options.Now = time.Now
@@ -73,7 +73,7 @@ func (i *Installer) Run(ctx context.Context) error {
 		i.options.Logger.Info("update_install_resumed", slog.String("stage", string(journal.Stage)), slog.String("version", journal.Version))
 		return i.resume(ctx, journal)
 	}
-	if !i.options.Staging.Ready() {
+	if i.options.Staging == nil || !i.options.Staging.Ready() {
 		return nil
 	}
 	return i.take(ctx)
@@ -220,7 +220,14 @@ func (i *Installer) revert(ctx context.Context, journal Journal, failure Failure
 func (i *Installer) ended(journal Journal, failure Failure, reason string) error {
 	journal.Stage, journal.Since, journal.Failure, journal.Reason = Failed, i.options.Now(), failure, explained(reason)
 	i.options.Logger.Warn("update_failed", slog.String("version", journal.Version), slog.String("failure", string(failure)), slog.String("reason", journal.Reason))
-	return errors.Join(i.options.Staging.Clear(), i.kept(journal), i.pruned(journal))
+	return errors.Join(i.cleared(), i.kept(journal), i.pruned(journal))
+}
+
+func (i *Installer) cleared() error {
+	if i.options.Staging == nil {
+		return nil
+	}
+	return i.options.Staging.Clear()
 }
 
 func (i *Installer) kept(journal Journal) error {
