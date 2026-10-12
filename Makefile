@@ -5,12 +5,13 @@ DIST ?= dist
 GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.8.0
 ARCH ?= $(shell $(GO) env GOARCH)
 PACKAGED = $(DIST)/linux-$(ARCH)/seagull-agent
+AHEAD = v1.999.0-gate
 
 # Every gate verifies the module graph go.mod pins, never a local workspace
 # that points at sibling checkouts.
 export GOWORK := off
 
-.PHONY: help fmt fmt-check vet mod-check lint test test-race build package native-gate vulncheck clean verify
+.PHONY: help fmt fmt-check vet mod-check lint test test-race build package ahead native-gate vulncheck clean verify
 
 help:
 	@echo "fmt         format the module"
@@ -22,6 +23,7 @@ help:
 	@echo "test-race   run the same suites under the race detector"
 	@echo "build       build the agent into $(DIST)"
 	@echo "package     build the Debian package of the commit checked out into $(DIST)/deb"
+	@echo "ahead       package the same commit as release $(AHEAD) into $(DIST)/ahead, which the native gate updates the agent to"
 	@echo "native-gate install that package on THIS host, as root, and run it as a service: use a disposable host"
 	@echo "vulncheck   scan reachable dependencies"
 	@echo "verify      the full gate: lint, mod-check, tests and build"
@@ -58,10 +60,18 @@ package:
 	rm -rf $(DIST)/deb
 	$(GO) run ./packaging -binary $(PACKAGED) -out $(DIST)/deb
 
+ahead:
+	rm -rf $(DIST)/ahead
+	git clone --quiet --no-local . $(DIST)/ahead/source
+	git -C $(DIST)/ahead/source tag $(AHEAD)
+	$(MAKE) -C $(DIST)/ahead/source package DIST=$(abspath $(DIST)/ahead)
+	rm -rf $(DIST)/ahead/source
+
 native-gate:
 	@test "$(words $(wildcard $(DIST)/deb/*.deb))" = 1 || { echo "$(DIST)/deb holds no single package: make package first" >&2; exit 1; }
+	@test "$(words $(wildcard $(DIST)/ahead/deb/*.deb))" = 1 || { echo "$(DIST)/ahead/deb holds no single package: make ahead first" >&2; exit 1; }
 	$(GO) test -c -o $(DIST)/native.test ./tests/native
-	sudo $(DIST)/native.test -test.v -test.count=1 -test.timeout=15m -package "$(abspath $(wildcard $(DIST)/deb/*.deb))"
+	sudo $(DIST)/native.test -test.v -test.count=1 -test.timeout=25m -package "$(abspath $(wildcard $(DIST)/deb/*.deb))" -ahead "$(abspath $(wildcard $(DIST)/ahead/deb/*.deb))"
 
 vulncheck:
 	$(GO) run $(GOVULNCHECK) ./...
