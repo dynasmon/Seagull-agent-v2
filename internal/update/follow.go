@@ -27,6 +27,7 @@ import (
 const (
 	transferRate  = 256 << 10
 	transferGrace = 30 * time.Second
+	watchEvery    = 10 * time.Second
 )
 
 type Client interface {
@@ -42,6 +43,7 @@ type Options struct {
 	Journal  func() (Journal, bool, error)
 	Running  Running
 	Every    func() time.Duration
+	Watch    time.Duration
 	Policy   link.Policy
 	Logger   *slog.Logger
 	Recovery func(error) string
@@ -98,22 +100,35 @@ func NewFollower(options Options) (*Follower, error) {
 	if options.Now == nil {
 		options.Now = time.Now
 	}
+	if options.Watch <= 0 {
+		options.Watch = watchEvery
+	}
 	options.Policy = settled
 	return &Follower{options: options, base: base}, nil
 }
 
 func (f *Follower) Run(ctx context.Context) error {
 	for {
-		wait := f.Ask(ctx)
+		next := f.options.Now().Add(f.Ask(ctx))
 		f.mu.Lock()
-		f.state.Next = f.options.Now().Add(wait)
+		f.state.Next = next
 		f.mu.Unlock()
-		timer := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil
-		case <-timer.C:
+		for {
+			wait := next.Sub(f.options.Now())
+			if f.awaiting() {
+				wait = min(wait, f.options.Watch)
+			}
+			timer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil
+			case <-timer.C:
+			}
+			if !f.options.Now().Before(next) {
+				break
+			}
+			f.consider(ctx, f.options.Now())
 		}
 	}
 }
@@ -122,6 +137,16 @@ func (f *Follower) State() State {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.state
+}
+
+func (f *Follower) awaiting() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch f.state.Stage {
+	case Staged, Installing, Checking, Reverting:
+		return true
+	}
+	return false
 }
 
 // Ask asks once whether to update, acts on the answer, and returns how long to
