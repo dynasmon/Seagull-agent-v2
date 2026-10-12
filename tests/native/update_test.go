@@ -300,6 +300,7 @@ func (g *gate) updates(t *testing.T) {
 	if *ahead == "" {
 		t.Skip("-ahead names no package of a later release, so the gate has nothing to update the agent to")
 	}
+	heard := len(g.platform.told())
 	aheadPackage, err := filepath.Abs(*ahead)
 	if err != nil {
 		t.Fatal(err)
@@ -374,4 +375,48 @@ func (g *gate) updates(t *testing.T) {
 	g.platform.offering(nil)
 	g.updating = false
 	g.write(t)
+	if *evidence != "" {
+		g.recordUpdates(t, heard)
+	}
+}
+
+func (g *gate) recordUpdates(t *testing.T, from int) {
+	t.Helper()
+	directory := filepath.Join(*evidence, "update-status")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatalf("create %s: %v", directory, err)
+	}
+	type told struct {
+		Batch    string `json:"batch"`
+		Sequence uint64 `json:"sequence"`
+		Stage    string `json:"stage"`
+		Version  string `json:"version"`
+		Failure  string `json:"failure"`
+	}
+	scenario := struct {
+		RecordedAt     time.Time `json:"recorded_at"`
+		InstallationID string    `json:"installation_id"`
+		AgentID        string    `json:"agent_id"`
+		Reports        []told    `json:"reports"`
+	}{RecordedAt: time.Now().UTC(), InstallationID: g.installation, AgentID: agentID}
+	batches, reports := g.platform.statusBatches(), g.platform.told()
+	for index := from; index < len(batches); index++ {
+		update := reports[index].GetUpdate()
+		if update == nil {
+			continue
+		}
+		name := fmt.Sprintf("batch-%03d.pb", len(scenario.Reports))
+		if err := os.WriteFile(filepath.Join(directory, name), batches[index], 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		scenario.Reports = append(scenario.Reports, told{Batch: name, Sequence: reports[index].GetSequence(),
+			Stage: update.GetStage().String(), Version: update.GetVersion(), Failure: update.GetFailure().String()})
+	}
+	encoded, err := json.MarshalIndent(scenario, "", "  ")
+	if err != nil {
+		t.Fatalf("encode the scenario: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "scenario.json"), append(encoded, '\n'), 0o644); err != nil {
+		t.Fatalf("write the scenario: %v", err)
+	}
 }
