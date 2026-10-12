@@ -10,6 +10,8 @@ import (
 	"syscall"
 )
 
+const NoFollow = syscall.O_NOFOLLOW
+
 // The lock belongs to the open file, so the kernel releases it when the file is
 // closed or the process ends, however it ends.
 func Lock(file *os.File) error {
