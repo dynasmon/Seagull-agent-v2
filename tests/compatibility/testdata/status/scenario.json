@@ -1,0 +1,327 @@
+{
+  "recorded_at": "2026-10-12T16:09:44.369273087Z",
+  "build": "seagull-agent v0.0.0-20261012160135-587e7954c6ad go1.26.9 linux/amd64\nprotocol_version 1\nevent_schema_version 1\ninventory_schema_version 1\nstatus_schema_version 1",
+  "installation_id": "132eafc2-d974-4153-afa8-7ae6dbec6a2b",
+  "agent_id": "web-01",
+  "boot_id": "5b0c45b7-b9a5-4de9-b22c-8cfe43a77125",
+  "reports": [
+    {
+      "batch": "batch-000.pb",
+      "sequence": 1,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_NONE"
+    },
+    {
+      "batch": "batch-001.pb",
+      "sequence": 2,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_NONE"
+    },
+    {
+      "batch": "batch-002.pb",
+      "sequence": 3,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-003.pb",
+      "sequence": 4,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-004.pb",
+      "sequence": 5,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-005.pb",
+      "sequence": 6,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_INTERRUPTED"
+    },
+    {
+      "batch": "batch-006.pb",
+      "sequence": 7,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_INTERRUPTED"
+    },
+    {
+      "batch": "batch-007.pb",
+      "sequence": 8,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-008.pb",
+      "sequence": 9,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-009.pb",
+      "sequence": 10,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-010.pb",
+      "sequence": 11,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-011.pb",
+      "sequence": 12,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-012.pb",
+      "sequence": 13,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-013.pb",
+      "sequence": 14,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-014.pb",
+      "sequence": 15,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-015.pb",
+      "sequence": 16,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-016.pb",
+      "sequence": 17,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-017.pb",
+      "sequence": 18,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-018.pb",
+      "sequence": 19,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-019.pb",
+      "sequence": 20,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-020.pb",
+      "sequence": 21,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-021.pb",
+      "sequence": 22,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-022.pb",
+      "sequence": 23,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-023.pb",
+      "sequence": 24,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-024.pb",
+      "sequence": 25,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-025.pb",
+      "sequence": 26,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-026.pb",
+      "sequence": 27,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-027.pb",
+      "sequence": 28,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-028.pb",
+      "sequence": 29,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-029.pb",
+      "sequence": 30,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-030.pb",
+      "sequence": 31,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-031.pb",
+      "sequence": 32,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-032.pb",
+      "sequence": 33,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-033.pb",
+      "sequence": 34,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-034.pb",
+      "sequence": 35,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-035.pb",
+      "sequence": 36,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-036.pb",
+      "sequence": 37,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-037.pb",
+      "sequence": 38,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-038.pb",
+      "sequence": 39,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-039.pb",
+      "sequence": 40,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-040.pb",
+      "sequence": 41,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-041.pb",
+      "sequence": 42,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-042.pb",
+      "sequence": 43,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-043.pb",
+      "sequence": 44,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-044.pb",
+      "sequence": 45,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-045.pb",
+      "sequence": 46,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-046.pb",
+      "sequence": 47,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-047.pb",
+      "sequence": 48,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-048.pb",
+      "sequence": 49,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-049.pb",
+      "sequence": 50,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-050.pb",
+      "sequence": 51,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-051.pb",
+      "sequence": 52,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_INTERRUPTED"
+    },
+    {
+      "batch": "batch-052.pb",
+      "sequence": 53,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_INTERRUPTED"
+    }
+  ]
+}
