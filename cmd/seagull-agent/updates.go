@@ -35,7 +35,6 @@ const (
 
 var (
 	installerDirectory = "/var/lib/seagull-agent-update"
-	healthWithin       = 4 * time.Minute
 	healthSettle       = statusEvery
 )
 
@@ -236,7 +235,7 @@ func installRelease(ctx context.Context, path string, stderr io.Writer) int {
 		Running:    running,
 		Generation: generation,
 		Packages:   debianPackages{},
-		Health:     healthy(filepath.Join(state, statusDirectory), owner),
+		Health:     healthy(filepath.Join(state, statusDirectory), owner, time.Duration(settings.Updates.CheckWithin)),
 		Logger:     logger,
 	}
 	staged, err := opened(filepath.Join(state, stagedDirectory))
@@ -307,16 +306,16 @@ func (debianPackages) Install(ctx context.Context, path string, downgrade bool) 
 // installed has said so for a whole status interval, recently, with nothing
 // the agent holds on the host failing. What the platform does not answer is
 // left out, so an outage is never taken for a release that went wrong.
-func healthy(directory string, owner int) update.Health {
+func healthy(directory string, owner int, within time.Duration) update.Health {
 	return func(ctx context.Context, version update.Version, since time.Time) error {
-		deadline := time.Now().Add(healthWithin)
+		deadline := time.Now().Add(within)
 		for {
 			last := judged(directory, owner, version, since)
 			if last == nil {
 				return nil
 			}
 			if time.Now().After(deadline) {
-				return fmt.Errorf("%s did not run as it should within %s: %w", version, healthWithin, last)
+				return fmt.Errorf("%s did not run as it should within %s: %w", version, within, last)
 			}
 			select {
 			case <-ctx.Done():
