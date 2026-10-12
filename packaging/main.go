@@ -46,6 +46,8 @@ const description = `Seagull endpoint agent
 
 var installed = []struct{ from, to string }{
 	{from: "linux/seagull-agent.service", to: "usr/lib/systemd/system/seagull-agent.service"},
+	{from: "linux/seagull-agent-update.service", to: "usr/lib/systemd/system/seagull-agent-update.service"},
+	{from: "linux/seagull-agent-update.path", to: "usr/lib/systemd/system/seagull-agent-update.path"},
 	{from: "linux/sysusers.conf", to: "usr/lib/sysusers.d/seagull-agent.conf"},
 	{from: "linux/tmpfiles.conf", to: "usr/lib/tmpfiles.d/seagull-agent.conf"},
 	{from: "linux/agent.json", to: "usr/share/seagull-agent/agent.json"},
