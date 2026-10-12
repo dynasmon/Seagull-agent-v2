@@ -131,6 +131,8 @@ func (g *gate) tamper(t *testing.T) {
 		"systemctl disable " + unit,
 		"systemctl mask " + unit,
 		"dpkg --remove " + packageName,
+		": > " + filepath.Join(installerState, "pending"),
+		"systemctl start " + installerUnit,
 	}
 	for _, who := range []string{intruder, account} {
 		for _, attempt := range attempts {
