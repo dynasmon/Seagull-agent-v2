@@ -13,7 +13,8 @@ var guarded = protection
 
 // What decides what the agent is and what it does: its executable, its
 // configuration, the authorities it trusts, the keys it accepts a policy
-// under, and the directory its installation is kept in. The agent runs only
+// under, the root it verifies a release under, and the directory its
+// installation is kept in. The agent runs only
 // when root alone can change them, so whoever takes over its account, or any
 // other but root, cannot change what it runs after it starts again.
 func protection(path string, settings config.Config) error {
@@ -29,6 +30,9 @@ func protection(path string, settings config.Config) error {
 	}
 	if settings.Policy.Signers != "" {
 		held = append(held, struct{ what, path string }{"policy.signers", settings.Policy.Signers})
+	}
+	if settings.Updates.Root != "" {
+		held = append(held, struct{ what, path string }{"updates.root", settings.Updates.Root})
 	}
 	for _, decides := range held {
 		absolute, err := filepath.Abs(decides.path)
