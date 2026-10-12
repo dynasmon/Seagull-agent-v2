@@ -41,6 +41,19 @@ printf '%s %s %s\n' "${SEAGULL_SECRET-unset}" "${LANG-unset}" "${HOME-unset}"
 	}
 }
 
+func TestAProgramRunsInTheEnvironmentTheAgentFixesAndNothingElse(t *testing.T) {
+	t.Setenv("SEAGULL_SECRET", "kept by the agent alone")
+	ran := program(t, `printf '%s %s\n' "${SEAGULL_SECRET-unset}" "${DEBIAN_FRONTEND-unset}"
+`)
+	written, err := OutputIn(t.Context(), ran, nil, []string{"DEBIAN_FRONTEND=noninteractive"}, 1<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(written), "unset noninteractive\n"; got != want {
+		t.Errorf("the program wrote %q, want what the agent fixed and nothing of its own environment, %q", got, want)
+	}
+}
+
 func TestAProgramTheHostDoesNotHaveIsAbsent(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("the agent runs the programs of the host on linux alone")
