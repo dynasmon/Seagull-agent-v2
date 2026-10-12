@@ -83,6 +83,7 @@ func (o *observing) report(stopping bool) *agentv1.Status {
 	if id, revision, expires := o.configuration.inForce(); revision > 0 {
 		report.Configuration.PolicyId, report.Configuration.PolicyRevision, report.Configuration.PolicyExpiresAt = id, revision, timestamppb.New(expires)
 	}
+	report.Update = o.updateReport()
 	if granted := held.Agent.Privileges; granted != nil {
 		report.Privileges.User, report.Privileges.NoNewPrivileges = strconv.Itoa(granted.User), granted.NoNewPrivs
 		report.Privileges.Seccomp = protocol.Cut(string(granted.Seccomp), 32)
