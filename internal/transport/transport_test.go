@@ -955,6 +955,10 @@ func TestASuccessfulReplyIsWrittenWhereTheCallerKeepsItAndARefusalIsHeld(t *test
 	if err != nil || reply.Status != http.StatusNotFound || string(reply.Body) != "no such package" || kept.Len() != 0 {
 		t.Fatalf("a refusal was answered %d with %q held and %d bytes kept: %v", reply.Status, reply.Body, kept.Len(), err)
 	}
+	reply, err = client.Get(t.Context(), transport.Request{URL: listener.URL + "/v1/agents/update/packages/absent", Most: 4, Into: &kept})
+	if err != nil || reply.Status != http.StatusNotFound || string(reply.Body) != "no such package" || kept.Len() != 0 {
+		t.Fatalf("a refusal longer than the package it refuses was answered %d with %q held: %v", reply.Status, reply.Body, err)
+	}
 
 	if _, err := client.Get(t.Context(), transport.Request{URL: listener.URL + "/v1/agents/update/packages/present", Most: 1 << 10, Into: io.Discard}); !errors.Is(err, transport.ErrReplyTooLarge) {
 		t.Fatalf("a reply written elsewhere was read past its bound: %v", err)
