@@ -50,6 +50,10 @@ func TestAReloadThatChangesWhatTheAgentSettledAsItStartedIsRefused(t *testing.T)
 		"whose policies it takes": func(settings *config.Config) {
 			settings.Policy.Signers = "/etc/seagull-agent/policy-signers.pem"
 		},
+		"whether it takes updates": func(settings *config.Config) { settings.Updates.Enabled = true },
+		"which releases it installs": func(settings *config.Config) {
+			settings.Updates.Root = "/etc/seagull-agent/update-root.pb"
+		},
 		"the log it writes": func(settings *config.Config) { settings.Logging.Format = "text" },
 		"how long it stops": func(settings *config.Config) { settings.Resources.ShutdownTimeout = config.Duration(0) },
 	} {
