@@ -58,7 +58,7 @@ func TestTheSettingsTheFileLeavesOutAreTheOnesTheAgentDocuments(t *testing.T) {
 			ShutdownTimeout:       config.Duration(10 * time.Second),
 		},
 		Logging:   config.Logging{Level: "info", Format: "json"},
-		Updates:   config.Updates{Enabled: false, Interval: config.Duration(15 * time.Minute)},
+		Updates:   config.Updates{Enabled: false, Interval: config.Duration(15 * time.Minute), CheckWithin: config.Duration(4 * time.Minute)},
 		Policy:    config.Policy{Interval: config.Duration(5 * time.Minute)},
 		Reporting: config.Reporting{Interval: config.Duration(time.Minute)},
 	}
@@ -875,6 +875,8 @@ func TestAnUpdateIsVerifiedUnderARootOnlyRootMayChange(t *testing.T) {
 		"a relative root":                   {`{"enabled": true, "root": "update-root.pb"}`, "updates.root"},
 		"asking every 59 seconds":           {`{"interval": "59s"}`, "updates.interval"},
 		"asking every 25 hours":             {`{"interval": "25h"}`, "updates.interval"},
+		"checking for 59 seconds":           {`{"check_within": "59s"}`, "updates.check_within"},
+		"checking for more than an hour":    {`{"check_within": "61m"}`, "updates.check_within"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := config.Load(configured(t, map[string]string{"updates": refused.updates})); !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), refused.says) {

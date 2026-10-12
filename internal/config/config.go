@@ -179,9 +179,10 @@ type Logging struct {
 // the trust in the platform is, and only root may change it: whoever does
 // decides which releases the agent installs.
 type Updates struct {
-	Enabled  bool     `json:"enabled"`
-	Root     string   `json:"root"`
-	Interval Duration `json:"interval"`
+	Enabled     bool     `json:"enabled"`
+	Root        string   `json:"root"`
+	Interval    Duration `json:"interval"`
+	CheckWithin Duration `json:"check_within"`
 }
 
 type Policy struct {
@@ -221,7 +222,7 @@ func defaults() Config {
 			ShutdownTimeout:       Duration(10 * time.Second),
 		},
 		Logging:   Logging{Level: "info", Format: JSONLogs},
-		Updates:   Updates{Interval: Duration(15 * time.Minute)},
+		Updates:   Updates{Interval: Duration(15 * time.Minute), CheckWithin: Duration(4 * time.Minute)},
 		Policy:    Policy{Interval: Duration(5 * time.Minute)},
 		Reporting: Reporting{Interval: Duration(time.Minute)},
 	}
@@ -585,7 +586,10 @@ func (l *Logging) validate() []error {
 }
 
 func (u *Updates) validate() []error {
-	found := problems(duration("updates.interval", u.Interval, Duration(time.Minute), Duration(24*time.Hour)))
+	found := problems(
+		duration("updates.interval", u.Interval, Duration(time.Minute), Duration(24*time.Hour)),
+		duration("updates.check_within", u.CheckWithin, Duration(time.Minute), Duration(time.Hour)),
+	)
 	switch {
 	case u.Enabled && u.Root == "":
 		found = append(found, errors.New("updates.enabled is true, and updates.root names no root to verify a release under"))
