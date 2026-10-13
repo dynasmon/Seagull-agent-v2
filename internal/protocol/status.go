@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
+	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
 
 // What the platform admits of a status report beyond the shape of its
@@ -124,6 +125,12 @@ func CheckStatus(report *agentv1.Status) error {
 			moment("credential.not_after", credential.GetNotAfter().IsValid()),
 			moment("credential.renews_at", credential.GetRenewsAt() == nil || credential.GetRenewsAt().IsValid()),
 			moment("credential.renewal_failing_since", credential.GetRenewalFailingSince() == nil || credential.GetRenewalFailingSince().IsValid()))
+	}
+	if compatibility := report.GetCompatibility(); compatibility != nil {
+		checks = append(checks, text("compatibility.contracts", compatibility.GetContracts(), MaxStatusVersion, false))
+		if updates := compatibility.GetUpdates(); updates != nil {
+			checks = append(checks, enumerated("compatibility.updates.format", updatev1.Format_name[int32(updates.GetFormat())]))
+		}
 	}
 	for index, part := range report.GetComponents() {
 		checks = append(checks, named(fmt.Sprintf("components[%d]", index), part.GetName(), part.GetCondition(), part.GetSince(), part.GetReason()))
