@@ -51,11 +51,13 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/journal"
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/privileges"
+	"github.com/dynasmon/Seagull-agent-v2/internal/policy"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/renewal"
 	agentruntime "github.com/dynasmon/Seagull-agent-v2/internal/runtime"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	"github.com/dynasmon/Seagull-agent-v2/internal/transport"
+	"github.com/dynasmon/Seagull-agent-v2/internal/update"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
@@ -79,7 +81,7 @@ func TestTheVersionFlagPrintsTheBuildIdentityApartFromTheWireVersions(t *testing
 	if code := run([]string{"-version"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code %d: %s", code, stderr.String())
 	}
-	identity, spoken, _ := strings.Cut(stdout.String(), "\n")
+	identity, rest, _ := strings.Cut(stdout.String(), "\n")
 	fields := strings.Fields(identity)
 	if len(fields) != 4 || fields[0] != "seagull-agent" || fields[2] != runtime.Version() {
 		t.Fatalf("build identity %q", identity)
@@ -87,8 +89,12 @@ func TestTheVersionFlagPrintsTheBuildIdentityApartFromTheWireVersions(t *testing
 	if platform := runtime.GOOS + "/" + runtime.GOARCH; fields[3] != platform {
 		t.Fatalf("build identity names %s, the binary runs on %s", fields[3], platform)
 	}
-	want := fmt.Sprintf("protocol_version %d\nevent_schema_version %d\ninventory_schema_version %d\nstatus_schema_version %d\n",
-		protocol.Version, protocol.EventSchemaVersion, protocol.InventorySchemaVersion, protocol.StatusSchemaVersion)
+	contracts, spoken, _ := strings.Cut(rest, "\n")
+	if contracts != "contracts "+contractsRelease() || contractsRelease() == "" {
+		t.Fatalf("printed the contracts release as %q", contracts)
+	}
+	want := fmt.Sprintf("protocol_version %d\nevent_schema_version %d\ninventory_schema_version %d\nstatus_schema_version %d\npolicy_schema_version %d\nupdate_schema_version %d\n",
+		protocol.Version, protocol.EventSchemaVersion, protocol.InventorySchemaVersion, protocol.StatusSchemaVersion, policy.SchemaVersion, update.SchemaVersion)
 	if spoken != want {
 		t.Fatalf("printed the wire versions as %q, want %q", spoken, want)
 	}
@@ -104,11 +110,14 @@ func TestTheAgentLogsWhatItIsAsItStarts(t *testing.T) {
 	}
 	want := map[string]any{
 		"build":                    buildIdentity(),
+		"contracts":                contractsRelease(),
 		"config":                   path,
 		"protocol_version":         float64(protocol.Version),
 		"event_schema_version":     float64(protocol.EventSchemaVersion),
 		"inventory_schema_version": float64(protocol.InventorySchemaVersion),
 		"status_schema_version":    float64(protocol.StatusSchemaVersion),
+		"policy_schema_version":    float64(policy.SchemaVersion),
+		"update_schema_version":    float64(update.SchemaVersion),
 		"installation_id":          created["installation_id"],
 		"key_provider":             "filesystem",
 		"key_exportable":           true,
