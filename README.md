@@ -120,8 +120,10 @@ agent runs on, and every policy applied or refused is in the journal.
 
 Once an operator enables it, the agent installs the release the platform asks
 it to run when a catalog operators signed off the platform names it, and goes
-back to the release before when the new one does not run as it should. See
-[Updating](#updating).
+back to the release before when the new one does not run as it should. The
+platform decides which agents are asked, and when, agent by agent or in the
+waves of a rollout, and pauses a rollout on the agents that report it went
+wrong. See [Updating](#updating).
 
 ### Status and diagnostics
 
@@ -392,6 +394,19 @@ The platform holds no key of either role: a taken platform can withhold an
 update or move an agent to another release a catalog it verified allows, but not
 to anything operators did not sign, nor back past what a release allows.
 
+Which agents are asked to run a release, and when, is the platform's decision
+and never signed: an operator assigns a release agent by agent, or rolls it out
+to a tenant in waves, a canary first and then shares of the rest, each agent at
+a place drawn from the rollout and its identifier, so renewing its certificate
+or rotating its key never moves it between waves. The agent takes part only
+through what it reports. Every report says which contracts release it was built
+with, the protocol and schemas it speaks and reads, and whether it takes
+updates, in which format, over which state and under which root and catalog, so
+a rollout does not wait for an agent that cannot take its release; and where
+its update stands, so the platform pauses a rollout once agents went back from
+its release or could not verify or install it, and never because an agent could
+not reach it. What a rollout decides changes nothing the agent verifies.
+
 ## Runtime state
 
 | Path | Purpose |
@@ -421,24 +436,28 @@ agent's identity, and a copied key is revoked with its agent.
 ## Compatibility
 
 This build speaks protocol 1, event schema 1, inventory schema 1 and status
-schema 1, as `seagull-agent -version` prints, and reads update metadata of
-schema 1, from the contracts release `go.mod` pins. The
-agent negotiates nothing before it sends; the platform's answer to a batch is
-where it learns what the platform accepts. A refused version, or a refused value
-its contracts declare, is an incompatibility that holds the records rather than
-quarantining them, since a platform that speaks them accepts them unchanged. A
-refusal of the agent itself is an exclusion that waits for an operator. Reply
-fields the contracts do not declare are ignored.
+schema 1, and reads signed policies of schema 1 and update metadata of schema 1,
+from the contracts release `go.mod` pins, as `seagull-agent -version` prints and
+every status report says. The agent negotiates nothing before it sends; the
+platform's answer to a batch is where it learns what the platform accepts. A
+refused version, or a refused value its contracts declare, is an incompatibility
+that holds the records rather than quarantining them, since a platform that
+speaks them accepts them unchanged. A refusal of the agent itself is an
+exclusion that waits for an operator. Reply fields the contracts do not declare
+are ignored.
 
 Compatibility is claimed only with the backend commits recorded under
-[`tests/compatibility/testdata`](tests/compatibility/testdata): 6fae345, 2829b0d,
-0656b2a, fdd814d, 46ca9c7 and 6b85c4b, whose ingest gateway, control plane and
-pipeline were driven with what this agent sends; fdd814d, 46ca9c7 and 6b85c4b
-also handed it the signed policies it applies, 46ca9c7 and 6b85c4b took and kept
-the status reports an installed agent sent in the native gate, and 6b85c4b
-handed it the signed releases it installs and took what it reported while it was
-updated. The suite fails when `go.mod` pins contracts no recorded platform was
-built with, or when a recorded answer reads differently.
+[`tests/compatibility/testdata`](tests/compatibility/testdata): 6fae345,
+2829b0d, 0656b2a, fdd814d, 46ca9c7, 6b85c4b and 8d1e9e0, whose ingest gateway,
+control plane and pipeline were driven with what this agent sends; fdd814d,
+46ca9c7, 6b85c4b and 8d1e9e0 also handed it the signed policies it applies;
+46ca9c7, 6b85c4b and 8d1e9e0 took and kept the status reports this build's
+installed agent sent in the native gate; 6b85c4b and 8d1e9e0 handed it the
+signed releases it installs and took what it reported while it was updated; and
+8d1e9e0 rolled releases out on those reports, opening the next wave once the
+agent ran one and pausing the rollout of the one it went back from. The suite
+fails when `go.mod` pins contracts no recorded platform was built with, or when
+a recorded answer reads differently.
 
 ## Build and test
 
