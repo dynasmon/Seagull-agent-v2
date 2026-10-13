@@ -1,0 +1,40 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "8d1e9e051a14175ff009a2b289f91fb13626aa4e",
+    "contracts": "v0.18.0"
+  },
+  "recorded_at": "2026-10-13T17:09:33.11775942Z",
+  "exchanges": [
+    {
+      "name": "update-status-000",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "update-status-001",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "update-status-002",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "update-status-003",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "update-status-004",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    }
+  ]
+}
