@@ -1,24 +1,26 @@
 
-'132eafc2-d974-4153-afa8-7ae6dbec6a2b.49ô$132eafc2-d974-4153-afa8-7ae6dbec6a2b1"œŒ´Ö¡ĞùÍ*<2
-6fb5fd58b1a5linux"amd64Ba
-$5b0c45b7-b9a5-4de9-b22c-8cfe43a77125œŒ´Öé€¨É"œŒ´Öç—Œ«*the agent was asked to stopJf
-"v0.0.0-20261012160135-587e7954c6ad(587e7954c6ad52d5e81e94800f2d191e9a99ed13go1.26.9"linux*amd64PZ
-configurationœŒ´Öé€¨ÉZ
+'22beb95d-201d-4afb-9bb2-f2b03b050663.49‘	$22beb95d-201d-4afb-9bb2-f2b03b0506631"ãÈ¹Öå *<2
+ec421e395e06linux"amd64B`
+$fee2269c-4702-4508-a23b-30bf76e054b4ãÈ¹Öí›±›"ãÈ¹Öÿô|*the agent was asked to stopJf
+"v0.0.0-20261013165626-bf58c1d2857d(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
+configurationãÈ¹Öí›±›Z
 
 collectionZ	
 spoolZ
 deliveryZ
 
 credentialZ
-	resourcesZ€
-policyş‹´ÖáãÙ"åthe agent runs on revision 1 of gate-servers, signed by 49161ad5eddd47d1453805931c30d84ad9adc6bee669e4c5144caeacfb4b425c, until 2026-10-13T16:08:30Z; its own configuration keeps resources.max_concurrent_uploads at 1 rather than 8Z
-	reportingb 
-authenticationœŒ´Ö÷šºÌb
-	inventoryœŒ´ÖÈ±ÀËb
-	processesœŒ´ÖÊ²ÀËb
-filesœŒ´Öš³ÀËb
-networkœŒ´Ö…ÖÀËj'p€€€€
+	resourcesZÿ
+policyÅÈ¹ÖÆ€İB"åthe agent runs on revision 1 of gate-servers, signed by 31b8050d56f75128eb35ef064a2ee6979116d1ac49dfcfd4d776b708688572b3, until 2026-10-14T17:03:01Z; its own configuration keeps resources.max_concurrent_uploads at 1 rather than 8Z
+	reportingZ€
+update"tupdates.enabled is false or the installation is not enrolled, so the agent installs no release the platform hands itb 
+authenticationãÈ¹Ö¡îÌb
+	inventoryãÈ¹Öæğûb
+	processesãÈ¹Ö›òûb
+filesãÈ¹Ö±óûb
+networkãÈ¹ÖÇôûj'p€€€€
 events8@#
-	inventory8@r´Á´Öš¯´ÖÓÿãÿz_
-@7cb72f4058100be0ee46a6af21ef24092ea70ff1c25d3fe8d7deb79fb30dcf7bgate-servers"ş®¹Ö™æ |‚
-997997999 *filter
+	inventory8@r·ş¹Öõæ¹ÖÇÓÊÁz_
+@31b4f09fe2f39f19d0d55c2324901f2a8c15a9c469f03e7df54b7e98e4ce79a6gate-servers"Åë¾Ö¶‚
+997997999 *filter’
+v0.18.0 (0:

@@ -1,24 +1,26 @@
 
-'132eafc2-d974-4153-afa8-7ae6dbec6a2b.33ì$132eafc2-d974-4153-afa8-7ae6dbec6a2b!"àŠ´ÖÄíüú*<2
-6fb5fd58b1a5linux"amd64Ba
-$5b0c45b7-b9a5-4de9-b22c-8cfe43a77125¸Š´ÖŒ»ª"¸Š´Ö›÷Ì*the agent was asked to stopJf
-"v0.0.0-20261012160135-587e7954c6ad(587e7954c6ad52d5e81e94800f2d191e9a99ed13go1.26.9"linux*amd64PZ
-configuration¹Š´Ö÷·!Z®
+'22beb95d-201d-4afb-9bb2-f2b03b050663.33$22beb95d-201d-4afb-9bb2-f2b03b050663!"ÀÇ¹Ö»Êü#*<2
+ec421e395e06linux"amd64Ba
+$fee2269c-4702-4508-a23b-30bf76e054b4˜Ç¹ÖŠÂã¾"˜Ç¹Ö€…É¢*the agent was asked to stopJf
+"v0.0.0-20261013165626-bf58c1d2857d(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
+configuration˜Ç¹ÖÏë«“Z¯
 
-collection¹Š´Ö½´!"files: watching 9 entries of 2 paths, 3 directories as they change; 8 changes found since the agent started, the last at 2026-10-12T16:05:52Z; directories it cannot list: 1, such as /srv/seagull-native-gate/closed; files whose content it cannot read: 1, such as /srv/seagull-native-gate/private; the module cannot look at a path it was given: /root/seagull-native-gate: openat root: permission deniedZ	
+collection˜Ç¹ÖÏí¨“"files: watching 9 entries of 2 paths, 3 directories as they change; 8 changes found since the agent started, the last at 2026-10-13T17:00:47Z; directories it cannot list: 1, such as /srv/seagull-native-gate/closed; files whose content it cannot read: 1, such as /srv/seagull-native-gate/private; the module cannot look at a path it was given: /root/seagull-native-gate: openat root: permission deniedZ	
 spoolZ
 deliveryZ
 
 credentialZ
 	resourcesZ\
 policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
-	reporting¸Š´ÖŸåÈÄb 
-authentication¸Š´Öö¹¼¬b
-	inventory¸Š´Öªœğ«b
-	processes¸Š´ÖÔğ«b¢
-files¹Š´Ö½´!*‰watching 9 entries of 2 paths, 3 directories as they change; 8 changes found since the agent started, the last at 2026-10-12T16:05:52Z; directories it cannot list: 1, such as /srv/seagull-native-gate/closed; files whose content it cannot read: 1, such as /srv/seagull-native-gate/private; the module cannot look at a path it was given: /root/seagull-native-gate: openat root: permission deniedb
-network¸Š´ÖŸ ğ«j'p€€€€
+	reporting˜Ç¹ÖæŸ™ÄZ€
+update"tupdates.enabled is false or the installation is not enrolled, so the agent installs no release the platform hands itb 
+authentication˜Ç¹Öô±¯Áb
+	inventory˜Ç¹Öü©ÏÀb
+	processes˜Ç¹Öİ­ÏÀb£
+files˜Ç¹ÖÏí¨“*‰watching 9 entries of 2 paths, 3 directories as they change; 8 changes found since the agent started, the last at 2026-10-13T17:00:47Z; directories it cannot list: 1, such as /srv/seagull-native-gate/closed; files whose content it cannot read: 1, such as /srv/seagull-native-gate/private; the module cannot look at a path it was given: /root/seagull-native-gate: openat root: permission deniedb
+network˜Ç¹ÖÍ¯ÏÀj'p€€€€
 events8@#
-	inventory8@r´Á´Öš¯´ÖÓÿãÿzB
-@bda74fa91a1168fbe44d1c6d11c1f23fcc5c6235c910096cf08ed8337eb7465f‚
-997997999 *filter
+	inventory8@r·ş¹Öõæ¹ÖÇÓÊÁzB
+@cca740f7f64f81648f01dc569afa05b11d5b3db0e58f1178d0db4937581ce3f2‚
+997997999 *filter’
+v0.18.0 (0:

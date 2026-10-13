@@ -1,9 +1,9 @@
 
-'132eafc2-d974-4153-afa8-7ae6dbec6a2b.21$132eafc2-d974-4153-afa8-7ae6dbec6a2b"ù‰´Ö¨ÛÊ‰*<2
-6fb5fd58b1a5linux"amd64Ba
-$5b0c45b7-b9a5-4de9-b22c-8cfe43a77125ø‰´ÖÍç¡Ş"ø‰´Öç™ƒµ*the agent was asked to stopJf
-"v0.0.0-20261012160135-587e7954c6ad(587e7954c6ad52d5e81e94800f2d191e9a99ed13go1.26.9"linux*amd64PZ
-configurationø‰´ÖÍç¡ŞZ
+'22beb95d-201d-4afb-9bb2-f2b03b050663.21$22beb95d-201d-4afb-9bb2-f2b03b050663"÷Æ¹Öïªğ×*<2
+ec421e395e06linux"amd64Ba
+$fee2269c-4702-4508-a23b-30bf76e054b4öÆ¹Öö¿§Å"öÆ¹Ö•­Ö£*the agent was asked to stopJf
+"v0.0.0-20261013165626-bf58c1d2857d(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
+configurationöÆ¹Öö¿§ÅZ
 
 collectionZ	
 spoolZ
@@ -11,14 +11,16 @@ collectionZ
 
 credentialZ
 	resourcesZ\
-policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
-	reportingø‰´ÖÔğ°÷b 
-authenticationø‰´Ö£—Ëğb^
-	inventoryø‰´ÖƒøËğ*Athe platform holds as one user "0": "root", "seagull-native-toor"b
-	processesø‰´Öø«ğïb
-filesø‰´Ö­ğïb
-networkø‰´Ö¤®ğïj4p€€€€
-events8@#
-	inventory8*ù‰´Öî·ä2@r´Á´Öš¯´ÖÓÿãÿzB
-@e4581b125aff6d43311e0a47819046858bf8606ee8bbb1d5736746234eb91289‚
-997997999 *filter
+policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
+	reporting÷Æ¹ÖÖ¿üZ€
+update"tupdates.enabled is false or the installation is not enrolled, so the agent installs no release the platform hands itb 
+authenticationöÆ¹Öƒ»±Ïb=
+	inventory÷Æ¹ÖŠÜÓÖ* the agent has not started it yetb
+	processesöÆ¹ÖÄõŞÌb
+filesöÆ¹Ö²öŞÌb
+networköÆ¹Öİ÷ŞÌj5p€€€€
+events8@#
+	inventory8*÷Æ¹Ö¶ş›’@r·ş¹Öõæ¹ÖÇÓÊÁzB
+@3220e9e5f323242f57e5fdabfd161b23d537a0bfb1235ebea00990255e506fb2‚
+997997999 *filter’
+v0.18.0 (0:

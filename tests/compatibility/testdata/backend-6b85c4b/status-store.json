@@ -6,14 +6,14 @@
     "broker": "redpandadata/redpanda:v24.2.20",
     "store": "clickhouse/clickhouse-server:24.8"
   },
-  "recorded_at": "2026-10-12T22:54:15.671025402Z",
+  "recorded_at": "2026-10-13T17:09:59.598682563Z",
   "alone": {
     "admitted": 53,
     "current_rows": 1,
     "sequence": 53,
     "condition": "CONDITION_STOPPED",
     "previous_ending": "ENDING_INTERRUPTED",
-    "installation_id": "132eafc2-d974-4153-afa8-7ae6dbec6a2b",
+    "installation_id": "22beb95d-201d-4afb-9bb2-f2b03b050663",
     "liveness": "LIVENESS_STOPPED"
   },
   "replayed": {
@@ -22,7 +22,7 @@
     "sequence": 53,
     "condition": "CONDITION_STOPPED",
     "previous_ending": "ENDING_INTERRUPTED",
-    "installation_id": "132eafc2-d974-4153-afa8-7ae6dbec6a2b",
+    "installation_id": "22beb95d-201d-4afb-9bb2-f2b03b050663",
     "liveness": "LIVENESS_STOPPED"
   }
 }
