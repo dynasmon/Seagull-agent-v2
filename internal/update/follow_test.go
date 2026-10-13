@@ -330,3 +330,47 @@ func TestAnAgentAskedForNothingSaysHowItsLastUpdateEnded(t *testing.T) {
 		t.Fatalf("an agent whose last update ended installed stands at %+v", state)
 	}
 }
+
+func TestAnAgentSaysTheNewestRootAndCatalogItVerifiedWhateverItWasAsked(t *testing.T) {
+	land := newEstate(t)
+	current, next, catalog := pair(t)
+	followed := land.follow(t, "", catalog, map[string][]byte{"current": current, "next": next})
+	if state := followed.follower.State(); state.Trusted != 1 || state.Verified != 0 {
+		t.Fatalf("before asking the agent says it trusts root %d and verified catalog %d", state.Trusted, state.Verified)
+	}
+
+	offer := land.offer(t, "", catalog)
+	offer.Roots = append(offer.Roots, sign(t, rootOf(2, []signer{land.owner}, 1, []signer{land.owner}, 1), update.RootPayloadType, land.owner))
+	encoded, err := proto.Marshal(offer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	followed.platform.offer = encoded
+	followed.follower.Ask(t.Context())
+	if state := followed.follower.State(); state.Trusted != 2 || state.Verified != 7 || state.Stage != "" {
+		t.Fatalf("after an offer asking nothing the agent stands at %+v", state)
+	}
+
+	store, err := update.OpenStore(followed.held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := update.NewFollower(update.Options{
+		Client:  followed.platform,
+		URL:     "https://control.example:8446",
+		Anchor:  land.anchor,
+		Store:   store,
+		Staging: update.OpenStaging(followed.staged),
+		Journal: func() (update.Journal, bool, error) { return update.ReadJournal(followed.installer) },
+		Running: running("v0.2.0"),
+		Every:   func() time.Duration { return 15 * time.Minute },
+		Logger:  slog.New(slog.DiscardHandler),
+		Now:     func() time.Time { return written },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state := again.State(); state.Trusted != 2 || state.Verified != 7 {
+		t.Fatalf("an agent that started again says it trusts root %d and verified catalog %d", state.Trusted, state.Verified)
+	}
+}
