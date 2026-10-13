@@ -638,6 +638,13 @@ func TestAnEnrolledAgentDeliversWhatItsSpoolHoldsAsItRuns(t *testing.T) {
 		reports[0].GetRun().GetPreviousEnding() != agentv1.Status_ENDING_NONE || reports[0].GetConfiguration().GetDigestSha256() == "" {
 		t.Fatalf("the platform was told %d reports, the first %+v", len(reports), reports[0])
 	}
+	spoken := reports[0].GetCompatibility()
+	if spoken.GetContracts() != contractsRelease() || spoken.GetProtocolVersion() != protocol.Version ||
+		spoken.GetEventSchemaVersion() != protocol.EventSchemaVersion || spoken.GetInventorySchemaVersion() != protocol.InventorySchemaVersion ||
+		spoken.GetPolicySchemaVersion() != policy.SchemaVersion || spoken.GetUpdateSchemaVersion() != update.SchemaVersion ||
+		spoken.GetUpdates().GetEnabled() || spoken.GetUpdates().GetFormat() != packaged() || spoken.GetUpdates().GetStateGeneration() != update.StateGeneration {
+		t.Fatalf("an agent that takes no update said it speaks %v", spoken)
+	}
 	opened, _ := logged(t, serveStopped(t, path), "spool_opened")
 	if events, _ := opened["events"].(map[string]any); events["outstanding"] != float64(0) || events["delivered"] != float64(3) {
 		t.Fatalf("after delivering, the agent opened its spool as %v", opened)
