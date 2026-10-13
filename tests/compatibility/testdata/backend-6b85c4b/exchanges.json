@@ -1,0 +1,104 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "6b85c4be62a5cc75c53c9404ab51a0f6365fb827",
+    "contracts": "v0.17.0"
+  },
+  "exchanges": [
+    {
+      "name": "events-accepted",
+      "route": "POST /v1/events",
+      "status": 200
+    },
+    {
+      "name": "events-protocol-2",
+      "route": "POST /v1/events",
+      "status": 426
+    },
+    {
+      "name": "events-schema-2",
+      "route": "POST /v1/events",
+      "status": 422
+    },
+    {
+      "name": "events-unknown-class",
+      "route": "POST /v1/events",
+      "status": 422
+    },
+    {
+      "name": "events-unknown-transport",
+      "route": "POST /v1/events",
+      "status": 422
+    },
+    {
+      "name": "events-invalid-record",
+      "route": "POST /v1/events",
+      "status": 422
+    },
+    {
+      "name": "inventory-accepted",
+      "route": "POST /v1/inventory",
+      "status": 200
+    },
+    {
+      "name": "inventory-protocol-2",
+      "route": "POST /v1/inventory",
+      "status": 426
+    },
+    {
+      "name": "inventory-schema-2",
+      "route": "POST /v1/inventory",
+      "status": 422
+    },
+    {
+      "name": "inventory-unknown-kind",
+      "route": "POST /v1/inventory",
+      "status": 422
+    },
+    {
+      "name": "inventory-unknown-mode",
+      "route": "POST /v1/inventory",
+      "status": 422
+    },
+    {
+      "name": "inventory-unknown-service-state",
+      "route": "POST /v1/inventory",
+      "status": 422
+    },
+    {
+      "name": "inventory-invalid-record",
+      "route": "POST /v1/inventory",
+      "status": 422
+    },
+    {
+      "name": "events-agent-not-registered",
+      "route": "POST /v1/events",
+      "status": 403
+    },
+    {
+      "name": "events-agent-not-admitted",
+      "route": "POST /v1/events",
+      "status": 403
+    },
+    {
+      "name": "events-unusable-identity",
+      "route": "POST /v1/events",
+      "status": 403
+    },
+    {
+      "name": "inventory-agent-not-registered",
+      "route": "POST /v1/inventory",
+      "status": 403
+    },
+    {
+      "name": "inventory-agent-not-admitted",
+      "route": "POST /v1/inventory",
+      "status": 403
+    },
+    {
+      "name": "inventory-unusable-identity",
+      "route": "POST /v1/inventory",
+      "status": 403
+    }
+  ]
+}

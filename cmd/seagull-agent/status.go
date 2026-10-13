@@ -26,6 +26,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/reporting"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	"github.com/dynasmon/Seagull-agent-v2/internal/status"
+	"github.com/dynasmon/Seagull-agent-v2/internal/update"
 )
 
 // What the running agent says of itself, read off the components it composed:
@@ -50,6 +51,7 @@ type observing struct {
 	delivery       *delivery.Delivery
 	follower       *policy.Follower
 	reporter       *reporting.Reporter
+	updater        *update.Follower
 	boot           string
 	granted        *status.Privileges
 	previous       *status.Previous
@@ -85,6 +87,7 @@ func (o *observing) snapshot() status.Snapshot {
 		o.resources(&snapshot),
 		o.configuration.policied(o.follower, now),
 		o.reported(enrolled),
+		o.updated(),
 	}
 	return snapshot
 }

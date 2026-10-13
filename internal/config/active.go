@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"sync"
 )
 
@@ -55,6 +56,8 @@ func (c Config) settled(next Config) error {
 		{name: "server.renewal_url", before: c.Server.RenewalURL, after: next.Server.RenewalURL},
 		{name: "server.trust_bundle", before: c.Server.TrustBundle, after: next.Server.TrustBundle},
 		{name: "policy.signers", before: c.Policy.Signers, after: next.Policy.Signers},
+		{name: "updates.enabled", before: strconv.FormatBool(c.Updates.Enabled), after: strconv.FormatBool(next.Updates.Enabled)},
+		{name: "updates.root", before: c.Updates.Root, after: next.Updates.Root},
 		{name: "transport.connect_timeout", before: c.Transport.ConnectTimeout.String(), after: next.Transport.ConnectTimeout.String()},
 		{name: "transport.request_timeout", before: c.Transport.RequestTimeout.String(), after: next.Transport.RequestTimeout.String()},
 		{name: "transport.max_response_bytes", before: c.Transport.MaxResponseBytes.String(), after: next.Transport.MaxResponseBytes.String()},

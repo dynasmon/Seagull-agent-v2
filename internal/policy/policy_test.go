@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-agent-v2/internal/dsse"
 	"github.com/dynasmon/Seagull-agent-v2/internal/policy"
 	policyv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/policy/v1"
 )
@@ -57,7 +58,7 @@ func named(revision uint64, targets ...string) *policyv1.Policy {
 
 func sealed(t *testing.T, payloadType string, payload []byte, keys ...*ecdsa.PrivateKey) []byte {
 	t.Helper()
-	digest := sha256.Sum256(policy.PAE(payloadType, payload))
+	digest := sha256.Sum256(dsse.PAE(payloadType, payload))
 	envelope := &policyv1.SignedPolicy{Payload: payload, PayloadType: payloadType}
 	for _, key := range keys {
 		signature, err := ecdsa.SignASN1(rand.Reader, key, digest[:])
@@ -84,12 +85,6 @@ func signed(t *testing.T, held *policyv1.Policy, keys ...*ecdsa.PrivateKey) []by
 		t.Fatalf("encode the policy: %v", err)
 	}
 	return sealed(t, policy.PayloadType, payload, keys...)
-}
-
-func TestPAEIsTheEncodingDSSESigns(t *testing.T) {
-	if encoded := policy.PAE("http://example.com/HelloWorld", []byte("hello world")); string(encoded) != "DSSEv1 29 http://example.com/HelloWorld 11 hello world" {
-		t.Fatalf("the pre-authentication encoding is %q", encoded)
-	}
 }
 
 func TestAPolicyIsVerifiedUnderAKeyTheAgentAccepts(t *testing.T) {

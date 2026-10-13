@@ -86,6 +86,23 @@ func TestASnapshotIsPrivateAndReplacedWhole(t *testing.T) {
 	}
 }
 
+func TestAStatusIsReadForTheAccountThatWroteItAndNoOther(t *testing.T) {
+	directory := private(t)
+	keeper, err := status.NewKeeper(opened(t, directory), time.Second, func() status.Snapshot {
+		return snapshot(status.Component{Name: "spool", State: status.Running})
+	}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("compose the keeper: %v", err)
+	}
+	keeper.Stopped("the agent was asked to stop")
+	if held, err := status.ReadOwned(directory, os.Geteuid()); err != nil || held.Reason != "the agent was asked to stop" {
+		t.Fatalf("the status read for the account that wrote it says %q: %v", held.Reason, err)
+	}
+	if _, err := status.ReadOwned(directory, os.Geteuid()+1); !errors.Is(err, status.ErrInsecure) {
+		t.Fatalf("a status was read for an account that did not write it: %v", err)
+	}
+}
+
 func TestAStatusThatIsMissingDamagedNewerOrNotPrivateIsNotRead(t *testing.T) {
 	written := func(t *testing.T, content string, mode os.FileMode) string {
 		t.Helper()

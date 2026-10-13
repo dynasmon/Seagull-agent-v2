@@ -21,6 +21,7 @@ const (
 	MinStatusInterval     = 10 * time.Second
 	MaxStatusInterval     = time.Hour
 	MaxStatusText         = 1 << 10
+	MaxStatusVersion      = 128
 	MaxStatusName         = 64
 	MaxStatusParts        = 32
 	MaxStatusStreams      = 8

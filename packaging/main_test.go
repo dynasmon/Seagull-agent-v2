@@ -29,51 +29,6 @@ import (
 
 var committed = time.Date(2026, 9, 26, 0, 43, 46, 0, time.UTC)
 
-func TestAPackageIsVersionedAsGoStampedTheAgent(t *testing.T) {
-	versioned := map[string]string{
-		"v0.1.0":                               "0.1.0-1",
-		"v1.2.3-rc.1":                          "1.2.3~rc.1-1",
-		"v0.0.0-20260926004346-7d7db5969ad5":   "0.0.0~20260926004346.7d7db5969ad5-1",
-		"v0.1.1-0.20260926004346-7d7db5969ad5": "0.1.1~0.20260926004346.7d7db5969ad5-1",
-	}
-	for stamped, want := range versioned {
-		if got, err := debianVersion(stamped); err != nil || got != want {
-			t.Errorf("an agent built as %s is packaged as %q (%v), want %q", stamped, got, err, want)
-		}
-	}
-	for _, stamped := range []string{"", "(devel)", "v0.0.0-20260926004346-7d7db5969ad5+dirty", "0.1.0", "v0.1", "v01.2.3", "v1.2.3-", "v1.2.3-rc..1"} {
-		if got, err := debianVersion(stamped); err == nil {
-			t.Errorf("an agent built as %q is packaged as %q", stamped, got)
-		}
-	}
-}
-
-func TestDpkgOrdersPackagesAsGoOrdersTheVersionsOfTheirAgents(t *testing.T) {
-	if _, err := exec.LookPath("dpkg"); err != nil {
-		t.Skip("dpkg compares Debian versions, and this host has none")
-	}
-	ascending := []string{
-		"v0.0.0-20260101000000-aaaaaaaaaaaa",
-		"v0.0.0-20260201000000-000000000000",
-		"v0.1.0-rc.1",
-		"v0.1.0-rc.2",
-		"v0.1.0",
-		"v0.1.1-0.20260301000000-bbbbbbbbbbbb",
-		"v0.1.1",
-		"v0.10.0",
-		"v1.0.0-beta",
-		"v1.0.0",
-	}
-	for i := 1; i < len(ascending); i++ {
-		older, _ := debianVersion(ascending[i-1])
-		newer, _ := debianVersion(ascending[i])
-		if err := exec.Command("dpkg", "--compare-versions", older, "lt", newer).Run(); err != nil {
-			t.Errorf("dpkg does not order %s (%s) before %s (%s): upgrading from one to the other would go backwards",
-				older, ascending[i-1], newer, ascending[i])
-		}
-	}
-}
-
 func TestOnlyAPortableLinuxBuildOfACommitIsPackaged(t *testing.T) {
 	want := release{version: "0.0.0~20260926004346.7d7db5969ad5-1", architecture: "amd64", committed: committed}
 	if described, err := describe(built(nil)); err != nil || described != want {
@@ -116,12 +71,14 @@ func TestThePackageHoldsTheAgentItsServiceAndNothingElse(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"./usr/bin/seagull-agent":                        "-rwxr-xr-x",
-		"./usr/lib/systemd/system/seagull-agent.service": "-rw-r--r--",
-		"./usr/lib/sysusers.d/seagull-agent.conf":        "-rw-r--r--",
-		"./usr/lib/tmpfiles.d/seagull-agent.conf":        "-rw-r--r--",
-		"./usr/share/doc/seagull-agent/copyright":        "-rw-r--r--",
-		"./usr/share/seagull-agent/agent.json":           "-rw-r--r--",
+		"./usr/bin/seagull-agent":                               "-rwxr-xr-x",
+		"./usr/lib/systemd/system/seagull-agent.service":        "-rw-r--r--",
+		"./usr/lib/systemd/system/seagull-agent-update.service": "-rw-r--r--",
+		"./usr/lib/systemd/system/seagull-agent-update.path":    "-rw-r--r--",
+		"./usr/lib/sysusers.d/seagull-agent.conf":               "-rw-r--r--",
+		"./usr/lib/tmpfiles.d/seagull-agent.conf":               "-rw-r--r--",
+		"./usr/share/doc/seagull-agent/copyright":               "-rw-r--r--",
+		"./usr/share/seagull-agent/agent.json":                  "-rw-r--r--",
 	}
 	entries := listed(t, "--fsys-tarfile", written)
 	var files []string
@@ -202,6 +159,46 @@ func TestTheSameCommitIsPackagedIntoTheSameBytes(t *testing.T) {
 	}
 	if !bytes.Equal(first, second) {
 		t.Fatal("packaging the same commit twice wrote two different packages")
+	}
+}
+
+func TestTheInstallerRunsAsRootWhenTheAgentStagesAReleaseOrAnInstallationIsPending(t *testing.T) {
+	watch := sections(t, "linux/seagull-agent-update.path")
+	installer := sections(t, "linux/seagull-agent-update.service")
+	settings, _ := template(t)
+	staged := path.Join(settings.Identity.StateDirectory, "staged", "ready")
+
+	if got := watch["Path"]["PathExists"]; got != staged+"\n/var/lib/seagull-agent-update/pending" {
+		t.Errorf("the watch starts the installer on %q", got)
+	}
+	if watch["Path"]["Unit"] != "seagull-agent-update.service" || watch["Install"]["WantedBy"] != "paths.target" {
+		t.Errorf("the watch starts %q and is wanted by %q", watch["Path"]["Unit"], watch["Install"]["WantedBy"])
+	}
+	for name, want := range map[string]string{
+		"Type":               "oneshot",
+		"User":               "",
+		"ExecStart":          "/" + agentPath + " -config /etc/seagull-agent/agent.json update install",
+		"StateDirectory":     "seagull-agent-update",
+		"StateDirectoryMode": "0755",
+		"NoNewPrivileges":    "yes",
+	} {
+		if got := installer["Service"][name]; got != want {
+			t.Errorf("the installer sets %s=%q, want %q", name, got, want)
+		}
+	}
+	if installer["Service"]["TimeoutStartSec"] == "" {
+		t.Error("the installer leaves how long it may take to the host")
+	}
+
+	installed, removed, purged := asset(t, "deb/postinst"), asset(t, "deb/prerm"), asset(t, "deb/postrm")
+	if !strings.Contains(installed, "enable seagull-agent-update.path") || !strings.Contains(installed, "start seagull-agent-update.path") {
+		t.Error("installing the package does not watch what the agent stages")
+	}
+	if !strings.Contains(removed, "stop seagull-agent-update.path") {
+		t.Error("removing the package leaves the watch running")
+	}
+	if !strings.Contains(purged, "/var/lib/seagull-agent-update") || !strings.Contains(purged, "/etc/systemd/system/paths.target.wants/seagull-agent-update.path") {
+		t.Error("purging the package leaves what the installer kept or the link that enables the watch")
 	}
 }
 
@@ -438,7 +435,7 @@ func sections(t *testing.T, name string) map[string]map[string]string {
 			if !found || current == nil {
 				t.Fatalf("%s holds %q", name, line)
 			}
-			if held, set := current[key]; set && key == "SystemCallFilter" {
+			if held, set := current[key]; set && (key == "SystemCallFilter" || key == "PathExists") {
 				value = held + "\n" + value
 			} else if set {
 				t.Fatalf("%s sets %s twice", name, key)

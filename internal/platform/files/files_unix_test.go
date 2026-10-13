@@ -202,3 +202,20 @@ func open(t *testing.T, path string) *os.File {
 	t.Cleanup(func() { _ = file.Close() })
 	return file
 }
+
+func TestAFileIsPrivateOnlyToTheAccountItIsNamedFor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "held")
+	if err := os.WriteFile(path, []byte("held"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	described, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := files.PrivateTo(described, os.Geteuid()); err != nil {
+		t.Fatalf("a file private to its owner was judged %v", err)
+	}
+	if err := files.PrivateTo(described, os.Geteuid()+1); err == nil {
+		t.Fatal("a file was judged private to an account that does not own it")
+	}
+}

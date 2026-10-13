@@ -17,8 +17,11 @@ import (
 
 // Read returns the snapshot the agent last wrote in directory, without the lock
 // of the installation, so it reads while the agent runs. It takes the snapshot
-// only from a directory and a file private to the account that reads them.
-func Read(directory string) (Snapshot, error) {
+// only from a directory and a file private to the account that reads them, and
+// ReadOwned from ones private to the account given.
+func Read(directory string) (Snapshot, error) { return ReadOwned(directory, os.Geteuid()) }
+
+func ReadOwned(directory string, account int) (Snapshot, error) {
 	described, err := os.Lstat(directory)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -28,7 +31,7 @@ func Read(directory string) (Snapshot, error) {
 	case !described.IsDir():
 		return Snapshot{}, fmt.Errorf("%w: %s is not a directory", ErrDamaged, directory)
 	}
-	if err := private(directory, described); err != nil {
+	if err := private(directory, described, account); err != nil {
 		return Snapshot{}, err
 	}
 	root, err := os.OpenRoot(directory)
@@ -46,7 +49,7 @@ func Read(directory string) (Snapshot, error) {
 	case !described.Mode().IsRegular():
 		return Snapshot{}, fmt.Errorf("%w: %s is not a regular file", ErrDamaged, path)
 	}
-	if err := private(path, described); err != nil {
+	if err := private(path, described, account); err != nil {
 		return Snapshot{}, err
 	}
 	file, err := root.Open(name)
@@ -96,8 +99,8 @@ func decode(content []byte) (Snapshot, error) {
 	return snapshot, nil
 }
 
-func private(path string, described fs.FileInfo) error {
-	if err := files.Private(described); err != nil {
+func private(path string, described fs.FileInfo, account int) error {
+	if err := files.PrivateTo(described, account); err != nil {
 		if errors.Is(err, errors.ErrUnsupported) {
 			return fmt.Errorf("read the status in %s: %w", path, err)
 		}

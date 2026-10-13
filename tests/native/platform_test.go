@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -57,6 +58,8 @@ type platform struct {
 	stocked   [][]byte
 	reports   []*agentv1.Status
 	statused  [][]byte
+	offered   []byte
+	packages  map[string][]byte
 }
 
 func emulate(t *testing.T) *platform {
@@ -292,9 +295,18 @@ func (p *platform) renew(w http.ResponseWriter, r *http.Request) {
 		encoded, _ := proto.Marshal(&controlv1.Refusal{Code: code, Detail: "refused by the emulated platform"})
 		answer(status, encoded)
 	}
-	if r.Method == http.MethodGet && r.URL.Path == "/v1/agents/policy" && r.TLS != nil && len(r.TLS.VerifiedChains) > 0 {
-		p.policy(w, r)
-		return
+	if r.Method == http.MethodGet && r.TLS != nil && len(r.TLS.VerifiedChains) > 0 {
+		switch {
+		case r.URL.Path == "/v1/agents/policy":
+			p.policy(w, r)
+			return
+		case r.URL.Path == "/v1/agents/update":
+			p.offer(w, r)
+			return
+		case strings.HasPrefix(r.URL.Path, "/v1/agents/update/packages/"):
+			p.hand(w, r)
+			return
+		}
 	}
 	if r.Method != http.MethodPost || r.URL.Path != "/v1/agents/certificate" || r.TLS == nil || len(r.TLS.VerifiedChains) == 0 {
 		refuse(http.StatusNotFound, "not_found")

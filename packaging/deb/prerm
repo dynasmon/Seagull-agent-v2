@@ -2,5 +2,5 @@
 set -e
 
 if [ -d /run/systemd/system ] && [ "$1" = remove ]; then
-	deb-systemd-invoke stop seagull-agent.service >/dev/null || true
+	deb-systemd-invoke stop seagull-agent-update.path seagull-agent.service >/dev/null || true
 fi

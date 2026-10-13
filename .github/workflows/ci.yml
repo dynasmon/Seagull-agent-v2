@@ -49,7 +49,7 @@ jobs:
   package:
     name: debian package on ubuntu 24.04
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -65,7 +65,9 @@ jobs:
           make package DIST=dist/again
           cmp dist/deb/*.deb dist/again/deb/*.deb
           sha256sum dist/deb/*.deb
-      - name: install the package, run it as a service and remove it
+      - name: package the commit again as a later release, to update the agent to
+        run: make ahead
+      - name: install the package, run it as a service, update it and remove it
         run: make native-gate
 
   vulnerabilities:

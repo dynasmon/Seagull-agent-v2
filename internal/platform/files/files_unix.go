@@ -10,6 +10,8 @@ import (
 	"syscall"
 )
 
+const NoFollow = syscall.O_NOFOLLOW
+
 // The lock belongs to the open file, so the kernel releases it when the file is
 // closed or the process ends, however it ends.
 func Lock(file *os.File) error {
@@ -52,13 +54,15 @@ func Available(file *os.File) (int64, error) {
 	return int64(described.Bavail) * int64(described.Bsize), nil
 }
 
-func Private(info fs.FileInfo) error {
+func Private(info fs.FileInfo) error { return PrivateTo(info, os.Geteuid()) }
+
+func PrivateTo(info fs.FileInfo, account int) error {
 	described, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
 		return errors.New("does not say who owns it")
 	}
-	if owner, agent := int(described.Uid), os.Geteuid(); owner != agent {
-		return fmt.Errorf("belongs to uid %d and the agent runs as uid %d", owner, agent)
+	if owner := int(described.Uid); owner != account {
+		return fmt.Errorf("belongs to uid %d and the agent runs as uid %d", owner, account)
 	}
 	if permissions := info.Mode().Perm(); permissions&0o077 != 0 {
 		return fmt.Errorf("grants %s, which opens it to its group or to others", permissions)

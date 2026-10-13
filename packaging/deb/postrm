@@ -6,8 +6,8 @@ set -e
 # its keys and its spool with the settings; the account stays, since a file the
 # agent left elsewhere would otherwise belong to whoever is given its uid next.
 if [ "$1" = purge ]; then
-	rm -rf /var/lib/seagull-agent /etc/seagull-agent /etc/systemd/system/seagull-agent.service.d
-	rm -f /etc/systemd/system/multi-user.target.wants/seagull-agent.service
+	rm -rf /var/lib/seagull-agent /var/lib/seagull-agent-update /etc/seagull-agent /etc/systemd/system/seagull-agent.service.d
+	rm -f /etc/systemd/system/multi-user.target.wants/seagull-agent.service /etc/systemd/system/paths.target.wants/seagull-agent-update.path
 fi
 
 if [ -d /run/systemd/system ]; then

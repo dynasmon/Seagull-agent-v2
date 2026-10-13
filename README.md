@@ -116,6 +116,13 @@ from `policy.signers` withdraws what it signed; one that expires stays in force
 and is reported until a newer one arrives. `status` says which revision the
 agent runs on, and every policy applied or refused is in the journal.
 
+### Signed updates
+
+Once an operator enables it, the agent installs the release the platform asks
+it to run when a catalog operators signed off the platform names it, and goes
+back to the release before when the new one does not run as it should. See
+[Updating](#updating).
+
 ### Status and diagnostics
 
 The running agent writes its status every 30 seconds, and `status` prints it,
@@ -235,7 +242,8 @@ root or the agent's account may write it. On SIGHUP the agent validates the
 whole file before it replaces its configuration, and keeps the one it has when
 it refuses the new one; the state directory, the key provider, the `server`
 settings, the connect and request timeouts, the reply bound, the log format,
-the shutdown timeout and the `policy.signers` file named take a restart.
+the shutdown timeout, the `policy.signers` file named and `updates.enabled` and
+`updates.root` take a restart.
 
 | Setting | Default | What it decides |
 |---|---|---|
@@ -252,6 +260,10 @@ the shutdown timeout and the `policy.signers` file named take a restart.
 | `policy.signers` | none | the PEM public keys, ECDSA P-256, a signed policy is accepted under; none asks for no policy |
 | `policy.interval` | `5m` | how often the agent asks for the policy that names it |
 | `reporting.interval` | `1m` | how often the agent tells the platform how it runs, between `10s` and `1h` |
+| `updates.enabled` | `false` | whether the agent installs the release the platform asks it to run |
+| `updates.root` | none | the update root the agent is provisioned with, as its signed envelope; needed once updates are enabled |
+| `updates.interval` | `15m` | how often the agent asks whether to update, between `1m` and `24h` |
+| `updates.check_within` | `4m` | how long a new release has to show it runs before the installer goes back, between `1m` and `1h` |
 
 `transport.*` sets the timeouts, the batch sizes, within the platform's
 ceilings, and the upload bandwidth; `resources.*` also bounds the scans and
@@ -288,8 +300,9 @@ drop-in loosens the agent as a whole.
 ## Self-protection
 
 The agent runs only when root alone can change what decides it: its
-executable, its configuration, `server.trust_bundle`, `policy.signers` and the
-directory that holds its installation, with every directory above them. When
+executable, its configuration, `server.trust_bundle`, `policy.signers`,
+`updates.root` and the directory that holds its installation, with every
+directory above them. When
 another account could change one of them, its own included, the agent refuses
 to start and says which and why, so taking over its account does not change
 what it runs after it starts again; `config check` says the same without
@@ -323,11 +336,11 @@ disabled or revoked for it, and a copied key is still found at renewal, as
 Install a newer package the same way. The upgrade replaces the agent and its
 service and restarts the service when it is enabled or running; the
 installation, its keys, its backlog and its settings stay, so it runs on as the
-same agent. The agent never updates itself.
+same agent. The agent updates itself only as [Updating](#updating) describes.
 
 ```bash
 sudo apt remove seagull-agent   # keeps the installation, the settings and the account
-sudo apt purge seagull-agent    # also deletes them and the service's overrides
+sudo apt purge seagull-agent    # also deletes them, what the installer kept and the service's overrides
 ```
 
 `purge` deletes the installation's keys, but not the certificate the platform
@@ -337,6 +350,47 @@ installation aside under `replaced/` and starts a new, unenrolled one, for a
 host whose state was damaged or whose key may have been copied. Keys set aside
 still authenticate until their certificate expires or is revoked, so revoke the
 old agent when it was enrolled.
+
+## Updating
+
+The agent installs a release only once an operator enables updates, and only a
+release operators authorized off the platform, after The Update Framework: the
+root role of a root signs the next root, and its catalog role signs a catalog of
+every release agents may install, with the digest and size of its package. Give
+the agent the first root as root, enable updates and restart the service:
+
+```json
+"updates": {"enabled": true, "root": "/etc/seagull-agent/update-root.pb"}
+```
+
+Every `updates.interval`, the agent asks the platform, on the listener it renews
+on, for the roots after the one it was provisioned with, the newest catalog and
+the version the platform wants it to run, and verifies all of it from
+`updates.root`. It refuses a root or a catalog older than one it verified, a
+catalog that ran out, a release for another system, one older than the release
+it runs unless that release `replaces` it, and one that keeps an older
+generation of state than the agent's. A release is installed only over one the
+same catalog names, which is the release the installer goes back to: the agent
+downloads both packages, checks every byte against the catalog and stages them.
+
+The installer, `seagull-agent-update.service`, runs as root and only when
+`seagull-agent-update.path` sees a staged release or a pending installation. It
+trusts nothing the agent's account wrote: it verifies what was staged again
+from `updates.root` and what it verified before, copies each package where only
+root writes and checks the copy, and has dpkg confirm the package is the
+release. It installs with apt, keeping the configuration, then waits
+`updates.check_within` for a run of the new release, started after the
+installation, to say it runs as it should for a whole status interval; unless
+one does, it installs the release before again and waits for it the same way.
+Each step is written down before it is taken, so an installation a crash or a
+reboot interrupted is taken to its end when the host starts again, and going
+back is refused once the state was moved past what the release before reads.
+How the last update went is in `status`, in what the agent reports to the
+platform and in `journalctl -u seagull-agent-update`.
+
+The platform holds no key of either role: a taken platform can withhold an
+update or move an agent to another release a catalog it verified allows, but not
+to anything operators did not sign, nor back past what a release allows.
 
 ## Runtime state
 
@@ -353,6 +407,9 @@ old agent when it was enrolled.
 | `/var/lib/seagull-agent/status/status.json` | What the agent last said of itself |
 | `/var/lib/seagull-agent/policy/policy.json` | The signed policy applied last, and the revision no later one goes below |
 | `/var/lib/seagull-agent/reporting/sequence.json` | The count of the reports the installation sent, which never goes back |
+| `/var/lib/seagull-agent/update/` | The newest root and catalog the agent verified, which nothing handed later goes below, and the generation of its state |
+| `/var/lib/seagull-agent/staged/` | The release staged for the installer, with the one the agent runs |
+| `/var/lib/seagull-agent-update/` | The installer's journal, what it verified and the packages it installs from, root's |
 | `/var/lib/seagull-agent/replaced/` | Installations set aside by `installation replace` |
 
 The state directory is private to the agent's account and locked while the
@@ -363,8 +420,9 @@ agent's identity, and a copied key is revoked with its agent.
 
 ## Compatibility
 
-This build speaks protocol 1, event schema 1 and inventory schema 1, as
-`seagull-agent -version` prints, from the contracts release `go.mod` pins. The
+This build speaks protocol 1, event schema 1, inventory schema 1 and status
+schema 1, as `seagull-agent -version` prints, and reads update metadata of
+schema 1, from the contracts release `go.mod` pins. The
 agent negotiates nothing before it sends; the platform's answer to a batch is
 where it learns what the platform accepts. A refused version, or a refused value
 its contracts declare, is an incompatibility that holds the records rather than
@@ -374,10 +432,12 @@ fields the contracts do not declare are ignored.
 
 Compatibility is claimed only with the backend commits recorded under
 [`tests/compatibility/testdata`](tests/compatibility/testdata): 6fae345, 2829b0d,
-0656b2a, fdd814d and 46ca9c7, whose ingest gateway, control plane and pipeline
-were driven with what this agent sends; fdd814d and 46ca9c7 also handed it the
-signed policies it applies, and 46ca9c7 took and kept the status reports an
-installed agent sent in the native gate. The suite fails when `go.mod` pins contracts no recorded platform was
+0656b2a, fdd814d, 46ca9c7 and 6b85c4b, whose ingest gateway, control plane and
+pipeline were driven with what this agent sends; fdd814d, 46ca9c7 and 6b85c4b
+also handed it the signed policies it applies, 46ca9c7 and 6b85c4b took and kept
+the status reports an installed agent sent in the native gate, and 6b85c4b
+handed it the signed releases it installs and took what it reported while it was
+updated. The suite fails when `go.mod` pins contracts no recorded platform was
 built with, or when a recorded answer reads differently.
 
 ## Build and test

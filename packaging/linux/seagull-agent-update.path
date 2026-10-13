@@ -1,0 +1,11 @@
+[Unit]
+Description=Seagull endpoint agent releases staged for installation
+Documentation=https://github.com/dynasmon/Seagull-agent-v2#updating
+
+[Path]
+PathExists=/var/lib/seagull-agent/staged/ready
+PathExists=/var/lib/seagull-agent-update/pending
+Unit=seagull-agent-update.service
+
+[Install]
+WantedBy=paths.target

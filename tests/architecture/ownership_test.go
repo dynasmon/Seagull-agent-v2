@@ -175,6 +175,34 @@ var dependencyRules = []dependencyRule{
 		reason:    "a policy is asked for through the transport alone, which authenticates the platform and presents the agent's credential; the policy decides what an answer means",
 	},
 	{
+		packages:   "internal/dsse",
+		forbidden:  append([]string{modulePath, contractsPath, "os"}, networkPackages...),
+		transitive: true,
+		reason:     "what a dsse signature covers is a question about bytes: it opens no file, reaches no host and knows nothing the agent holds",
+	},
+	{
+		packages: "internal/update",
+		forbidden: []string{
+			modulePath + "/internal/identity",
+			modulePath + "/internal/pki",
+			modulePath + "/internal/enrollment",
+			modulePath + "/internal/renewal",
+			modulePath + "/internal/delivery",
+			modulePath + "/internal/spool",
+			modulePath + "/internal/modules",
+			modulePath + "/internal/governor",
+			modulePath + "/internal/policy",
+			modulePath + "/internal/config",
+		},
+		transitive: true,
+		reason:     "an update is verified under the root the agent was provisioned with and installed by the package manager the composition root hands it: it holds no key of the installation, reaches no collector, spool or delivery, reads no configuration and applies no policy",
+	},
+	{
+		packages:  "internal/update",
+		forbidden: []string{"crypto/tls", "os/exec"},
+		reason:    "an update is asked for through the transport alone, which authenticates the platform and presents the agent's credential, and installed through the adapter the composition root hands it, never by running a program itself",
+	},
+	{
 		packages:  "internal/reporting",
 		forbidden: []string{modulePath},
 		allowed: []string{
