@@ -9,6 +9,9 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
+	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
+	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 	policyv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/policy/v1"
 )
 
@@ -19,6 +22,7 @@ var (
 		policyv1.Module_MODULE_PROCESSES:      "processes",
 		policyv1.Module_MODULE_FILES:          "files",
 		policyv1.Module_MODULE_NETWORK:        "network",
+		policyv1.Module_MODULE_ASSESSMENT:     "assessment",
 	}
 	levels = map[policyv1.LogLevel]string{
 		policyv1.LogLevel_LOG_LEVEL_DEBUG: "debug",
@@ -47,6 +51,9 @@ func Overlay(local config.Config, settings *policyv1.Settings) (config.Config, [
 		candidate.Modules[name] = held
 	}
 
+	if err := checklist(settings.GetAssessment()); err != nil {
+		return config.Config{}, nil, err
+	}
 	if level := settings.GetLogLevel(); level != policyv1.LogLevel_LOG_LEVEL_UNSPECIFIED {
 		written, known := levels[level]
 		if !known {
@@ -113,6 +120,31 @@ func Overlay(local config.Config, settings *policyv1.Settings) (config.Config, [
 		return config.Config{}, nil, fmt.Errorf("%w: %w", ErrInapplicable, err)
 	}
 	return made, kept, nil
+}
+
+// Which checks a policy asks for is read whole, though each check is read on
+// its own when it is run: a check named by nothing, or twice, could not be
+// answered once each.
+func checklist(held *assessmentv1.Checklist) error {
+	if held == nil {
+		return nil
+	}
+	checks := held.GetChecks()
+	if len(checks) == 0 || len(checks) > protocol.MaxAssessmentResults {
+		return fmt.Errorf("%w: settings.assessment names %d checks, and a checklist names between 1 and %d", ErrMalformed, len(checks), protocol.MaxAssessmentResults)
+	}
+	seen := make(map[string]bool, len(checks))
+	for index, check := range checks {
+		switch id := check.GetCheckId(); {
+		case !identifier.MatchString(id):
+			return fmt.Errorf("%w: settings.assessment.checks[%d].check_id %s is not an identifier", ErrMalformed, index, secrets.Shown(id))
+		case seen[id]:
+			return fmt.Errorf("%w: settings.assessment names check %s twice", ErrMalformed, id)
+		default:
+			seen[id] = true
+		}
+	}
+	return nil
 }
 
 func sized(held *config.Size, asked uint64, setting string, kept *[]Kept) {
