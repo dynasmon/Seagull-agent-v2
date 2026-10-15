@@ -17,6 +17,7 @@ import (
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/dsse"
 	"github.com/dynasmon/Seagull-agent-v2/internal/policy"
+	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 	policyv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/policy/v1"
 )
 
@@ -207,5 +208,66 @@ func TestAVerifierHoldsP256KeysAndAtLeastOne(t *testing.T) {
 	}
 	if _, err := policy.NewVerifier([]*ecdsa.PublicKey{&wider.PublicKey}); err == nil {
 		t.Fatal("a verifier was built with a P-384 key")
+	}
+}
+
+// A check is read on its own when it runs: a test, or a value in one, newer
+// than this agent is answered as unsupported then, and never keeps the rest of
+// the policy from being read. Anything else the agent does not know is
+// refused with the policy.
+func TestACheckNewerThanTheAgentIsReadWithThePolicyAndAnythingElseNewerIsNot(t *testing.T) {
+	key := signingKey(t)
+	accepted := verifier(t, key)
+	held := named(7, "web-01")
+	held.Settings = &policyv1.Settings{Assessment: &assessmentv1.Checklist{Checks: []*assessmentv1.Check{
+		{CheckId: "ssh.root-login", Test: &assessmentv1.Check_Directive{Directive: &assessmentv1.DirectiveTest{
+			Source: assessmentv1.DirectiveTest_SOURCE_SSHD, Name: "PermitRootLogin", Allowed: []string{"no"},
+		}}},
+		{CheckId: "from-tomorrow"},
+	}}}
+	payload, err := proto.Marshal(held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var check, list []byte
+	check = protowire.AppendTag(check, 1, protowire.BytesType)
+	check = protowire.AppendString(check, "from-tomorrow")
+	check = protowire.AppendTag(check, 99, protowire.BytesType)
+	check = protowire.AppendBytes(check, []byte{0x08, 0x01})
+	first, err := proto.Marshal(held.Settings.Assessment.Checks[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	list = protowire.AppendTag(list, 1, protowire.BytesType)
+	list = protowire.AppendBytes(list, first)
+	list = protowire.AppendTag(list, 1, protowire.BytesType)
+	list = protowire.AppendBytes(list, check)
+	settings := protowire.AppendTag(nil, 4, protowire.BytesType)
+	settings = protowire.AppendBytes(settings, list)
+	held.Settings = nil
+	bare, err := proto.Marshal(held)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer := protowire.AppendTag(slices.Clone(bare), 7, protowire.BytesType)
+	newer = protowire.AppendBytes(newer, settings)
+	verified, err := accepted.Verify(sealed(t, policy.PayloadType, newer, key))
+	if err != nil {
+		t.Fatalf("a policy carrying a check newer than the agent was refused: %v", err)
+	}
+	checks := verified.Policy.GetSettings().GetAssessment().GetChecks()
+	if len(checks) != 2 || checks[1].GetTest() != nil || len(checks[1].ProtoReflect().GetUnknown()) == 0 {
+		t.Fatalf("the newer check reads as %v", checks)
+	}
+
+	outside := protowire.AppendTag(slices.Clone(settings), 9, protowire.VarintType)
+	outside = protowire.AppendVarint(outside, 1)
+	refused := protowire.AppendTag(slices.Clone(bare), 7, protowire.BytesType)
+	refused = protowire.AppendBytes(refused, outside)
+	if _, err := accepted.Verify(sealed(t, policy.PayloadType, refused, key)); !errors.Is(err, policy.ErrMalformed) {
+		t.Fatalf("a policy holding a setting the agent does not know beside its checks was answered %v", err)
+	}
+	if _, err := accepted.Verify(sealed(t, policy.PayloadType, payload, key)); err != nil {
+		t.Fatalf("a policy carrying checks was refused: %v", err)
 	}
 }
