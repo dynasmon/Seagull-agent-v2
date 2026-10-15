@@ -1,0 +1,37 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "331492dfdaaa7d1ac80cffe4d61c3868835a5e3d",
+    "contracts": "v0.19.0"
+  },
+  "recorded_at": "2026-10-15T22:12:21.519304095Z",
+  "source": "policy-001.pb",
+  "signers": "checklist-signers.pem",
+  "publications": [
+    {
+      "name": "checklist-published",
+      "checks": 20,
+      "status": 201,
+      "code": "",
+      "detail": ""
+    },
+    {
+      "name": "checklist-newer-test",
+      "checks": 21,
+      "status": 422,
+      "code": "malformed_policy",
+      "detail": "the policy is not one the platform takes: its Check holds fields this platform does not know"
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "checklist-served",
+      "route": "GET /v1/agents/policy",
+      "agent_id": "web-01",
+      "if_none_match": "",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "etag": "\"9dbd50a3922d988837a54b1a954b2ae2e1e9d76af3856f9e985c3aff3a4fee56\""
+    }
+  ]
+}
