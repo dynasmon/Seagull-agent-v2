@@ -24,6 +24,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/assessment"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/integrity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
@@ -529,6 +530,39 @@ func TestTheStatusSaysWhatTheNetworkModuleCannotSeeAndWhatToDo(t *testing.T) {
 		}
 		if (failing != nil) != held.failing || held.failing && !strings.Contains(network.Recovery(failing), held.recovery) {
 			t.Errorf("%s: the status fails with %v and recovers with %q", name, failing, network.Recovery(failing))
+		}
+	}
+}
+
+func TestTheStatusSaysWhatTheAssessmentFoundAndWhenItCannotAdmitIt(t *testing.T) {
+	assessed := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	ran := assessment.Stats{PolicyID: "linux-baseline", Revision: 7, Checks: 12, Assessed: assessed, Sent: assessed,
+		Counts: assessment.Counts{Passed: 8, Failed: 2, Errors: 1, Unsupported: 0, NotApplicable: 1}}
+	beyond := ran
+	beyond.Failure = fmt.Errorf("%w: it encodes to 300000 bytes", assessment.ErrBeyondBatch)
+	behind := ran
+	behind.Failure = fmt.Errorf("%w: the clock reads earlier", assessment.ErrClockBehind)
+	for name, held := range map[string]struct {
+		stats    assessment.Stats
+		said     []string
+		failing  bool
+		recovery string
+	}{
+		"no policy":   {stats: assessment.Stats{Idle: "no policy is in force, so nothing asks for checks"}, said: []string{"no policy is in force"}},
+		"a first run": {stats: assessment.Stats{}, said: []string{"assessing the host for the first time"}},
+		"what it found": {stats: ran, said: []string{"ran the 12 checks of revision 7 of linux-baseline at 2026-10-15T12:00:00Z: 8 passed, 2 failed, 1 could not be read, 0 are not run by this agent and 1 do not apply",
+			"last admitted what it found at 2026-10-15T12:00:00Z"}},
+		"too large to admit": {stats: beyond, said: []string{"what it found is not admitted"}, failing: true, recovery: "transport.max_batch_bytes"},
+		"a clock behind":     {stats: behind, said: []string{"ran the 12 checks"}},
+	} {
+		reason, failing := assessing(held.stats)
+		for _, said := range held.said {
+			if !strings.Contains(reason, said) {
+				t.Errorf("%s: the status says %q, without %q", name, reason, said)
+			}
+		}
+		if (failing != nil) != held.failing || held.failing && !strings.Contains(assessment.Recovery(failing), held.recovery) {
+			t.Errorf("%s: the status fails with %v and recovers with %q", name, failing, assessment.Recovery(failing))
 		}
 	}
 }
