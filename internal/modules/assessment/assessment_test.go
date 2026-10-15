@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
+	"github.com/dynasmon/Seagull-agent-v2/internal/platform/dpkg"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 )
@@ -358,6 +359,37 @@ func TestAnAssessmentTheBatchOrThePlatformCannotTakeIsNotAdmittedAndSaysWhy(t *t
 	far := h.round(madeAt.Add(-10 * time.Minute))
 	if far.Stats().Failure != nil || len(h.admitted()) != 2 || len(h.log.lines("assessment_clock_regressed")) != 1 {
 		t.Fatalf("an assessment further behind the last than any platform admits was answered %v", far.Stats().Failure)
+	}
+}
+
+type stalling struct{ *fakeHost }
+
+func (stalling) Packages(ctx context.Context) ([]dpkg.Package, error) {
+	<-ctx.Done()
+	return nil, errors.New("dpkg-query stopped: signal: killed")
+}
+
+func TestARoundThatRunsOutOfItsTimeAnswersWhatItDidNotReachAsAnErrorAndStillAdmitsIt(t *testing.T) {
+	h := prepare(t)
+	collector := h.round(madeAt, func(options *Options) { options.Host, options.Within = stalling{h.host}, 50*time.Millisecond })
+	admitted := h.admitted()
+	if len(admitted) != 1 || len(admitted[0].GetResults()) != 5 {
+		t.Fatalf("a round that ran out of time admitted %v:\n%s", admitted, h.log)
+	}
+	results := admitted[0].GetResults()
+	if results[0].GetOutcome() != pass || results[1].GetOutcome() != pass {
+		t.Errorf("the checks answered before the round ran out of time were answered %v", results[:2])
+	}
+	if results[2].GetOutcome() != erred || !strings.Contains(results[2].GetEvidence(), "killed") {
+		t.Errorf("the check whose source took too long was answered %v", results[2])
+	}
+	for _, result := range results[3:] {
+		if result.GetOutcome() != erred || !strings.Contains(result.GetEvidence(), "ran out of the time") {
+			t.Errorf("a check the round did not reach was answered %v", result)
+		}
+	}
+	if stats := collector.Stats(); stats.Counts != (Counts{Passed: 2, Errors: 3}) || stats.Failure != nil {
+		t.Fatalf("the module says %+v", stats)
 	}
 }
 
