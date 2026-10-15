@@ -16,6 +16,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/assessment"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/integrity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
@@ -47,6 +48,7 @@ type observing struct {
 	processes      *inventory.Collector
 	files          *integrity.Collector
 	network        *network.Collector
+	assessment     *assessment.Collector
 	renewer        *renewal.Renewer
 	delivery       *delivery.Delivery
 	follower       *policy.Follower
@@ -151,6 +153,12 @@ func (o *observing) collected(snapshot *status.Snapshot) status.Component {
 			held.Reason = status.Text(reason)
 			if failing != nil {
 				held.State, state, recovery = status.Degraded, status.Degraded, network.Recovery(failing)
+			}
+		case module.State == modules.Running && module.Name == assessment.Name && o.assessment != nil:
+			reason, failing := assessing(o.assessment.Stats())
+			held.Reason = status.Text(reason)
+			if failing != nil {
+				held.State, state, recovery = status.Degraded, status.Degraded, assessment.Recovery(failing)
 			}
 		}
 		snapshot.Modules = append(snapshot.Modules, held)
@@ -279,6 +287,28 @@ func networking(held network.Stats) (string, error) {
 		said = append(said, "not seeing "+gaps)
 	}
 	return strings.Join(said, "; "), held.Failure
+}
+
+func assessing(held assessment.Stats) (string, error) {
+	if held.Idle != "" {
+		return held.Idle, nil
+	}
+	if held.Assessed.IsZero() {
+		return "assessing the host for the first time", nil
+	}
+	said := []string{fmt.Sprintf("ran the %d checks of revision %d of %s at %s: %d passed, %d failed, %d could not be read, %d are not run by this agent and %d do not apply",
+		held.Checks, held.Revision, held.PolicyID, held.Assessed.UTC().Format(time.RFC3339), held.Counts.Passed, held.Counts.Failed, held.Counts.Errors,
+		held.Counts.Unsupported, held.Counts.NotApplicable)}
+	if !held.Sent.IsZero() {
+		said = append(said, "last admitted what it found at "+held.Sent.UTC().Format(time.RFC3339))
+	}
+	if !held.Waiting.IsZero() {
+		said = append(said, fmt.Sprintf("waiting since %s for room in the spool", held.Waiting.UTC().Format(time.RFC3339)))
+	}
+	if held.Failure != nil && !errors.Is(held.Failure, assessment.ErrClockBehind) {
+		return strings.Join(append(said, fmt.Sprintf("what it found is not admitted: %v", held.Failure)), "; "), held.Failure
+	}
+	return strings.Join(said, "; "), nil
 }
 
 func (o *observing) streams(snapshot *status.Snapshot) status.Component {
