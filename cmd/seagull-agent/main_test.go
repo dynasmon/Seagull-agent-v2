@@ -1704,7 +1704,7 @@ func TestTheAgentCollectsAuthenticationWhileItsConfigurationNamesIt(t *testing.T
 
 	rewrite(t, path, state, map[string]string{"modules": `{"authentication": {"enabled": true}, "fim": {"enabled": true}}`})
 	hangup(t, agent)
-	if cause, _ := await(t, entries, "configuration_not_reloaded")["error"].(string); !strings.Contains(cause, "modules.fim is configured, and this build collects with authentication") {
+	if cause, _ := await(t, entries, "configuration_not_reloaded")["error"].(string); !strings.Contains(cause, "modules.fim is configured, and this build collects with assessment, authentication") {
 		t.Errorf("the agent refused the configuration with %q", cause)
 	}
 

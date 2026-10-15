@@ -377,7 +377,7 @@ func TestThisBuildConfiguresTheCollectorItHasAndUpdatesOnlyUnderARoot(t *testing
 			if !errors.Is(err, config.ErrInvalid) {
 				t.Fatalf("the agent promised %s: %v", name, err)
 			}
-			if name == "a collector it does not have" && !strings.Contains(err.Error(), "modules.auth is configured, and this build collects with authentication") {
+			if name == "a collector it does not have" && !strings.Contains(err.Error(), "modules.auth is configured, and this build collects with assessment, authentication") {
 				t.Errorf("the refusal does not name the collector this build has: %v", err)
 			}
 			if name != "a collector it does not have" && !strings.Contains(err.Error(), "updates.root") {
@@ -413,6 +413,18 @@ func TestTheInventoryIsTakenEveryIntervalWithinBoundsAndTheAuthenticationOnNone(
 		}
 	}
 	for modules, want := range map[string]time.Duration{
+		`{"assessment": {"enabled": true}}`:                    time.Hour,
+		`{"assessment": {"enabled": true, "interval": "15m"}}`: 15 * time.Minute,
+	} {
+		settings, err := config.Load(configured(t, map[string]string{"modules": modules}))
+		if err != nil {
+			t.Fatalf("modules %s: %v", modules, err)
+		}
+		if got := time.Duration(settings.Modules["assessment"].Interval); got != want || !settings.Modules["assessment"].Enabled {
+			t.Errorf("modules %s assess the host every %s, want %s", modules, got, want)
+		}
+	}
+	for modules, want := range map[string]time.Duration{
 		`{"processes": {"enabled": true}}`:                   time.Hour,
 		`{"processes": {"enabled": true, "interval": "5m"}}`: 5 * time.Minute,
 	} {
@@ -431,6 +443,8 @@ func TestTheInventoryIsTakenEveryIntervalWithinBoundsAndTheAuthenticationOnNone(
 		`{"authentication": {"enabled": true, "interval": "1h"}}`: "modules.authentication.interval is 1h, and the authentication collector follows its source",
 		`{"inventory": {"enabled": true, "interval": 60}}`:        "modules.inventory.interval is 60, and it takes a time with a unit",
 		`{"processes": {"enabled": true, "interval": "59s"}}`:     "modules.processes.interval is 59s, and this agent takes between 1m and 24h",
+		`{"assessment": {"enabled": true, "interval": "48h"}}`:    "modules.assessment.interval is 48h, and this agent takes between 1m and 24h",
+		`{"assessment": {"enabled": true, "paths": ["/etc"]}}`:    "modules.assessment names paths, and only the files collector watches any",
 	} {
 		_, err := config.Load(configured(t, map[string]string{"modules": modules}))
 		if !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), refusal) {
