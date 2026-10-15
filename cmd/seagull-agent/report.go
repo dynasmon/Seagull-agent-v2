@@ -110,13 +110,14 @@ func (o *observing) compatibility() *agentv1.Status_Compatibility {
 		updates.Enabled, updates.RootVersion, updates.CatalogVersion = true, held.Trusted, held.Verified
 	}
 	return &agentv1.Status_Compatibility{
-		Contracts:              protocol.Cut(contractsRelease(), protocol.MaxStatusVersion),
-		ProtocolVersion:        protocol.Version,
-		EventSchemaVersion:     protocol.EventSchemaVersion,
-		InventorySchemaVersion: protocol.InventorySchemaVersion,
-		PolicySchemaVersion:    policy.SchemaVersion,
-		UpdateSchemaVersion:    update.SchemaVersion,
-		Updates:                updates,
+		Contracts:               protocol.Cut(contractsRelease(), protocol.MaxStatusVersion),
+		ProtocolVersion:         protocol.Version,
+		EventSchemaVersion:      protocol.EventSchemaVersion,
+		InventorySchemaVersion:  protocol.InventorySchemaVersion,
+		PolicySchemaVersion:     policy.SchemaVersion,
+		UpdateSchemaVersion:     update.SchemaVersion,
+		Updates:                 updates,
+		AssessmentSchemaVersion: protocol.AssessmentSchemaVersion,
 	}
 }
 
