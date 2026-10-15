@@ -1,9 +1,9 @@
 
-'132eafc2-d974-4153-afa8-7ae6dbec6a2b.42´$132eafc2-d974-4153-afa8-7ae6dbec6a2b*"ê‹´Ö¤ìÔ*<2
-6fb5fd58b1a5linux"amd64B`
-$5b0c45b7-b9a5-4de9-b22c-8cfe43a77125à‹´Ö…²ý"ß‹´Ö¤­ÿË*the agent was asked to stopJf
-"v0.0.0-20261012160135-587e7954c6ad(587e7954c6ad52d5e81e94800f2d191e9a99ed13go1.26.9"linux*amd64PZ
-configurationà‹´Ö…²ýZ
+'22beb95d-201d-4afb-9bb2-f2b03b050663.42$22beb95d-201d-4afb-9bb2-f2b03b050663*"¦È¹Ö£Î¯*<2
+ec421e395e06linux"amd64Ba
+$fee2269c-4702-4508-a23b-30bf76e054b4œÈ¹Ö—âÄû"œÈ¹ÖÐ¹ÌÞ*the agent was asked to stopJf
+"v0.0.0-20261013165626-bf58c1d2857d(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
+configurationœÈ¹Ö—âÄûZ
 
 collectionZ	
 spoolZ
@@ -11,14 +11,16 @@ collectionZ
 
 credentialZ
 	resourcesZ\
-policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
-	reportingà‹´ÖÓ¢b
-authenticationà‹´ÖµŽµb
-	inventoryà‹´Öž©Ëb
-	processesà‹´Ö–ªËb
-filesà‹´Ö¢«Ëb”
-networkà‹´Ö‘¸µ*ùwatching 2 network namespaces: 6 listeners and 2 flows of 2 connections; 5 changes found since the agent started, the last at 2026-10-12T16:08:09Z; not seeing which processes hold the sockets, as the agent may not read the descriptors of 8 processesj'p€€€€
+policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
+	reportingœÈ¹Ö¤Ý±Z€
+update"tupdates.enabled is false or the installation is not enrolled, so the agent installs no release the platform hands itb 
+authenticationœÈ¹Ö¦£ÿýb
+	inventoryœÈ¹ÖÎâŽýb
+	processesœÈ¹ÖÚãŽýb
+filesœÈ¹ÖÉäŽýb;
+network¦È¹Öðþ‘®* the agent has not started it yetj'p€€€€
 events8@#
-	inventory8@r´Á´Öš¯´ÖÓÿãÿzB
-@a70a525f2e8c0237691889dcbeda3820c5258d5409e9fe735deab638dc3c4b0b‚
-997997999 *filter
+	inventory8@r·þ¹Öõæ¹ÖÇÓÊÁzB
+@b9855e1ac249e30fff7115ac780b7745ad34ad6d37c469c52ddf84fc43b0ded7‚
+997997999 *filter’
+v0.18.0 (0:

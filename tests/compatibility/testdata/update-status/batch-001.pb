@@ -1,9 +1,9 @@
 
-'89e2987c-f5bc-4081-b7e8-e6472acb445a.57„$89e2987c-f5bc-4081-b7e8-e6472acb445a9"üÎµÖ˜—ëÈ*<2
-a2244e8cba4clinux"amd64Ba
-$5b0c45b7-b9a5-4de9-b22c-8cfe43a77125ÂÎµÖöñÁ"ÂÎµÖ‹ý³¥*the agent was asked to stopJQ
-v1.999.0-gate(26a7e788138cfe186872e3f213a27c7fe5b04cebgo1.26.9"linux*amd64PZ
-configurationÂÎµÖöñÁZ
+'22beb95d-201d-4afb-9bb2-f2b03b050663.57§$22beb95d-201d-4afb-9bb2-f2b03b0506639"ËÉ¹Ö­¾¨*<2
+ec421e395e06linux"amd64Ba
+$fee2269c-4702-4508-a23b-30bf76e054b4‘É¹Ö¡ª¸È"‘É¹Ö¶’—ª*the agent was asked to stopJQ
+v1.999.0-gate(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
+configuration‘É¹Ö¡ª¸ÈZ
 
 collectionZ	
 spoolZ
@@ -12,14 +12,16 @@ collectionZ
 credentialZ
 	resourcesZ\
 policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
-	reportingÂÎµÖ£±ÊÆZ2
-updateàÎµÖÐÅÊÕ"v1.999.0-gate: installedb 
-authenticationÂÎµÖ¹ùÄb
-	inventoryÂÎµÖ¹ÈùÂb
-	processesÂÎµÖÏÉùÂb
-filesÂÎµÖªÊùÂb
-networkÂÎµÖ¬ËùÂj'p€€€€
+	reporting‘É¹Öá¬¨èZ2
+update¯É¹Öª£ëÜ"v1.999.0-gate: installedb 
+authentication‘É¹ÖÀìËb
+	inventory‘É¹ÖðÜ“Êb
+	processes‘É¹Ö†Þ“Êb
+files‘É¹ÖôÞ“Êb
+network‘É¹Öà“Êj'p€€€€
 events8@#
-	inventory8@rðƒ¶ÖìðµÖÎÀ¯9zB
-@cdc16be125c7701e1e3e304c704ff50c87c3700dd97f8adaa50172b8af8903ae‚
-997997999 *filterŠ#v1.999.0-gate *àÎµÖÐÅÊÕ
+	inventory8@r·þ¹Öõæ¹ÖÇÓÊÁzB
+@19bafc04cb0658fa00a86a83b13703e1e66dcad1362a684096f2e4262bde7a78‚
+997997999 *filterŠ#v1.999.0-gate *¯É¹Öª£ëÜ’
+v0.18.0 (0:
+ (

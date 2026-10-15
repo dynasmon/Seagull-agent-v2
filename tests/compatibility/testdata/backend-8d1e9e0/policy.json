@@ -1,0 +1,74 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "8d1e9e051a14175ff009a2b289f91fb13626aa4e",
+    "contracts": "v0.18.0"
+  },
+  "recorded_at": "2026-10-13T16:55:53.264559146Z",
+  "signers": "policy-signers.pem",
+  "exchanges": [
+    {
+      "name": "policy-served",
+      "route": "GET /v1/agents/policy",
+      "agent_id": "web-01",
+      "if_none_match": "",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "etag": "\"88262a07bb43ad59a2577ca1b5f009040336db7475da99434f9222b46bc33c41\""
+    },
+    {
+      "name": "policy-unchanged",
+      "route": "GET /v1/agents/policy",
+      "agent_id": "web-01",
+      "if_none_match": "\"88262a07bb43ad59a2577ca1b5f009040336db7475da99434f9222b46bc33c41\"",
+      "status": 304,
+      "content_type": "",
+      "etag": "\"88262a07bb43ad59a2577ca1b5f009040336db7475da99434f9222b46bc33c41\""
+    },
+    {
+      "name": "policy-newer",
+      "route": "GET /v1/agents/policy",
+      "agent_id": "web-01",
+      "if_none_match": "\"88262a07bb43ad59a2577ca1b5f009040336db7475da99434f9222b46bc33c41\"",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "etag": "\"0c71b25e12d81169642b9353bb753502381655ba4b2f7b0c2f0ade8eea710840\""
+    },
+    {
+      "name": "policy-none",
+      "route": "GET /v1/agents/policy",
+      "agent_id": "web-02",
+      "if_none_match": "",
+      "status": 404,
+      "content_type": "application/x-protobuf",
+      "etag": ""
+    },
+    {
+      "name": "policy-not-admitted",
+      "route": "GET /v1/agents/policy",
+      "agent_id": "web-03",
+      "if_none_match": "",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "etag": ""
+    },
+    {
+      "name": "policy-unknown-agent",
+      "route": "GET /v1/agents/policy",
+      "agent_id": "web-09",
+      "if_none_match": "",
+      "status": 404,
+      "content_type": "application/x-protobuf",
+      "etag": ""
+    },
+    {
+      "name": "policy-unidentified",
+      "route": "GET /v1/agents/policy",
+      "agent_id": "web 04",
+      "if_none_match": "",
+      "status": 401,
+      "content_type": "application/x-protobuf",
+      "etag": ""
+    }
+  ]
+}

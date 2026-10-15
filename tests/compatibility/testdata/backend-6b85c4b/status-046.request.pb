@@ -1,24 +1,26 @@
 
-'132eafc2-d974-4153-afa8-7ae6dbec6a2b.47µ$132eafc2-d974-4153-afa8-7ae6dbec6a2b/"ş‹´Ö…¿Ñ¦*<2
-6fb5fd58b1a5linux"amd64Ba
-$5b0c45b7-b9a5-4de9-b22c-8cfe43a77125ş‹´Ö•êó™"ş‹´Öôî†*the agent was asked to stopJf
-"v0.0.0-20261012160135-587e7954c6ad(587e7954c6ad52d5e81e94800f2d191e9a99ed13go1.26.9"linux*amd64PZ
-configurationş‹´Ö•êó™Z
+'22beb95d-201d-4afb-9bb2-f2b03b050663.47‰	$22beb95d-201d-4afb-9bb2-f2b03b050663/"ÅÈ¹ÖóúÿU*<2
+ec421e395e06linux"amd64B_
+$fee2269c-4702-4508-a23b-30bf76e054b4ÅÈ¹ÖŞ›>"ÅÈ¹Ö‡£œ*the agent was asked to stopJf
+"v0.0.0-20261013165626-bf58c1d2857d(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
+configurationÅÈ¹ÖŞ›>Z
 
 collectionZ	
 spoolZ
 deliveryZ
 
 credentialZ
-	resourcesZ_
-policyş‹´Ö·±Ù"Eno policy is in force: the agent runs on its configuration file aloneZ
-	reportingb 
-authenticationş‹´Öêàb
-	inventoryş‹´Ö¾Üœb
-	processesş‹´ÖÀİœb
-filesş‹´ÖŞœb
-networkş‹´Ö’ßœj'p€€€€
+	resourcesZÿ
+policyÅÈ¹ÖÆ€İB"åthe agent runs on revision 1 of gate-servers, signed by 31b8050d56f75128eb35ef064a2ee6979116d1ac49dfcfd4d776b708688572b3, until 2026-10-14T17:03:01Z; its own configuration keeps resources.max_concurrent_uploads at 1 rather than 8Z
+	reportingZ€
+update"tupdates.enabled is false or the installation is not enrolled, so the agent installs no release the platform hands itb
+authenticationÅÈ¹ÖğÍ‡Ab
+	inventoryÅÈ¹Ö¶Ü@b
+	processesÅÈ¹ÖÍİ@b
+filesÅÈ¹Ö±Ş@b
+networkÅÈ¹Ö½ß@j'p€€€€
 events8@#
-	inventory8@r´Á´Öš¯´ÖÓÿãÿzB
-@e52bb5749e17ec7c594ca659f28468db3c704ff6c919cffe50a57337ba2f7913‚
-997997999 *filter
+	inventory8@r·ş¹Öõæ¹ÖÇÓÊÁz_
+@e62bff8199e4ea6d98464c774986cb9765f63e42645769ab5b80e631360bb326gate-servers"Åë¾Ö¶‚
+997997999 *filter’
+v0.18.0 (0:

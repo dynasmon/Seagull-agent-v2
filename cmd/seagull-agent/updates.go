@@ -68,11 +68,15 @@ func runningRelease() (update.Running, error) {
 	if !valid {
 		return update.Running{}, fmt.Errorf("this build is %q, which names no release, so it takes no update", info.Main.Version)
 	}
-	format := updatev1.Format_FORMAT_UNSPECIFIED
+	return update.Running{Version: version, OS: runtime.GOOS, Architecture: runtime.GOARCH, Format: packaged(), State: update.StateGeneration}, nil
+}
+
+// How a release of the agent is installed on the system this binary runs on.
+func packaged() updatev1.Format {
 	if runtime.GOOS == "linux" {
-		format = updatev1.Format_FORMAT_DEB
+		return updatev1.Format_FORMAT_DEB
 	}
-	return update.Running{Version: version, OS: runtime.GOOS, Architecture: runtime.GOARCH, Format: format, State: update.StateGeneration}, nil
+	return updatev1.Format_FORMAT_UNSPECIFIED
 }
 
 func followUpdates(installation *identity.Installation, settings config.Config, client update.Client, every func() time.Duration,

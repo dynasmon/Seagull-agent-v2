@@ -47,6 +47,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	"github.com/dynasmon/Seagull-agent-v2/internal/status"
 	"github.com/dynasmon/Seagull-agent-v2/internal/transport"
+	"github.com/dynasmon/Seagull-agent-v2/internal/update"
 )
 
 const (
@@ -58,6 +59,7 @@ const (
 	collectionDirectory   = "collection"
 	reportingDirectory    = "reporting"
 	statusEvery           = 30 * time.Second
+	contractsModule       = "github.com/dynasmon/Seagull-contracts"
 )
 
 const usage = `Usage:
@@ -98,6 +100,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch {
 	case *version && *path == "" && flags.NArg() == 0:
 		fmt.Fprintln(stdout, buildIdentity())
+		fmt.Fprintf(stdout, "contracts %s\n", contractsRelease())
 		for _, spoken := range wireVersions() {
 			fmt.Fprintf(stdout, "%s %d\n", spoken.name, spoken.version)
 		}
@@ -199,7 +202,7 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	if errors.Is(unread, config.ErrInvalid) {
 		return refused(unread)
 	}
-	started := []any{slog.String("build", buildIdentity()), slog.String("config", path)}
+	started := []any{slog.String("build", buildIdentity()), slog.String("contracts", contractsRelease()), slog.String("config", path)}
 	for _, spoken := range wireVersions() {
 		started = append(started, slog.Int(spoken.name, spoken.version))
 	}
@@ -1341,6 +1344,19 @@ func buildIdentity() string {
 	return fmt.Sprintf("seagull-agent %s %s %s/%s", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 }
 
+func contractsRelease() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, module := range info.Deps {
+		if module.Path == contractsModule {
+			return module.Version
+		}
+	}
+	return ""
+}
+
 type wireVersion struct {
 	name    string
 	version int
@@ -1352,5 +1368,7 @@ func wireVersions() []wireVersion {
 		{name: "event_schema_version", version: protocol.EventSchemaVersion},
 		{name: "inventory_schema_version", version: protocol.InventorySchemaVersion},
 		{name: "status_schema_version", version: protocol.StatusSchemaVersion},
+		{name: "policy_schema_version", version: policy.SchemaVersion},
+		{name: "update_schema_version", version: update.SchemaVersion},
 	}
 }

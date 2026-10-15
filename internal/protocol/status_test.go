@@ -15,6 +15,7 @@ import (
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
+	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
 
 var written = time.Date(2026, time.October, 11, 12, 0, 0, 0, time.UTC)
@@ -72,6 +73,12 @@ func TestAReportThePlatformAdmitsIsCheckedAndOneItRefusesIsNamed(t *testing.T) {
 		"too many groups":   {func(r *agentv1.Status) { r.Privileges.Groups = make([]string, protocol.MaxStatusGroups+1) }, "privileges.groups"},
 		"empty capability":  {func(r *agentv1.Status) { r.Privileges.Capabilities = []string{""} }, "privileges.capabilities[0]"},
 		"undeclared ending": {func(r *agentv1.Status) { r.Run.PreviousEnding = agentv1.Status_Ending(9) }, "run.previous_ending"},
+		"contracts release": {func(r *agentv1.Status) {
+			r.Compatibility = &agentv1.Status_Compatibility{Contracts: "v" + strings.Repeat("1", protocol.MaxStatusVersion)}
+		}, "compatibility.contracts"},
+		"undeclared format": {func(r *agentv1.Status) {
+			r.Compatibility = &agentv1.Status_Compatibility{Updates: &agentv1.Status_Updates{Format: updatev1.Format(9)}}
+		}, "compatibility.updates.format"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := report()

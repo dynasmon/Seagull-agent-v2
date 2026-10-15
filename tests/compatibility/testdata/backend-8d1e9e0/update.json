@@ -1,0 +1,141 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "8d1e9e051a14175ff009a2b289f91fb13626aa4e",
+    "contracts": "v0.18.0"
+  },
+  "recorded_at": "2026-10-13T16:55:53.291307578Z",
+  "root": "update-root.pb",
+  "exchanges": [
+    {
+      "name": "update-nothing",
+      "route": "GET /v1/agents/update",
+      "agent_id": "web-01",
+      "if_none_match": "",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "etag": "\"e4016e587d1dc7b5ab461ed9e373a25ddeb767734be20f109df406e258a1086d\"",
+      "content_length": "532"
+    },
+    {
+      "name": "update-offered",
+      "route": "GET /v1/agents/update",
+      "agent_id": "web-01",
+      "if_none_match": "",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "etag": "\"2cf38e99e2983d463a42980691fbfd7aecb3180afc89f9a15a04b04acbf43921\"",
+      "content_length": "1750"
+    },
+    {
+      "name": "update-unchanged",
+      "route": "GET /v1/agents/update",
+      "agent_id": "web-01",
+      "if_none_match": "\"2cf38e99e2983d463a42980691fbfd7aecb3180afc89f9a15a04b04acbf43921\"",
+      "status": 304,
+      "content_type": "",
+      "etag": "\"2cf38e99e2983d463a42980691fbfd7aecb3180afc89f9a15a04b04acbf43921\"",
+      "content_length": ""
+    },
+    {
+      "name": "update-package-target",
+      "route": "GET /v1/agents/update/packages/{sha256}",
+      "agent_id": "web-01",
+      "if_none_match": "",
+      "status": 200,
+      "content_type": "application/octet-stream",
+      "etag": "",
+      "content_length": "45"
+    },
+    {
+      "name": "update-package-running",
+      "route": "GET /v1/agents/update/packages/{sha256}",
+      "agent_id": "web-01",
+      "if_none_match": "",
+      "status": 200,
+      "content_type": "application/octet-stream",
+      "etag": "",
+      "content_length": "45"
+    },
+    {
+      "name": "update-package-unknown",
+      "route": "GET /v1/agents/update/packages/{sha256}",
+      "agent_id": "web-01",
+      "if_none_match": "",
+      "status": 404,
+      "content_type": "application/x-protobuf",
+      "etag": "",
+      "content_length": "70"
+    },
+    {
+      "name": "update-unassigned",
+      "route": "GET /v1/agents/update",
+      "agent_id": "web-02",
+      "if_none_match": "",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "etag": "\"cb3e4c7d0a7acc37fea7f8973cc33eb4449f03ffac0e7493f05c9a09114dcc7b\"",
+      "content_length": "1742"
+    },
+    {
+      "name": "update-package-unassigned",
+      "route": "GET /v1/agents/update/packages/{sha256}",
+      "agent_id": "web-02",
+      "if_none_match": "",
+      "status": 404,
+      "content_type": "application/x-protobuf",
+      "etag": "",
+      "content_length": "70"
+    },
+    {
+      "name": "update-not-admitted",
+      "route": "GET /v1/agents/update",
+      "agent_id": "web-03",
+      "if_none_match": "",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "etag": "",
+      "content_length": "66"
+    },
+    {
+      "name": "update-unknown-agent",
+      "route": "GET /v1/agents/update",
+      "agent_id": "web-09",
+      "if_none_match": "",
+      "status": 404,
+      "content_type": "application/x-protobuf",
+      "etag": "",
+      "content_length": "81"
+    },
+    {
+      "name": "update-unidentified",
+      "route": "GET /v1/agents/update",
+      "agent_id": "web 04",
+      "if_none_match": "",
+      "status": 401,
+      "content_type": "application/x-protobuf",
+      "etag": "",
+      "content_length": "108"
+    },
+    {
+      "name": "update-not-configured",
+      "route": "GET /v1/agents/update",
+      "agent_id": "web-01",
+      "if_none_match": "",
+      "status": 404,
+      "content_type": "application/x-protobuf",
+      "etag": "",
+      "content_length": "65"
+    },
+    {
+      "name": "update-rate-limited",
+      "route": "GET /v1/agents/update",
+      "agent_id": "web-01",
+      "if_none_match": "",
+      "status": 429,
+      "content_type": "application/x-protobuf",
+      "etag": "",
+      "content_length": "64"
+    }
+  ]
+}

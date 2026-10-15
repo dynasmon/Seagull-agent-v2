@@ -134,4 +134,8 @@ func TestAnAgentThatTakesNoUpdateSaysSoAndReportsNone(t *testing.T) {
 	if reported := observed.updateReport(); reported != nil {
 		t.Fatalf("an agent that takes no update reports %v", reported)
 	}
+	if updates := observed.compatibility().GetUpdates(); updates.GetEnabled() || updates.GetRootVersion() != 0 || updates.GetCatalogVersion() != 0 ||
+		updates.GetFormat() != packaged() || updates.GetStateGeneration() != update.StateGeneration {
+		t.Fatalf("an agent that takes no update says it takes %v", updates)
+	}
 }

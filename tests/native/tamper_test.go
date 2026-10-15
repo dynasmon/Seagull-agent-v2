@@ -4,6 +4,7 @@ package native_test
 
 import (
 	"crypto/sha256"
+	"debug/buildinfo"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
+	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
 
 const intruder = "seagull-native-intruder"
@@ -45,6 +47,12 @@ func (g *gate) reports(t *testing.T) {
 	if privileges.GetUser() != strconv.Itoa(g.uid) || !privileges.GetNoNewPrivileges() || privileges.GetSeccomp() != "filter" || len(privileges.GetCapabilities()) != 0 ||
 		!strings.HasPrefix(build.GetVersion(), "v") || !strings.HasPrefix(build.GetToolchain(), "go") || build.GetOs() != "linux" {
 		t.Errorf("the agent reported it runs as %v, built as %v", privileges, build)
+	}
+	if spoken := first.GetCompatibility(); spoken.GetContracts() != contractsOf(t, agentPath) || spoken.GetProtocolVersion() != 1 ||
+		spoken.GetEventSchemaVersion() != 1 || spoken.GetInventorySchemaVersion() != 1 || spoken.GetPolicySchemaVersion() != 1 ||
+		spoken.GetUpdateSchemaVersion() != 1 || spoken.GetUpdates().GetEnabled() || spoken.GetUpdates().GetFormat() != updatev1.Format_FORMAT_DEB ||
+		spoken.GetUpdates().GetStateGeneration() != 1 {
+		t.Errorf("an agent that takes no update said it speaks %v", spoken)
 	}
 	if previous := await(t, g.invocation, "agent_previous_run", 10*time.Second); previous["level"] != "INFO" || previous["ending"] != "stopped" {
 		t.Errorf("the agent logged its previous run as %v", previous)
@@ -296,4 +304,21 @@ func (g *gate) recordReports(t *testing.T, boot string) {
 	if err := os.WriteFile(filepath.Join(directory, "scenario.json"), append(encoded, '\n'), 0o644); err != nil {
 		t.Fatalf("write the scenario: %v", err)
 	}
+}
+
+// The contracts release the installed agent was built with, as Go recorded it
+// in the binary.
+func contractsOf(t *testing.T, binary string) string {
+	t.Helper()
+	info, err := buildinfo.ReadFile(binary)
+	if err != nil {
+		t.Fatalf("read how %s was built: %v", binary, err)
+	}
+	for _, module := range info.Deps {
+		if module.Path == "github.com/dynasmon/Seagull-contracts" {
+			return module.Version
+		}
+	}
+	t.Fatalf("%s was built with no contracts", binary)
+	return ""
 }

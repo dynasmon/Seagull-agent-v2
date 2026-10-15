@@ -14,6 +14,7 @@ import (
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
+	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
 
 // What the installed agent reported in the native gate, byte for byte, and
@@ -84,6 +85,11 @@ func TestEveryReportTheInstalledAgentSentIsOneThePlatformAdmits(t *testing.T) {
 		}
 		if report.GetSequence() <= last || report.GetInstallationId() != scenario.InstallationID || report.GetRun().GetBootId() != scenario.Boot {
 			t.Errorf("report %d carries sequence %d after %d, installation %s and boot %s", index, report.GetSequence(), last, report.GetInstallationId(), report.GetRun().GetBootId())
+		}
+		if spoken := report.GetCompatibility(); spoken.GetContracts() == "" || spoken.GetProtocolVersion() != protocol.Version ||
+			spoken.GetEventSchemaVersion() != protocol.EventSchemaVersion || spoken.GetInventorySchemaVersion() != protocol.InventorySchemaVersion ||
+			spoken.GetUpdates().GetFormat() != updatev1.Format_FORMAT_DEB || spoken.GetUpdates().GetEnabled() {
+			t.Errorf("report %d, from an agent that took no update, says it speaks %v", index, spoken)
 		}
 		last = report.GetSequence()
 	}
@@ -165,6 +171,10 @@ func TestARecordedPlatformAdmitsWhatTheInstalledAgentReportedOfItsUpdates(t *tes
 		if err := protocol.CheckStatus(report); err != nil || report.GetInstallationId() != scenario.InstallationID || report.GetSequence() <= last ||
 			update.GetStage().String() != told.Stage || update.GetVersion() != told.Version || update.GetFailure().String() != told.Failure {
 			t.Errorf("report %d says %v of its update as sequence %d after %d: %v", index, update, report.GetSequence(), last, err)
+		}
+		if takes := report.GetCompatibility().GetUpdates(); !takes.GetEnabled() || takes.GetRootVersion() != update.GetRootVersion() ||
+			takes.GetCatalogVersion() < update.GetCatalogVersion() {
+			t.Errorf("report %d says the agent takes %v while its update stood at %v", index, takes, update)
 		}
 		stages[update.GetStage()] = true
 		last = report.GetSequence()

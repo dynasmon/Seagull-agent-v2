@@ -11,8 +11,10 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-agent-v2/internal/policy"
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/status"
+	"github.com/dynasmon/Seagull-agent-v2/internal/update"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 )
@@ -84,6 +86,7 @@ func (o *observing) report(stopping bool) *agentv1.Status {
 		report.Configuration.PolicyId, report.Configuration.PolicyRevision, report.Configuration.PolicyExpiresAt = id, revision, timestamppb.New(expires)
 	}
 	report.Update = o.updateReport()
+	report.Compatibility = o.compatibility()
 	if granted := held.Agent.Privileges; granted != nil {
 		report.Privileges.User, report.Privileges.NoNewPrivileges = strconv.Itoa(granted.User), granted.NoNewPrivs
 		report.Privileges.Seccomp = protocol.Cut(string(granted.Seccomp), 32)
@@ -95,6 +98,26 @@ func (o *observing) report(stopping bool) *agentv1.Status {
 		}
 	}
 	return report
+}
+
+// What the agent speaks and which releases it can take, as this binary and its
+// settings say, so the platform knows which agents a release can reach before
+// it asks anything of them.
+func (o *observing) compatibility() *agentv1.Status_Compatibility {
+	updates := &agentv1.Status_Updates{Format: packaged(), StateGeneration: update.StateGeneration}
+	if o.updater != nil {
+		held := o.updater.State()
+		updates.Enabled, updates.RootVersion, updates.CatalogVersion = true, held.Trusted, held.Verified
+	}
+	return &agentv1.Status_Compatibility{
+		Contracts:              protocol.Cut(contractsRelease(), protocol.MaxStatusVersion),
+		ProtocolVersion:        protocol.Version,
+		EventSchemaVersion:     protocol.EventSchemaVersion,
+		InventorySchemaVersion: protocol.InventorySchemaVersion,
+		PolicySchemaVersion:    policy.SchemaVersion,
+		UpdateSchemaVersion:    update.SchemaVersion,
+		Updates:                updates,
+	}
 }
 
 func moment(at time.Time) *timestamppb.Timestamp {

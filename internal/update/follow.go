@@ -51,7 +51,8 @@ type Options struct {
 }
 
 // Where the newest update the platform asked of the agent stands, as the agent
-// knows it, and when it last asked.
+// knows it, when it last asked, and the newest root it trusts and catalog it
+// verified, whatever it was asked.
 type State struct {
 	Stage    Stage
 	Version  string
@@ -64,6 +65,8 @@ type State struct {
 	Asking   string
 	Attempts int
 	Next     time.Time
+	Trusted  uint64
+	Verified uint64
 }
 
 type Follower struct {
@@ -104,7 +107,10 @@ func NewFollower(options Options) (*Follower, error) {
 		options.Watch = watchEvery
 	}
 	options.Policy = settled
-	return &Follower{options: options, base: base}, nil
+	follower := &Follower{options: options, base: base}
+	held, _ := options.Store.Held(options.Anchor, options.Now())
+	follower.state.Trusted, follower.state.Verified = held.Root.Version(), held.Catalog
+	return follower, nil
 }
 
 func (f *Follower) Run(ctx context.Context) error {
@@ -221,6 +227,9 @@ func (f *Follower) consider(ctx context.Context, now time.Time) {
 		if kept := f.options.Store.Keep(progressed); kept != nil {
 			f.options.Logger.Warn("update_trust_unkept", slog.Any("error", kept))
 		}
+		f.mu.Lock()
+		f.state.Trusted, f.state.Verified = max(f.state.Trusted, progressed.Root.Version()), max(f.state.Verified, progressed.Catalog)
+		f.mu.Unlock()
 	}
 	about := State{Version: offer.GetVersion(), Root: judged.Root.Version(), Since: now}
 	if judged.Catalog != nil {

@@ -1,9 +1,9 @@
 
-'89e2987c-f5bc-4081-b7e8-e6472acb445a.58Å$89e2987c-f5bc-4081-b7e8-e6472acb445a:"åœµ÷ê—Ôë*<2
-a2244e8cba4clinux"amd64Ba
-$5b0c45b7-b9a5-4de9-b22c-8cfe43a77125¬Œµ÷ˆÒù¡"¬Œµ÷ã˝≥•*the agent was asked to stopJQ
-v1.999.0-gate(26a7e788138cfe186872e3f213a27c7fe5b04cebgo1.26.9"linux*amd64PZ
-configuration¬Œµ÷ˆÒù¡Z
+'22beb95d-201d-4afb-9bb2-f2b03b050663.58§$22beb95d-201d-4afb-9bb2-f2b03b050663:"ÿ…π÷ÁÌ‹©*<2
+ec421e395e06linux"amd64Ba
+$fee2269c-4702-4508-a23b-30bf76e054b4ë…π÷°™∏»"ë…π÷∂íó™*the agent was asked to stopJQ
+v1.999.0-gate(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
+configurationë…π÷°™∏»Z
 
 collectionZ	
 spoolZ
@@ -12,14 +12,16 @@ collectionZ
 credentialZ
 	resourcesZ\
 policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
-	reporting¸Œµ÷£ﬂÓ…Z/
-updateäœµ÷˜ò∂ù"v1.999.1-gate: stagedb 
-authentication¬Œµ÷π˘êƒb
-	inventory¬Œµ÷π»˘¬b
-	processes¬Œµ÷œ…˘¬b
-files¬Œµ÷™ ˘¬b
-network¬Œµ÷¨À˘¬j'pÄÄÄÄ
+	reportingÀ…π÷á¶•™Z/
+update÷…π÷¬üé¡"v1.999.1-gate: stagedb 
+authenticationë…π÷¿çÏÀb
+	inventoryë…π÷‹ì b
+	processesë…π÷Üﬁì b
+filesë…π÷Ùﬁì b
+networkë…π÷Å‡ì j'pÄÄÄÄ
 events8@#
-	inventory8@rÉ∂÷Ïµ÷Œ¿Ø9zB
-@cdc16be125c7701e1e3e304c704ff50c87c3700dd97f8adaa50172b8af8903aeÇ
-997997999 *filterä#v1.999.1-gate *äœµ÷˜ò∂ù
+	inventory8@r∑˛π÷ıÊπ÷«” ¡zB
+@19bafc04cb0658fa00a86a83b13703e1e66dcad1362a684096f2e4262bde7a78Ç
+997997999 *filterä#v1.999.1-gate *÷…π÷¬üé¡í
+v0.18.0 (0:
+ (

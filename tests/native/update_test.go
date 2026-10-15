@@ -274,14 +274,14 @@ func ended(t *testing.T, stage string, before any, within time.Duration) map[str
 	}
 }
 
-func (g *gate) toldOfUpdate(t *testing.T, stage agentv1.Status_Update_Stage, version string, within time.Duration) *agentv1.Status_Update {
+func (g *gate) toldOfUpdate(t *testing.T, stage agentv1.Status_Update_Stage, version string, within time.Duration) *agentv1.Status {
 	t.Helper()
 	deadline := time.Now().Add(within)
 	for {
 		reports := g.platform.told()
 		for index := len(reports) - 1; index >= 0; index-- {
 			if told := reports[index].GetUpdate(); told.GetStage() == stage && told.GetVersion() == version {
-				return told
+				return reports[index]
 			}
 		}
 		if time.Now().After(deadline) {
@@ -340,8 +340,13 @@ func (g *gate) updates(t *testing.T) {
 	if again := await(t, g.invocation, "agent_starting", 20*time.Second); again["installation_id"] != g.installation {
 		t.Errorf("the updated agent runs installation %v, and it ran %s", again["installation_id"], g.installation)
 	}
-	if told := g.toldOfUpdate(t, agentv1.Status_Update_STAGE_INSTALLED, later, 2*time.Minute); told.GetCatalogVersion() != 1 || told.GetRootVersion() != 1 {
+	report := g.toldOfUpdate(t, agentv1.Status_Update_STAGE_INSTALLED, later, 2*time.Minute)
+	if told := report.GetUpdate(); told.GetCatalogVersion() != 1 || told.GetRootVersion() != 1 {
 		t.Errorf("the platform was told %v", told)
+	}
+	if takes := report.GetCompatibility().GetUpdates(); !takes.GetEnabled() || takes.GetRootVersion() != 1 || takes.GetCatalogVersion() != 1 ||
+		takes.GetFormat() != updatev1.Format_FORMAT_DEB || takes.GetStateGeneration() != 1 || report.GetBuild().GetVersion() != later {
+		t.Errorf("the updated agent said it takes %v as %s", takes, report.GetBuild().GetVersion())
 	}
 	if active, result := answer("systemctl", "is-active", installerUnit), answer("systemctl", "show", "--property", "Result", "--value", installerUnit); active != "inactive" || result != "success" {
 		t.Errorf("the installer is %s with result %s once it ended", active, result)
@@ -366,8 +371,12 @@ func (g *gate) updates(t *testing.T) {
 	if again := await(t, g.invocation, "agent_starting", 20*time.Second); again["installation_id"] != g.installation {
 		t.Errorf("after going back the agent runs installation %v, and it ran %s", again["installation_id"], g.installation)
 	}
-	if told := g.toldOfUpdate(t, agentv1.Status_Update_STAGE_ROLLED_BACK, broken, 2*time.Minute); told.GetFailure() != agentv1.Status_Update_FAILURE_UNHEALTHY || told.GetCatalogVersion() != 2 {
+	report = g.toldOfUpdate(t, agentv1.Status_Update_STAGE_ROLLED_BACK, broken, 2*time.Minute)
+	if told := report.GetUpdate(); told.GetFailure() != agentv1.Status_Update_FAILURE_UNHEALTHY || told.GetCatalogVersion() != 2 {
 		t.Errorf("the platform was told %v", told)
+	}
+	if takes := report.GetCompatibility().GetUpdates(); !takes.GetEnabled() || takes.GetCatalogVersion() != 2 || report.GetBuild().GetVersion() != later {
+		t.Errorf("after going back the agent said it takes %v as %s", takes, report.GetBuild().GetVersion())
 	}
 	g.statusSays(t, false, "\nupdate: degraded since ", broken+": rolled_back, unhealthy")
 
