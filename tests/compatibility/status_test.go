@@ -88,6 +88,7 @@ func TestEveryReportTheInstalledAgentSentIsOneThePlatformAdmits(t *testing.T) {
 		}
 		if spoken := report.GetCompatibility(); spoken.GetContracts() == "" || spoken.GetProtocolVersion() != protocol.Version ||
 			spoken.GetEventSchemaVersion() != protocol.EventSchemaVersion || spoken.GetInventorySchemaVersion() != protocol.InventorySchemaVersion ||
+			spoken.GetAssessmentSchemaVersion() != protocol.AssessmentSchemaVersion ||
 			spoken.GetUpdates().GetFormat() != updatev1.Format_FORMAT_DEB || spoken.GetUpdates().GetEnabled() {
 			t.Errorf("report %d, from an agent that took no update, says it speaks %v", index, spoken)
 		}
