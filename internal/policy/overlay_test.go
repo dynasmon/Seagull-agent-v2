@@ -22,6 +22,7 @@ import (
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
 	"github.com/dynasmon/Seagull-agent-v2/internal/policy"
+	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 	policyv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/policy/v1"
 )
 
@@ -117,6 +118,16 @@ func TestAPolicyChangesWhatItSetsAndLeavesTheRestToTheAgentsOwn(t *testing.T) {
 		t.Fatal("laying a policy over the agent's configuration changed it")
 	}
 
+	assessing, _, err := policy.Overlay(own, &policyv1.Settings{
+		Modules: []*policyv1.ModuleSettings{{Module: policyv1.Module_MODULE_ASSESSMENT, Collection: policyv1.Collection_COLLECTION_ENABLED, Interval: durationpb.New(15 * time.Minute)}},
+		Assessment: &assessmentv1.Checklist{Checks: []*assessmentv1.Check{{CheckId: "telnetd", Test: &assessmentv1.Check_Package{Package: &assessmentv1.PackageTest{
+			Name: "telnetd", Presence: assessmentv1.Presence_PRESENCE_FORBIDDEN,
+		}}}}},
+	})
+	if err != nil || !assessing.Modules["assessment"].Enabled || assessing.Modules["assessment"].Interval != config.Duration(15*time.Minute) {
+		t.Fatalf("a policy enabling the assessment made %+v: %v", assessing.Modules["assessment"], err)
+	}
+
 	same, kept, err := policy.Overlay(own, &policyv1.Settings{})
 	if err != nil || len(kept) != 0 || !reflect.DeepEqual(same, own) {
 		t.Fatalf("a policy setting nothing made %+v, %v, %v", same, kept, err)
@@ -165,6 +176,22 @@ func TestAPolicyTheAgentWouldNotRunOnChangesNothing(t *testing.T) {
 		"a level the contract does not name": {
 			settings: &policyv1.Settings{LogLevel: 9},
 			want:     policy.ErrMalformed, says: "log_level",
+		},
+		"a checklist naming no check": {
+			settings: &policyv1.Settings{Assessment: &assessmentv1.Checklist{}},
+			want:     policy.ErrMalformed, says: "names 0 checks",
+		},
+		"a check named twice": {
+			settings: &policyv1.Settings{Assessment: &assessmentv1.Checklist{Checks: []*assessmentv1.Check{{CheckId: "telnetd"}, {CheckId: "telnetd"}}}},
+			want:     policy.ErrMalformed, says: "names check telnetd twice",
+		},
+		"a check named by no identifier": {
+			settings: &policyv1.Settings{Assessment: &assessmentv1.Checklist{Checks: []*assessmentv1.Check{{CheckId: "telnet d"}}}},
+			want:     policy.ErrMalformed, says: "checks[0].check_id",
+		},
+		"an interval outside the assessment's bounds": {
+			settings: &policyv1.Settings{Modules: []*policyv1.ModuleSettings{{Module: policyv1.Module_MODULE_ASSESSMENT, Interval: durationpb.New(48 * time.Hour)}}},
+			want:     policy.ErrInapplicable, says: "modules.assessment.interval",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
