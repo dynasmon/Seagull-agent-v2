@@ -1,0 +1,388 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "331492dfdaaa7d1ac80cffe4d61c3868835a5e3d",
+    "contracts": "v0.19.0"
+  },
+  "recorded_at": "2026-10-15T22:12:21.526634035Z",
+  "exchanges": [
+    {
+      "name": "status-000",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-001",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-002",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-003",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-004",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-005",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-006",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-007",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-008",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-009",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-010",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-011",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-012",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-013",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-014",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-015",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-016",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-017",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-018",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-019",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-020",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-021",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-022",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-023",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-024",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-025",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-026",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-027",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-028",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-029",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-030",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-031",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-032",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-033",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-034",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-035",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-036",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-037",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-038",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-039",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-040",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-041",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-042",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-043",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-044",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-045",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-046",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-047",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-048",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-049",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-050",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-051",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-052",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-053",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-054",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-055",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "status-invalid",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 422
+    },
+    {
+      "name": "status-ahead",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 422
+    },
+    {
+      "name": "status-protocol-2",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 426
+    },
+    {
+      "name": "status-agent-not-registered",
+      "route": "POST /v1/status",
+      "agent_id": "web-02",
+      "status": 403
+    },
+    {
+      "name": "status-agent-not-admitted",
+      "route": "POST /v1/status",
+      "agent_id": "web-03",
+      "status": 403
+    },
+    {
+      "name": "status-unusable-identity",
+      "route": "POST /v1/status",
+      "agent_id": "web 04",
+      "status": 403
+    },
+    {
+      "name": "status-malformed",
+      "route": "POST /v1/status",
+      "agent_id": "web-01",
+      "status": 400
+    }
+  ]
+}

@@ -1,9 +1,9 @@
 
-'22beb95d-201d-4afb-9bb2-f2b03b050663.19—	$22beb95d-201d-4afb-9bb2-f2b03b050663"öÆ¹ÖÀ¢½¢*<2
-ec421e395e06linux"amd64B`
-$fee2269c-4702-4508-a23b-30bf76e054b4óÆ¹ÖØŸ‚J"ëÆ¹ÖÞ£ÿ£*the agent was asked to stopJf
-"v0.0.0-20261013165626-bf58c1d2857d(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
-configurationöÆ¹Ö÷ÂIZ
+'65e4afeb-72be-4bcd-91df-1fb40d695704.19Ï	$65e4afeb-72be-4bcd-91df-1fb40d695704"Ý™ÅÖ™ÁÅÉ*<2
+0cf1ab12e505linux"amd64B`
+$57c59c5d-a6df-45b2-b1f2-a038a8bd3a4e×™ÅÖ×ÿ‡­"Ð™ÅÖüêªd*the agent was asked to stopJf
+"v0.0.0-20261015215544-ddedf57cabc5(ddedf57cabc5aa6084e57a99851bc8a30fe1cb11go1.26.9"linux*amd64PZ
+configurationÜ™ÅÖ«µ³Z
 
 collectionZ	
 spoolZ
@@ -11,16 +11,19 @@ collectionZ
 
 credentialZ
 	resourcesZ\
-policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
-	reportingóÆ¹Ö†Á¶OZ€
-update"tupdates.enabled is false or the installation is not enrolled, so the agent installs no release the platform hands itbŸ
-authenticationóÆ¹Öà‘M*~since the agent started, the journal dropped entries before the collector read them 1 times, as collection_gap in its log saysb=
-	inventoryöÆ¹ÖØù ¡* the agent has not started it yetb
-	processesóÆ¹Ö®ð“Lb
-filesóÆ¹Ö’ñ“Lb
-networkóÆ¹ÖŠò“LjCp€€€€
-events8*õÆ¹ÖØŠ„@#
-	inventory8*öÆ¹Ö—¤£Ì@	r·þ¹Öõæ¹ÖÇÓÊÁzB
-@3220e9e5f323242f57e5fdabfd161b23d537a0bfb1235ebea00990255e506fb2‚
-997997999 *filter’
-v0.18.0 (0:
+policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
+	reporting×™ÅÖÆîè³Z€
+update"tupdates.enabled is false or the installation is not enrolled, so the agent installs no release the platform hands itb 
+authentication×™ÅÖä’¤°*~since the agent started, the journal dropped entries before the collector read them 1 times, as collection_gap in its log saysb=
+	inventoryÝ™ÅÖ­‚±È* the agent has not started it yetb
+	processes×™ÅÖÒÛ¨¯b
+files×™ÅÖÊÜ¨¯b
+network×™ÅÖÃÝ¨¯b
+
+assessment×™ÅÖ“Þ¨¯jU¨€€€€
+events8*Ú™ÅÖ­íé»@#
+	inventory8*Ü™ÅÖ‰µþµ@	
+assessments8ršÑÅÖ»»ÅÖÏõ¥±zB
+@74c9b9b69a7adbb406c32c641ac8895a4d1d99c1f28e724ae2ac49fca2556855‚
+997997999 *filter’
+v0.19.0 (0:@

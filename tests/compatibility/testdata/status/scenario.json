@@ -1,9 +1,9 @@
 {
-  "recorded_at": "2026-10-13T17:04:14.999285231Z",
-  "build": "seagull-agent v0.0.0-20261013165626-bf58c1d2857d go1.26.9 linux/amd64\ncontracts v0.18.0\nprotocol_version 1\nevent_schema_version 1\ninventory_schema_version 1\nstatus_schema_version 1\npolicy_schema_version 1\nupdate_schema_version 1",
-  "installation_id": "22beb95d-201d-4afb-9bb2-f2b03b050663",
+  "recorded_at": "2026-10-15T22:06:00.026254153Z",
+  "build": "seagull-agent v0.0.0-20261015215544-ddedf57cabc5 go1.26.9 linux/amd64\ncontracts v0.19.0\nprotocol_version 1\nevent_schema_version 1\ninventory_schema_version 1\nstatus_schema_version 1\npolicy_schema_version 1\nupdate_schema_version 1\nassessment_schema_version 1",
+  "installation_id": "65e4afeb-72be-4bcd-91df-1fb40d695704",
   "agent_id": "web-01",
-  "boot_id": "fee2269c-4702-4508-a23b-30bf76e054b4",
+  "boot_id": "57c59c5d-a6df-45b2-b1f2-a038a8bd3a4e",
   "reports": [
     {
       "batch": "batch-000.pb",
@@ -308,18 +308,36 @@
     {
       "batch": "batch-050.pb",
       "sequence": 51,
-      "condition": "CONDITION_RUNNING",
+      "condition": "CONDITION_DEGRADED",
       "previous_ending": "ENDING_STOPPED"
     },
     {
       "batch": "batch-051.pb",
       "sequence": 52,
       "condition": "CONDITION_RUNNING",
-      "previous_ending": "ENDING_INTERRUPTED"
+      "previous_ending": "ENDING_STOPPED"
     },
     {
       "batch": "batch-052.pb",
       "sequence": 53,
+      "condition": "CONDITION_STOPPED",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-053.pb",
+      "sequence": 54,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_STOPPED"
+    },
+    {
+      "batch": "batch-054.pb",
+      "sequence": 55,
+      "condition": "CONDITION_RUNNING",
+      "previous_ending": "ENDING_INTERRUPTED"
+    },
+    {
+      "batch": "batch-055.pb",
+      "sequence": 56,
       "condition": "CONDITION_STOPPED",
       "previous_ending": "ENDING_INTERRUPTED"
     }
