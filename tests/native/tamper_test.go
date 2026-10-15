@@ -41,7 +41,7 @@ func (g *gate) reports(t *testing.T) {
 	if first.GetInstallationId() != g.installation || first.GetRun().GetBootId() != strings.TrimSpace(string(boot)) ||
 		first.GetRun().GetPreviousEnding() != agentv1.Status_ENDING_STOPPED || first.GetRun().GetPreviousReason() != "the agent was asked to stop" ||
 		first.GetCondition() == agentv1.Status_CONDITION_STOPPED || first.GetInterval().AsDuration() != time.Minute ||
-		len(first.GetConfiguration().GetDigestSha256()) != 64 || first.GetCredential().GetGeneration() < 2 || len(first.GetModules()) != 5 {
+		len(first.GetConfiguration().GetDigestSha256()) != 64 || first.GetCredential().GetGeneration() < 2 || len(first.GetModules()) != 6 {
 		t.Errorf("after a stop, the agent reported %v", first)
 	}
 	if privileges.GetUser() != strconv.Itoa(g.uid) || !privileges.GetNoNewPrivileges() || privileges.GetSeccomp() != "filter" || len(privileges.GetCapabilities()) != 0 ||
@@ -51,7 +51,7 @@ func (g *gate) reports(t *testing.T) {
 	if spoken := first.GetCompatibility(); spoken.GetContracts() != contractsOf(t, agentPath) || spoken.GetProtocolVersion() != 1 ||
 		spoken.GetEventSchemaVersion() != 1 || spoken.GetInventorySchemaVersion() != 1 || spoken.GetPolicySchemaVersion() != 1 ||
 		spoken.GetUpdateSchemaVersion() != 1 || spoken.GetUpdates().GetEnabled() || spoken.GetUpdates().GetFormat() != updatev1.Format_FORMAT_DEB ||
-		spoken.GetUpdates().GetStateGeneration() != 1 {
+		spoken.GetUpdates().GetStateGeneration() != 1 || spoken.GetAssessmentSchemaVersion() != 1 {
 		t.Errorf("an agent that takes no update said it speaks %v", spoken)
 	}
 	if previous := await(t, g.invocation, "agent_previous_run", 10*time.Second); previous["level"] != "INFO" || previous["ending"] != "stopped" {
