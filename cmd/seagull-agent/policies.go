@@ -12,6 +12,7 @@ import (
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/config"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/assessment"
 	"github.com/dynasmon/Seagull-agent-v2/internal/policy"
 	"github.com/dynasmon/Seagull-agent-v2/internal/status"
 )
@@ -281,6 +282,19 @@ func keeping(kept []policy.Kept) string {
 		written = append(written, fmt.Sprintf("%s at %s rather than %s", own.Setting, own.Own, own.Asked))
 	}
 	return "; its own configuration keeps " + strings.Join(written, ", ")
+}
+
+func (c *configuration) checklist() assessment.Asked {
+	if c.policies == nil {
+		return assessment.Asked{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.policies.applied == nil {
+		return assessment.Asked{}
+	}
+	applied := c.policies.applied.Policy
+	return assessment.Asked{PolicyID: applied.GetPolicyId(), Revision: applied.GetRevision(), Checks: applied.GetSettings().GetAssessment().GetChecks()}
 }
 
 func (c *configuration) inForce() (string, uint64, time.Time) {
