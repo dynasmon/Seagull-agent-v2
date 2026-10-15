@@ -23,6 +23,7 @@ import (
 
 const (
 	everyHour  = time.Hour
+	roundTime  = 5 * time.Minute
 	refresh    = 24 * time.Hour
 	frameBytes = 64
 	mostLogged = 100
@@ -46,6 +47,7 @@ type Options struct {
 	Logger       *slog.Logger
 	Asked        func() Asked
 	Interval     func() time.Duration
+	Within       time.Duration
 	Largest      func() int64
 	Host         Host
 	Now          func() time.Time
@@ -79,6 +81,9 @@ func New(options Options) (*Collector, error) {
 	}
 	if options.Interval == nil {
 		options.Interval = func() time.Duration { return everyHour }
+	}
+	if options.Within <= 0 {
+		options.Within = roundTime
 	}
 	if options.Largest == nil {
 		options.Largest = func() int64 { return spool.MaxPayloadBytes }
@@ -182,7 +187,9 @@ func (c *Collector) assess(ctx context.Context, held *baseline) error {
 	began := time.Now()
 	var results []*assessmentv1.Result
 	err := c.options.Governor.Scan(ctx, governor.Scan{Module: Name, Room: c.room, Needs: held.needs()}, func(ctx context.Context, meter *governor.Meter) error {
-		round := newRound(ctx, c.options.Host, asked.Checks)
+		within, cancel := context.WithTimeout(ctx, c.options.Within)
+		defer cancel()
+		round := newRound(within, c.options.Host, asked.Checks)
 		for _, check := range asked.Checks {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -356,6 +363,8 @@ func (r *round) answer(check *assessmentv1.Check) *assessmentv1.Result {
 	outcome, evidence := assessmentv1.Outcome_OUTCOME_UNSUPPORTED, ""
 	if err := unread(check); err != nil {
 		evidence = err.Error()
+	} else if r.ctx.Err() != nil {
+		outcome, evidence = assessmentv1.Outcome_OUTCOME_ERROR, "the round ran out of the time it is given before this check: a source of the host took too long to read"
 	} else {
 		switch test := check.GetTest().(type) {
 		case *assessmentv1.Check_File:
