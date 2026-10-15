@@ -29,6 +29,7 @@ const (
 	privateDropIn  = "/etc/ssh/sshd_config.d/20-seagull-native-private.conf"
 	assessModprobe = "/etc/modprobe.d/seagull-native-assess.conf"
 	assessPrivate  = "/etc/seagull-native-assess"
+	assessAside    = "/etc/seagull-native-assess-aside"
 	assessGroup    = "seagull-native-assess"
 	assessMember   = "seagull-native-member"
 )
@@ -118,7 +119,9 @@ func checks(order []string, held map[string]assessed) []*assessmentv1.Check {
 // An operator signs the checks the agent runs into its policy; the agent runs
 // them against its host through the sandbox the service puts it in, answers a
 // check it cannot read or cannot see through as such, admits what it found,
-// and assesses again as soon as it is handed a newer policy.
+// and assesses again as soon as it is handed a newer policy. The drop-ins the
+// host's sshd already has are set aside meanwhile, as a cloud image's is of
+// mode 0600 and would answer every sshd check an error.
 func (g *gate) assess(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -129,6 +132,7 @@ func (g *gate) assess(t *testing.T) {
 		t.Fatalf("encode the signer: %v", err)
 	}
 	place(t, signersPath, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
+	setAside(t, filepath.Dir(assessDropIn))
 	place(t, assessDropIn, []byte("PasswordAuthentication yes\nMatch User "+assessMember+"\n    PermitRootLogin yes\n"))
 	if err := os.MkdirAll(filepath.Dir(assessModprobe), 0o755); err != nil {
 		t.Fatalf("create %s: %v", filepath.Dir(assessModprobe), err)
@@ -204,6 +208,28 @@ func (g *gate) assess(t *testing.T) {
 	g.signers = ""
 	g.platform.handed.Store(nil)
 	g.write(t)
+}
+
+func setAside(t *testing.T, directory string) {
+	t.Helper()
+	held, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatalf("read %s: %v", directory, err)
+	}
+	if err := os.MkdirAll(assessAside, 0o700); err != nil {
+		t.Fatalf("create %s: %v", assessAside, err)
+	}
+	for _, entry := range held {
+		if err := os.Rename(filepath.Join(directory, entry.Name()), filepath.Join(assessAside, entry.Name())); err != nil {
+			t.Fatalf("set %s aside: %v", entry.Name(), err)
+		}
+	}
+	t.Cleanup(func() {
+		for _, entry := range held {
+			os.Rename(filepath.Join(assessAside, entry.Name()), filepath.Join(directory, entry.Name()))
+		}
+		os.Remove(assessAside)
+	})
 }
 
 func (g *gate) admitted(t *testing.T, revision uint64, within time.Duration) map[string]any {
