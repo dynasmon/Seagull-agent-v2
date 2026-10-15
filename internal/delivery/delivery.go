@@ -116,7 +116,11 @@ func New(options Options) (*Delivery, error) {
 		stream spool.Stream
 		route  protocol.Route
 		class  governor.Class
-	}{{spool.Events, protocol.Events, governor.Critical}, {spool.Inventory, protocol.Inventory, governor.Bulk}} {
+	}{
+		{spool.Events, protocol.Events, governor.Critical},
+		{spool.Inventory, protocol.Inventory, governor.Bulk},
+		{spool.Assessments, protocol.Assessments, governor.Bulk},
+	} {
 		address := *target
 		address.Path += carried.route.Path()
 		delivery.routes = append(delivery.routes, &route{
@@ -127,9 +131,9 @@ func New(options Options) (*Delivery, error) {
 	return delivery, nil
 }
 
-// Run delivers both routes until ctx ends. A route whose batches the platform
-// does not take holds back nothing on the other, while a listener that fails
-// holds back both until it answers again. It returns early only when the spool
+// Run delivers every route until ctx ends. A route whose batches the platform
+// does not take holds back nothing on the others, while a listener that fails
+// holds back all of them until it answers again. It returns early only when the spool
 // it delivers from is gone.
 func (d *Delivery) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
@@ -260,8 +264,11 @@ func (r *route) run(ctx context.Context) error {
 func (r *route) compose() (*batch, error) {
 	limits := r.options.Batching()
 	most := limits.MaxEvents
-	if r.stream == spool.Inventory {
+	switch r.stream {
+	case spool.Inventory:
 		most = limits.MaxInventoryRecords
+	case spool.Assessments:
+		most = protocol.MaxAssessmentsPerBatch
 	}
 	if r.window > 0 {
 		most = min(most, r.window)
