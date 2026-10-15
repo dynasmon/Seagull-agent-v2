@@ -482,16 +482,19 @@ fields the contracts do not declare are ignored.
 
 Compatibility is claimed only with the backend commits recorded under
 [`tests/compatibility/testdata`](tests/compatibility/testdata): 6fae345,
-2829b0d, 0656b2a, fdd814d, 46ca9c7, 6b85c4b and 8d1e9e0, whose ingest gateway,
-control plane and pipeline were driven with what this agent sends; fdd814d,
-46ca9c7, 6b85c4b and 8d1e9e0 also handed it the signed policies it applies;
-46ca9c7, 6b85c4b and 8d1e9e0 took and kept the status reports this build's
-installed agent sent in the native gate; 6b85c4b and 8d1e9e0 handed it the
-signed releases it installs and took what it reported while it was updated; and
-8d1e9e0 rolled releases out on those reports, opening the next wave once the
-agent ran one and pausing the rollout of the one it went back from. The suite
-fails when `go.mod` pins contracts no recorded platform was built with, or when
-a recorded answer reads differently.
+2829b0d, 0656b2a, fdd814d, 46ca9c7, 6b85c4b, 8d1e9e0 and 331492d, whose ingest
+gateway, control plane and pipeline were driven with what this agent sends;
+fdd814d, 46ca9c7, 6b85c4b, 8d1e9e0 and 331492d also handed it the signed
+policies it applies; 46ca9c7, 6b85c4b, 8d1e9e0 and 331492d took and kept the
+status reports this build's installed agent sent in the native gate; 6b85c4b,
+8d1e9e0 and 331492d handed it the signed releases it installs and took what it
+reported while it was updated; 8d1e9e0 and 331492d rolled releases out on those
+reports, opening the next wave once the agent ran one and pausing the rollout
+of the one it went back from; and 331492d handed it the checks it ran in the
+native gate, refusing to publish the one written for a newer contract, and took
+and kept what it found, the newest assessment as its posture. The suite fails
+when `go.mod` pins contracts no recorded platform was built with, or when a
+recorded answer reads differently.
 
 ## Build and test
 
