@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
+	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
@@ -22,14 +23,17 @@ var ErrMalformed = errors.New("the record is not a well-formed message of its ro
 
 // A Route is where the platform takes one kind of record, and the shape of the
 // batches it takes them in: an event is one record of the events route, what
-// one asset has of one kind is one record of the inventory route, and what the
-// agent says of itself at one moment is one record of the status route.
+// one asset has of one kind is one record of the inventory route, what the
+// agent says of itself at one moment is one record of the status route, and
+// what it found running the checks of its policy is one of the assessments
+// route.
 type Route int
 
 const (
 	Events Route = iota + 1
 	Inventory
 	Status
+	Assessments
 )
 
 func (r Route) String() string {
@@ -40,6 +44,8 @@ func (r Route) String() string {
 		return "inventory"
 	case Status:
 		return "status"
+	case Assessments:
+		return "assessments"
 	default:
 		return fmt.Sprintf("route(%d)", int(r))
 	}
@@ -87,6 +93,16 @@ var shapes = map[Route]shape{
 		record:   func() proto.Message { return &agentv1.Status{} },
 		refusing: "invalid_report",
 		maxAge:   MaxEventAge,
+	},
+	Assessments: {
+		path:     "/v1/assessments",
+		batchID:  number(&assessmentv1.AssessmentBatch{}, "batch_id"),
+		version:  number(&assessmentv1.AssessmentBatch{}, "protocol_version"),
+		records:  number(&assessmentv1.AssessmentBatch{}, "assessments"),
+		recordID: number(&assessmentv1.Assessment{}, "assessment_id"),
+		record:   func() proto.Message { return &assessmentv1.Assessment{} },
+		refusing: "invalid_assessment",
+		maxAge:   MaxAssessmentAge,
 	},
 }
 
