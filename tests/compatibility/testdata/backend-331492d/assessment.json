@@ -1,0 +1,88 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "331492dfdaaa7d1ac80cffe4d61c3868835a5e3d",
+    "contracts": "v0.19.0"
+  },
+  "recorded_at": "2026-10-15T22:12:21.492417751Z",
+  "exchanges": [
+    {
+      "name": "assessment-000",
+      "route": "POST /v1/assessments",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "assessment-001",
+      "route": "POST /v1/assessments",
+      "agent_id": "web-01",
+      "status": 200
+    },
+    {
+      "name": "assessment-invalid",
+      "route": "POST /v1/assessments",
+      "agent_id": "web-01",
+      "status": 422
+    },
+    {
+      "name": "assessment-unknown-outcome",
+      "route": "POST /v1/assessments",
+      "agent_id": "web-01",
+      "status": 422
+    },
+    {
+      "name": "assessment-schema-2",
+      "route": "POST /v1/assessments",
+      "agent_id": "web-01",
+      "status": 422
+    },
+    {
+      "name": "assessment-protocol-2",
+      "route": "POST /v1/assessments",
+      "agent_id": "web-01",
+      "status": 426
+    },
+    {
+      "name": "assessment-too-old",
+      "route": "POST /v1/assessments",
+      "agent_id": "web-01",
+      "status": 422
+    },
+    {
+      "name": "assessment-ahead",
+      "route": "POST /v1/assessments",
+      "agent_id": "web-01",
+      "status": 422
+    },
+    {
+      "name": "assessment-too-many",
+      "route": "POST /v1/assessments",
+      "agent_id": "web-01",
+      "status": 422
+    },
+    {
+      "name": "assessment-agent-not-registered",
+      "route": "POST /v1/assessments",
+      "agent_id": "web-02",
+      "status": 403
+    },
+    {
+      "name": "assessment-agent-not-admitted",
+      "route": "POST /v1/assessments",
+      "agent_id": "web-03",
+      "status": 403
+    },
+    {
+      "name": "assessment-unusable-identity",
+      "route": "POST /v1/assessments",
+      "agent_id": "web 04",
+      "status": 403
+    },
+    {
+      "name": "assessment-malformed",
+      "route": "POST /v1/assessments",
+      "agent_id": "web-01",
+      "status": 400
+    }
+  ]
+}
