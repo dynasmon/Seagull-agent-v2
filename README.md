@@ -23,9 +23,9 @@ request, ingestion, storage and analysis.
 ## Agent capabilities
 
 Collectors are enabled under `modules` in the configuration, and none runs
-unless it is named. Five are available: `authentication`, `inventory`,
-`processes`, `files` and `network`. The settings the package installs enable
-`authentication` and `inventory`.
+unless it is named. Six are available: `authentication`, `inventory`,
+`processes`, `files`, `network` and `assessment`. The settings the package
+installs enable `authentication` and `inventory`.
 
 ### Authentication monitoring
 
@@ -77,10 +77,40 @@ the process holding a socket when the agent may read it, and opens no socket,
 reads no packet and resolves no name. Like `files`, it delivers nothing until
 the contracts carry these records.
 
+### Security configuration assessment
+
+`assessment` runs the checks of the signed policy in force against the host, and
+nothing else: the agent's configuration names no checks, so what it assesses is
+what an operator signed. A check is a typed test, never a command: the owner,
+group, kind or permission bits of a path; a rule about the accounts and groups
+of `/etc/passwd` and `/etc/group`; a kernel parameter in force; a kernel module
+loaded, or kept out by an `install` line of the modprobe configuration; a dpkg
+package installed or not; a systemd unit enabled, masked or running; a directive
+as sshd applies `/etc/ssh/sshd_config` and what it includes, Match blocks too,
+or as the shadow utilities apply `/etc/login.defs`. Each check is answered
+`pass`, `fail`, `error` when the agent could not read what it is about, or not
+within the five minutes a round is given, `unsupported` when it does not run
+such a check, a newer test included, or `not_applicable` when what it is about
+is not on the host, with evidence naming what was judged and where, and never
+more of a file than the directive a check names. The module assesses when it
+starts, every `modules.assessment.interval`, and as soon as the policy in force
+changes, and admits an assessment answering every check when what it found
+changed, or once the platform's copy is nearly a day old. A policy enables the
+module like any other, under `modules`.
+
+The agent judges the host through the sandbox the service runs it in: a path
+the service hides from it, such as `/root`, or one its account may not reach,
+such as an sshd file of mode 0600, is an `error` that names the drop-in
+[Privileges](#privileges) lists, never a pass. A module built into the kernel
+without parameters cannot be told from an absent one, as the service hides
+`/usr/lib/modules`, and options sshd is started with outside its configuration
+are not read.
+
 ### Durable delivery
 
-A record is admitted to the on-disk spool only once it is synced, in one of two
-checksummed streams, `events` and `inventory`, each kept in its own order.
+A record is admitted to the on-disk spool only once it is synced, in one of
+three checksummed streams, `events`, `inventory` and `assessments`, each kept in
+its own order.
 Delivery sends batches over mutual TLS 1.3, and only a durable acknowledgement
 that counts every record drops them; anything less sends the same batch again,
 with jittered backoff and the platform's `Retry-After` honoured. A record the
@@ -89,7 +119,8 @@ or of a version it speaks, holds the records and drops none. The spool is
 bounded by `spool.max_bytes` and `spool.max_age`, keeps no event longer than the
 platform admits one, pauses admission when it is full instead of evicting, and
 counts every record that leaves it undelivered as lost, expired or quarantined.
-Events are sent before inventory.
+Events are sent before inventory and assessments, which take at most half and a
+sixteenth of the spool.
 
 ### Identity and renewal
 
@@ -108,12 +139,13 @@ the platform hands it on the listener the agent renews on, and the agent applies
 it only when a key `policy.signers` holds the public half of signed it, it names
 the agent, it has not expired and its revision is no lower than the one the
 agent holds. A policy sets the log level, which modules collect and how often,
-what the files module watches, and budgets, which only ever lower the ceilings
-of `agent.json`; it never reaches the platform the agent talks to, what it
-trusts, its identity or its timeouts. The policy in force is kept in the
-installation and verified again at every start and on SIGHUP, so retiring a key
-from `policy.signers` withdraws what it signed; one that expires stays in force
-and is reported until a newer one arrives. `status` says which revision the
+what the files module watches, the checks the assessment module runs, and
+budgets, which only ever lower the ceilings of `agent.json`; it never reaches
+the platform the agent talks to, what it trusts, its identity or its timeouts.
+The policy in force is kept in the installation and verified again at every
+start and on SIGHUP, so retiring a key from `policy.signers` withdraws what it
+signed; one that expires stays in force and is reported until a newer one
+arrives. `status` says which revision the
 agent runs on, and every policy applied or refused is in the journal.
 
 ### Signed updates
@@ -256,6 +288,7 @@ the shutdown timeout, the `policy.signers` file named and `updates.enabled` and
 | `modules.inventory.interval`, `modules.processes.interval` | `1h` | how often each takes stock |
 | `modules.files.paths`, `modules.files.exclude`, `modules.files.interval` | as above, none, `1h` | what the files module watches, leaves out, and walks again how often |
 | `modules.network.interval` | `1m` | how often the socket tables are read |
+| `modules.assessment.interval` | `1h` | how often the checks of the policy in force run |
 | `resources.memory_limit` | `256MiB` | the target of the garbage collector |
 | `resources.max_scan_bytes_per_second` | `8MiB` | the pace of scans and hashing |
 | `logging.level`, `logging.format` | `info`, `json` | what the log says, and how |
@@ -294,6 +327,7 @@ drop-in under `/etc/systemd/system/seagull-agent.service.d/` followed by
 | `files` | `ProtectHome=read-only`, `CapabilityBoundingSet=CAP_DAC_READ_SEARCH`, `AmbientCapabilities=CAP_DAC_READ_SEARCH` | `/home`, `/root` and the files only root reads |
 | `network` | `ProtectProc=default` | the other network namespaces |
 | `network` | also `ReadOnlyPaths=/proc`, `CapabilityBoundingSet=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH`, `AmbientCapabilities=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH`, `SystemCallFilter=~process_vm_readv process_vm_writev` | the process holding another account's socket |
+| `assessment` | `ProtectHome=read-only`, `CapabilityBoundingSet=CAP_DAC_READ_SEARCH`, `AmbientCapabilities=CAP_DAC_READ_SEARCH` | checks of `/home`, `/root` and the files only root reads |
 
 `CAP_DAC_READ_SEARCH` lets the agent read any file on the host, keys included,
 which is why the package never grants it. Modules share one process, so a
@@ -417,7 +451,7 @@ not reach it. What a rollout decides changes nothing the agent verifies.
 | `/var/lib/seagull-agent/keys/` | Private keys, PKCS #8 |
 | `/var/lib/seagull-agent/certificates/` | Issued certificates and their chains |
 | `/var/lib/seagull-agent/trust/` | Authorities adopted from renewals |
-| `/var/lib/seagull-agent/spool/` | Durable `events` and `inventory` streams |
+| `/var/lib/seagull-agent/spool/` | Durable `events`, `inventory` and `assessments` streams |
 | `/var/lib/seagull-agent/collection/` | Collector checkpoints and baselines |
 | `/var/lib/seagull-agent/status/status.json` | What the agent last said of itself |
 | `/var/lib/seagull-agent/policy/policy.json` | The signed policy applied last, and the revision no later one goes below |
@@ -435,16 +469,16 @@ agent's identity, and a copied key is revoked with its agent.
 
 ## Compatibility
 
-This build speaks protocol 1, event schema 1, inventory schema 1 and status
-schema 1, and reads signed policies of schema 1 and update metadata of schema 1,
-from the contracts release `go.mod` pins, as `seagull-agent -version` prints and
-every status report says. The agent negotiates nothing before it sends; the
-platform's answer to a batch is where it learns what the platform accepts. A
-refused version, or a refused value its contracts declare, is an incompatibility
-that holds the records rather than quarantining them, since a platform that
-speaks them accepts them unchanged. A refusal of the agent itself is an
-exclusion that waits for an operator. Reply fields the contracts do not declare
-are ignored.
+This build speaks protocol 1, event schema 1, inventory schema 1, status schema
+1 and assessment schema 1, and reads signed policies of schema 1 and update
+metadata of schema 1, from the contracts release `go.mod` pins, as
+`seagull-agent -version` prints and every status report says. The agent
+negotiates nothing before it sends; the platform's answer to a batch is where it
+learns what the platform accepts. A refused version, or a refused value its
+contracts declare, is an incompatibility that holds the records rather than
+quarantining them, since a platform that speaks them accepts them unchanged. A
+refusal of the agent itself is an exclusion that waits for an operator. Reply
+fields the contracts do not declare are ignored.
 
 Compatibility is claimed only with the backend commits recorded under
 [`tests/compatibility/testdata`](tests/compatibility/testdata): 6fae345,
