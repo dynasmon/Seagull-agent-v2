@@ -106,6 +106,7 @@ func TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge(t *testin
 		{name: "the agent watches the files it is told to, reads what only root reads once an operator lets it, and writes down what changes", run: g.files},
 		{name: "the agent watches what the host listens on and talks to, and sees other namespaces and who holds a socket once an operator lets it", run: g.sockets},
 		{name: "the agent runs on a policy an operator signed off the platform and refuses one nobody it trusts signed", run: g.policies},
+		{name: "the agent assesses its host against the checks of the policy it runs on, through the sandbox the service puts it in", run: g.assess},
 		{name: "the agent tells the platform how it runs and how the run before it ended", run: g.reports},
 		{name: "the agent runs the signed release the platform asks for, installed as root, and goes back from one that does not run", run: g.updates},
 		{name: "no account but root changes what decides the agent, and what root changes is told", run: g.tamper},
