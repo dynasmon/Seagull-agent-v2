@@ -15,24 +15,27 @@ import (
 
 // What the agent writes on the wire, each changing on its own: Version on every
 // batch, EventSchemaVersion on every event, InventorySchemaVersion on every
-// inventory record and StatusSchemaVersion on every status report. None of
-// them is the release of the agent.
+// inventory record, StatusSchemaVersion on every status report and
+// AssessmentSchemaVersion on every assessment. None of them is the release of
+// the agent.
 const (
-	Version                = 1
-	EventSchemaVersion     = 1
-	InventorySchemaVersion = 1
-	StatusSchemaVersion    = 1
+	Version                 = 1
+	EventSchemaVersion      = 1
+	InventorySchemaVersion  = 1
+	StatusSchemaVersion     = 1
+	AssessmentSchemaVersion = 1
 )
 
-// What the recorded platform admits beyond the shape of a record: events and
-// inventory no older than these ages and no later than its own clock by more
-// than MaxClockSkew, inventory batches of at most MaxInventoryItemsPerBatch
-// items, and a batch within its body ceiling, of which the batch identifier,
-// the protocol version and the framing of a record take less than
-// BatchEnvelopeBytes when the batch carries one record.
+// What the recorded platform admits beyond the shape of a record: events,
+// inventory and assessments no older than these ages and no later than its own
+// clock by more than MaxClockSkew, inventory batches of at most
+// MaxInventoryItemsPerBatch items, and a batch within its body ceiling, of
+// which the batch identifier, the protocol version and the framing of a record
+// take less than BatchEnvelopeBytes when the batch carries one record.
 const (
 	MaxEventAge               = 168 * time.Hour
 	MaxInventoryAge           = 720 * time.Hour
+	MaxAssessmentAge          = 720 * time.Hour
 	MaxClockSkew              = 5 * time.Minute
 	MaxInventoryItemsPerBatch = 20_000
 	BatchEnvelopeBytes        = 1 << 10
