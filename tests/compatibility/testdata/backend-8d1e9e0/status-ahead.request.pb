@@ -1,9 +1,9 @@
 
-&22beb95d-201d-4afb-9bb2-f2b03b050663.1·$22beb95d-201d-4afb-9bb2-f2b03b050663"Ýç¹Ö–Ÿª(*<2
-ec421e395e06linux"amd64B6
-$fee2269c-4702-4508-a23b-30bf76e054b4ŸÆ¹Öÿø´ÔJf
-"v0.0.0-20261013165626-bf58c1d2857d(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
-configurationŸÆ¹Öÿø´ÔZ$
+&65e4afeb-72be-4bcd-91df-1fb40d695704.1é$65e4afeb-72be-4bcd-91df-1fb40d695704"Æ»ÅÖ‡ê¤*<2
+0cf1ab12e505linux"amd64B6
+$57c59c5d-a6df-45b2-b1f2-a038a8bd3a4eƒ™ÅÖÒÌ—©Jf
+"v0.0.0-20261015215544-ddedf57cabc5(ddedf57cabc5aa6084e57a99851bc8a30fe1cb11go1.26.9"linux*amd64PZ
+configurationƒ™ÅÖÒÌ—©Z$
 
 collection"no module is enabledZ	
 spoolZ
@@ -14,14 +14,17 @@ credentialZ
 policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
 	reportingZ€
 update"tupdates.enabled is false or the installation is not enrolled, so the agent installs no release the platform hands itb 
-authenticationŸÆ¹Öï“ºàb
-	inventoryŸÆ¹Ö‚˜ºàb
-	processesŸÆ¹ÖÀ™ºàb
-filesŸÆ¹Öþšºàb
-networkŸÆ¹Ö©œºàj#p€€€€
+authenticationƒ™ÅÖªëï¹b
+	inventoryƒ™ÅÖÇïï¹b
+	processesƒ™ÅÖèðï¹b
+filesƒ™ÅÖÖñï¹b
+networkƒ™ÅÖžóï¹b
+
+assessmentƒ™ÅÖ‚ôï¹j5¨€€€€
 
 events8
-	inventory8r½Æ¹Ö´Æ¹Ö”ËÍzB
-@e9afdfd8aa15bfad46731b3b4b52028a88b60be0990939c9cde30507d7be6523‚
-997997999 *filter’
-v0.18.0 (0:
+	inventory8
+assessments8r¡™ÅÖ•™ÅÖÇéîµzB
+@d64af2713aa85449e0dc444d35147850a4dc3ff63369b5d0c876c803021d0561‚
+997997999 *filter’
+v0.19.0 (0:@

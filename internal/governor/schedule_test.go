@@ -135,3 +135,19 @@ func schedule(t *testing.T, installation, task string, every time.Duration) *gov
 	}
 	return periodic
 }
+
+func TestWorkAskedForOutOfItsTurnRunsAtOnceAndKeepsTheTurnsAfterIt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hourly := schedule(t, "8a4a6c52-3a3b-4f0e-9c38-1f2d7f0c9b11", "assessment", time.Hour)
+		turn := hourly.Next(time.Now())
+		sooner := make(chan struct{}, 1)
+		sooner <- struct{}{}
+		asked := time.Now()
+		if due, err := hourly.Until(t.Context(), sooner); err != nil || !due.IsZero() || !time.Now().Equal(asked) {
+			t.Fatalf("work asked for at %s ran at %s as due %s: %v", asked, time.Now(), due, err)
+		}
+		if due, err := hourly.Until(t.Context(), sooner); err != nil || due != turn || !time.Now().Equal(turn) {
+			t.Fatalf("after work asked for out of its turn, the next run came at %s as due %s, and its turn was %s: %v", time.Now(), due, turn, err)
+		}
+	})
+}

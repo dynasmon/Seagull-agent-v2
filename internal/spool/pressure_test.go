@@ -521,3 +521,32 @@ func onDisk(t *testing.T, directory string) int64 {
 	}
 	return total
 }
+
+func TestAssessmentsKeepToASixteenthOfTheBudgetAndLeaveTheRestToTheOtherStreams(t *testing.T) {
+	clock := newPressured()
+	clock.quick = true
+	held, _ := openPressured(t, spoolDirectory(t), aged(16<<20, time.Hour, time.Hour), clock)
+	for n := 0; ; n++ {
+		if _, err := held.Admit(Assessments, sizedRecord("assessment", n, 96<<10)); err != nil {
+			if !errors.Is(err, ErrFull) {
+				t.Fatalf("assessment %d was refused otherwise than for room: %v", n, err)
+			}
+			break
+		}
+	}
+	if kept := streamStats(t, held, Assessments).Bytes; kept > 16<<20/16 || kept < 16<<20/16-(128<<10) {
+		t.Fatalf("assessments hold %d bytes of a 16MiB spool, and their share is a sixteenth", kept)
+	}
+	for _, stream := range []Stream{Events, Inventory} {
+		if room := held.Room(stream); room < 16<<20/2-(128<<10) {
+			t.Fatalf("with every assessment it may hold, %s has room for %d bytes", stream, room)
+		}
+		if _, err := held.Admit(stream, sizedRecord(stream.String(), 0, 96<<10)); err != nil {
+			t.Fatalf("a full share of assessments kept %s from admitting: %v", stream, err)
+		}
+	}
+	directory := filepath.Join(held.lock.Name())
+	if described, err := os.Stat(filepath.Join(directory, "assessments")); err != nil || !described.IsDir() {
+		t.Fatalf("the assessments are not kept in a directory of their own: %v", err)
+	}
+}

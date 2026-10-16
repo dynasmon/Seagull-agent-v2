@@ -63,12 +63,13 @@ var (
 	levels     = map[string]slog.Level{"debug": slog.LevelDebug, "info": slog.LevelInfo, "warn": slog.LevelWarn, "error": slog.LevelError}
 	logFormats = []string{JSONLogs, TextLogs}
 	providers  = []string{KeysInFiles}
-	collectors = []string{"authentication", "files", "inventory", "network", "processes"}
+	collectors = []string{"assessment", "authentication", "files", "inventory", "network", "processes"}
 	periodic   = map[string]rounds{
-		"files":     {every: Duration(time.Hour), least: Duration(time.Minute), most: Duration(24 * time.Hour)},
-		"inventory": {every: Duration(time.Hour), least: Duration(time.Minute), most: Duration(24 * time.Hour)},
-		"network":   {every: Duration(time.Minute), least: Duration(10 * time.Second), most: Duration(time.Hour)},
-		"processes": {every: Duration(time.Hour), least: Duration(time.Minute), most: Duration(24 * time.Hour)},
+		"assessment": {every: Duration(time.Hour), least: Duration(time.Minute), most: Duration(24 * time.Hour)},
+		"files":      {every: Duration(time.Hour), least: Duration(time.Minute), most: Duration(24 * time.Hour)},
+		"inventory":  {every: Duration(time.Hour), least: Duration(time.Minute), most: Duration(24 * time.Hour)},
+		"network":    {every: Duration(time.Minute), least: Duration(10 * time.Second), most: Duration(time.Hour)},
+		"processes":  {every: Duration(time.Hour), least: Duration(time.Minute), most: Duration(24 * time.Hour)},
 	}
 	watched   = []string{"/etc", "/usr/bin", "/usr/sbin", "/usr/local/bin", "/usr/local/sbin", "/usr/lib/systemd/system", "/boot", "/var/spool/cron"}
 	unwatched = []string{"/proc", "/sys", "/dev", "/tmp", "/var/tmp"}

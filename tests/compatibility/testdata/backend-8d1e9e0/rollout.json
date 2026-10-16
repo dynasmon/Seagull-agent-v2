@@ -7,7 +7,7 @@
     "store": "clickhouse/clickhouse-server:24.8",
     "registry": "postgres:16.4-alpine"
   },
-  "recorded_at": "2026-10-13T17:10:21.506018756Z",
+  "recorded_at": "2026-10-15T22:12:12.087415434Z",
   "agent": "web-01",
   "agents": [
     "web-01",
@@ -31,11 +31,11 @@
     "web-19",
     "web-20"
   ],
-  "base": "v0.0.0-20261013165626-bf58c1d2857d",
+  "base": "v0.0.0-20261015215544-ddedf57cabc5",
   "rollouts": [
     {
       "name": "forward",
-      "rollout_id": "164d2dd7-11d3-4ac0-a4a8-595ab91758eb",
+      "rollout_id": "927764bb-5f50-4d97-9f94-c91ac4a6bc44",
       "version": "v1.999.0-gate",
       "waves": [
         {
@@ -56,7 +56,7 @@
       "steps": [
         {
           "after": "batch-000.pb",
-          "sequence": 55,
+          "sequence": 58,
           "state": "STATE_ACTIVE",
           "wave": 0,
           "reason": "the agent the native gate updated is the canary",
@@ -89,7 +89,7 @@
         },
         {
           "after": "batch-001.pb",
-          "sequence": 57,
+          "sequence": 60,
           "state": "STATE_ACTIVE",
           "wave": 1,
           "reason": "wave 0 ran for 1h0m0s with 1 of the agents reached running v1.999.0-gate",
@@ -99,32 +99,32 @@
           "pending": 0,
           "offered": {
             "web-01": "v1.999.0-gate",
-            "web-02": "",
-            "web-03": "v1.999.0-gate",
+            "web-02": "v1.999.0-gate",
+            "web-03": "",
             "web-04": "v1.999.0-gate",
-            "web-05": "v1.999.0-gate",
+            "web-05": "",
             "web-06": "v1.999.0-gate",
             "web-07": "",
-            "web-08": "",
-            "web-09": "v1.999.0-gate",
+            "web-08": "v1.999.0-gate",
+            "web-09": "",
             "web-10": "v1.999.0-gate",
-            "web-11": "v1.999.0-gate",
+            "web-11": "",
             "web-12": "v1.999.0-gate",
             "web-13": "",
-            "web-14": "",
+            "web-14": "v1.999.0-gate",
             "web-15": "",
-            "web-16": "",
+            "web-16": "v1.999.0-gate",
             "web-17": "v1.999.0-gate",
             "web-18": "v1.999.0-gate",
             "web-19": "v1.999.0-gate",
-            "web-20": "v1.999.0-gate"
+            "web-20": ""
           }
         }
       ]
     },
     {
       "name": "broken",
-      "rollout_id": "57befa5d-9936-409e-974e-9536e767d333",
+      "rollout_id": "1a5bdc03-969e-4a98-b166-aedfe99cf591",
       "version": "v1.999.1-gate",
       "waves": [
         {
@@ -142,7 +142,7 @@
       "steps": [
         {
           "after": "batch-002.pb",
-          "sequence": 58,
+          "sequence": 61,
           "state": "STATE_ACTIVE",
           "wave": 0,
           "reason": "the agent the native gate updated is the canary",
@@ -175,7 +175,7 @@
         },
         {
           "after": "batch-003.pb",
-          "sequence": 60,
+          "sequence": 63,
           "state": "STATE_PAUSED",
           "wave": 0,
           "reason": "1 of the agents reached failed v1.999.1-gate, and 1 failing pause the rollout",
@@ -208,7 +208,7 @@
         },
         {
           "after": "batch-004.pb",
-          "sequence": 61,
+          "sequence": 64,
           "state": "STATE_PAUSED",
           "wave": 0,
           "reason": "1 of the agents reached failed v1.999.1-gate, and 1 failing pause the rollout",

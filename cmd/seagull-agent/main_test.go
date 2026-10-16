@@ -93,8 +93,9 @@ func TestTheVersionFlagPrintsTheBuildIdentityApartFromTheWireVersions(t *testing
 	if contracts != "contracts "+contractsRelease() || contractsRelease() == "" {
 		t.Fatalf("printed the contracts release as %q", contracts)
 	}
-	want := fmt.Sprintf("protocol_version %d\nevent_schema_version %d\ninventory_schema_version %d\nstatus_schema_version %d\npolicy_schema_version %d\nupdate_schema_version %d\n",
-		protocol.Version, protocol.EventSchemaVersion, protocol.InventorySchemaVersion, protocol.StatusSchemaVersion, policy.SchemaVersion, update.SchemaVersion)
+	want := fmt.Sprintf("protocol_version %d\nevent_schema_version %d\ninventory_schema_version %d\nstatus_schema_version %d\npolicy_schema_version %d\nupdate_schema_version %d\nassessment_schema_version %d\n",
+		protocol.Version, protocol.EventSchemaVersion, protocol.InventorySchemaVersion, protocol.StatusSchemaVersion, policy.SchemaVersion, update.SchemaVersion,
+		protocol.AssessmentSchemaVersion)
 	if spoken != want {
 		t.Fatalf("printed the wire versions as %q, want %q", spoken, want)
 	}
@@ -642,6 +643,7 @@ func TestAnEnrolledAgentDeliversWhatItsSpoolHoldsAsItRuns(t *testing.T) {
 	if spoken.GetContracts() != contractsRelease() || spoken.GetProtocolVersion() != protocol.Version ||
 		spoken.GetEventSchemaVersion() != protocol.EventSchemaVersion || spoken.GetInventorySchemaVersion() != protocol.InventorySchemaVersion ||
 		spoken.GetPolicySchemaVersion() != policy.SchemaVersion || spoken.GetUpdateSchemaVersion() != update.SchemaVersion ||
+		spoken.GetAssessmentSchemaVersion() != protocol.AssessmentSchemaVersion ||
 		spoken.GetUpdates().GetEnabled() || spoken.GetUpdates().GetFormat() != packaged() || spoken.GetUpdates().GetStateGeneration() != update.StateGeneration {
 		t.Fatalf("an agent that takes no update said it speaks %v", spoken)
 	}
@@ -1247,7 +1249,7 @@ func TestTheAgentReadsItsConfigurationAgainWhenItIsAsked(t *testing.T) {
 		t.Fatalf("after the reload the spool keeps to %d bytes", spooled.MaxBytes)
 	}
 	for _, stream := range spooled.Streams {
-		if want := map[spool.Stream]time.Duration{spool.Events: 168 * time.Hour, spool.Inventory: 400 * time.Hour}[stream.Stream]; stream.MaxAge != want {
+		if want := map[spool.Stream]time.Duration{spool.Events: 168 * time.Hour, spool.Inventory: 400 * time.Hour, spool.Assessments: 400 * time.Hour}[stream.Stream]; stream.MaxAge != want {
 			t.Errorf("after the reload %s keeps records for %s, want %s", stream.Stream, stream.MaxAge, want)
 		}
 	}
@@ -1284,8 +1286,9 @@ func TestTheSpoolKeepsNothingLongerOrLargerThanThePlatformTakes(t *testing.T) {
 				"transport": `{"max_batch_bytes": "2MiB"}`,
 			}))
 			held := limits(settings)
-			if held.MaxAge[spool.Events] != c.events || held.MaxAge[spool.Inventory] != c.inventory {
-				t.Fatalf("a spool kept for %s keeps events for %s and inventory for %s", c.kept, held.MaxAge[spool.Events], held.MaxAge[spool.Inventory])
+			if held.MaxAge[spool.Events] != c.events || held.MaxAge[spool.Inventory] != c.inventory || held.MaxAge[spool.Assessments] != c.inventory {
+				t.Fatalf("a spool kept for %s keeps events for %s, inventory for %s and assessments for %s",
+					c.kept, held.MaxAge[spool.Events], held.MaxAge[spool.Inventory], held.MaxAge[spool.Assessments])
 			}
 			if held.MaxRecordBytes != 2<<20-protocol.BatchEnvelopeBytes || held.MaxBytes != 512<<20 {
 				t.Fatalf("the spool keeps records of up to %d bytes in %d", held.MaxRecordBytes, held.MaxBytes)
@@ -1704,7 +1707,7 @@ func TestTheAgentCollectsAuthenticationWhileItsConfigurationNamesIt(t *testing.T
 
 	rewrite(t, path, state, map[string]string{"modules": `{"authentication": {"enabled": true}, "fim": {"enabled": true}}`})
 	hangup(t, agent)
-	if cause, _ := await(t, entries, "configuration_not_reloaded")["error"].(string); !strings.Contains(cause, "modules.fim is configured, and this build collects with authentication") {
+	if cause, _ := await(t, entries, "configuration_not_reloaded")["error"].(string); !strings.Contains(cause, "modules.fim is configured, and this build collects with assessment, authentication") {
 		t.Errorf("the agent refused the configuration with %q", cause)
 	}
 

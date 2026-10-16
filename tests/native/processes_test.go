@@ -247,9 +247,9 @@ func (g *gate) checkProcesses(t *testing.T, name, changed string, record *invent
 		if process.User == uint32(g.uid) {
 			path = process.Executable
 		}
-		worker, _, _ := strings.Cut(process.Name, "-")
-		working := process.Parent == 2 && strings.HasPrefix(worker, "kworker/")
-		named := delivered.GetName() == process.Name || working && (delivered.GetName() == worker || strings.HasPrefix(delivered.GetName(), worker+"-"))
+		base := worker(process.Name)
+		working := process.Parent == 2 && strings.HasPrefix(base, "kworker/")
+		named := delivered.GetName() == process.Name || working && worker(delivered.GetName()) == base
 		if delivered.GetUser() != user || delivered.GetPath() != path || printable(process.Name) && !named {
 			t.Errorf("process %d (%q of %d, run from %q) was delivered as %v", process.PID, process.Name, process.User, process.Executable, delivered)
 		}
@@ -307,6 +307,13 @@ func (g *gate) logged(t *testing.T, message string) map[string]any {
 
 func printable(text string) bool {
 	return text != "" && utf8.ValidString(text) && strings.IndexFunc(text, func(held rune) bool { return !unicode.IsPrint(held) }) < 0
+}
+
+func worker(name string) string {
+	if at := strings.IndexAny(name, "+-"); at >= 0 {
+		return name[:at]
+	}
+	return name
 }
 
 func (g *gate) photographed(t *testing.T, rounds []photographed) {

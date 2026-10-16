@@ -1,9 +1,9 @@
 
-&22beb95d-201d-4afb-9bb2-f2b03b050663.5ƒ$22beb95d-201d-4afb-9bb2-f2b03b050663"µÆ¹ÖÃ¼±¥*<2
-ec421e395e06linux"amd64B`
-$fee2269c-4702-4508-a23b-30bf76e054b4µÆ¹Öˆü€Ÿ"µÆ¹Ö½Éÿ(*the agent was asked to stopJf
-"v0.0.0-20261013165626-bf58c1d2857d(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
-configurationµÆ¹Öˆü€ŸZ$
+&65e4afeb-72be-4bcd-91df-1fb40d695704.5´$65e4afeb-72be-4bcd-91df-1fb40d695704"–™ÅÖ‰Í³ž*<2
+0cf1ab12e505linux"amd64B`
+$57c59c5d-a6df-45b2-b1f2-a038a8bd3a4e–™ÅÖˆÑÒ™"–™ÅÖñÓ¨*the agent was asked to stopJf
+"v0.0.0-20261015215544-ddedf57cabc5(ddedf57cabc5aa6084e57a99851bc8a30fe1cb11go1.26.9"linux*amd64PZ
+configuration–™ÅÖˆÑÒ™Z$
 
 collection"no module is enabledZ	
 spoolZ
@@ -14,13 +14,16 @@ credentialZ
 policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
 	reportingZ€
 update"tupdates.enabled is false or the installation is not enrolled, so the agent installs no release the platform hands itb 
-authenticationµÆ¹Öîâ€¢b
-	inventoryµÆ¹ÖÑç€¢b
-	processesµÆ¹Ö·í€¢b
-filesµÆ¹Ö‰ï€¢b
-networkµÆ¹ÖÜð€¢jDê€€€€
-eventsì"µÆ¹Ö¦’úw
-	inventoryþ"µÆ¹ÖËàyr·þ¹Öõæ¹ÖÇÓÊÁzB
-@e9afdfd8aa15bfad46731b3b4b52028a88b60be0990939c9cde30507d7be6523‚
-997997999 *filter’
-v0.18.0 (0:
+authentication–™ÅÖòî›b
+	inventory–™ÅÖöî›b
+	processes–™ÅÖ›÷î›b
+files–™ÅÖõ÷î›b
+network–™ÅÖîøî›b
+
+assessment–™ÅÖÜùî›jU¢€€€€
+eventsì"–™ÅÖèìÁE
+	inventoryþ"–™ÅÖÜ«¹F
+assessments8ršÑÅÖ»»ÅÖÏõ¥±zB
+@d64af2713aa85449e0dc444d35147850a4dc3ff63369b5d0c876c803021d0561‚
+997997999 *filter’
+v0.19.0 (0:@

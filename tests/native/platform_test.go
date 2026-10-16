@@ -31,6 +31,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
+	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
@@ -58,6 +59,8 @@ type platform struct {
 	stocked   [][]byte
 	reports   []*agentv1.Status
 	statused  [][]byte
+	assessed  []*assessmentv1.Assessment
+	assessing [][]byte
 	offered   []byte
 	packages  map[string][]byte
 }
@@ -203,6 +206,7 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 	var ids []string
 	var collected []*eventv1.Event
 	var stocked []*inventoryv1.Record
+	var assessed []*assessmentv1.Assessment
 	switch {
 	case err != nil || r.Method != http.MethodPost:
 	case r.URL.Path == "/v1/events":
@@ -225,6 +229,14 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	case r.URL.Path == "/v1/assessments":
+		var batch assessmentv1.AssessmentBatch
+		if err = proto.Unmarshal(content, &batch); err == nil {
+			for _, assessment := range batch.GetAssessments() {
+				ids = append(ids, assessment.GetAssessmentId())
+			}
+			assessed = batch.GetAssessments()
+		}
 	}
 	if len(ids) == 0 {
 		answer(http.StatusBadRequest, &ingestv1.Rejection{Code: "malformed_payload", Detail: "the batch is not a valid protobuf message", EventIndex: -1})
@@ -244,6 +256,10 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 	p.inventory = append(p.inventory, stocked...)
 	if len(stocked) > 0 {
 		p.stocked = append(p.stocked, content)
+	}
+	p.assessed = append(p.assessed, assessed...)
+	if len(assessed) > 0 {
+		p.assessing = append(p.assessing, content)
 	}
 	p.mu.Unlock()
 	answer(http.StatusOK, &ingestv1.BatchAck{Accepted: true, Durable: true, Received: uint32(len(ids))})
@@ -280,6 +296,12 @@ func (p *platform) inventories() ([]*inventoryv1.Record, [][]byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return slices.Clone(p.inventory), slices.Clone(p.stocked)
+}
+
+func (p *platform) assessments() ([]*assessmentv1.Assessment, [][]byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.assessed), slices.Clone(p.assessing)
 }
 
 // A renewal as the recorded platform answers one: to the agent the certificate

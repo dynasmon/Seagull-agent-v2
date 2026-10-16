@@ -1,0 +1,69 @@
+{
+  "recorded_at": "2026-10-15T22:05:46.529803361Z",
+  "installation_id": "65e4afeb-72be-4bcd-91df-1fb40d695704",
+  "agent_id": "web-01",
+  "policies": [
+    "policy-000.pb",
+    "policy-001.pb"
+  ],
+  "assessments": [
+    {
+      "batch": "batch-000.pb",
+      "assessment_id": "1595f1d8-a772-8024-afc5-18102be9e2ff",
+      "policy_revision": 3,
+      "assessed_at": "2026-10-15T22:04:46.425663675Z",
+      "outcomes": {
+        "allow-users": "OUTCOME_UNSUPPORTED",
+        "aslr": "OUTCOME_PASS",
+        "assess-group-empty": "OUTCOME_FAIL",
+        "cramfs": "OUTCOME_PASS",
+        "from-tomorrow": "OUTCOME_UNSUPPORTED",
+        "hosts-equiv": "OUTCOME_PASS",
+        "journald": "OUTCOME_PASS",
+        "no-such-parameter": "OUTCOME_NOT_APPLICABLE",
+        "pass-max-days": "OUTCOME_FAIL",
+        "passwd-private": "OUTCOME_FAIL",
+        "password-auth": "OUTCOME_FAIL",
+        "private-file": "OUTCOME_ERROR",
+        "root-home": "OUTCOME_ERROR",
+        "root-login": "OUTCOME_FAIL",
+        "rsync": "OUTCOME_PASS",
+        "shadow-permissions": "OUTCOME_PASS",
+        "ssh-server": "OUTCOME_PASS",
+        "superuser": "OUTCOME_PASS",
+        "telnetd": "OUTCOME_PASS",
+        "umask": "OUTCOME_PASS",
+        "usb-storage": "OUTCOME_FAIL"
+      }
+    },
+    {
+      "batch": "batch-001.pb",
+      "assessment_id": "c3689fde-f39b-8a60-bce8-9618edb03659",
+      "policy_revision": 4,
+      "assessed_at": "2026-10-15T22:05:37.455819853Z",
+      "outcomes": {
+        "allow-users": "OUTCOME_UNSUPPORTED",
+        "aslr": "OUTCOME_PASS",
+        "assess-group-empty": "OUTCOME_FAIL",
+        "cramfs": "OUTCOME_PASS",
+        "from-tomorrow": "OUTCOME_UNSUPPORTED",
+        "hosts-equiv": "OUTCOME_PASS",
+        "journald": "OUTCOME_PASS",
+        "no-such-parameter": "OUTCOME_NOT_APPLICABLE",
+        "pass-max-days": "OUTCOME_FAIL",
+        "passwd-private": "OUTCOME_FAIL",
+        "password-auth": "OUTCOME_ERROR",
+        "private-file": "OUTCOME_ERROR",
+        "root-home": "OUTCOME_ERROR",
+        "root-login": "OUTCOME_ERROR",
+        "rsync": "OUTCOME_PASS",
+        "shadow-permissions": "OUTCOME_PASS",
+        "ssh-server": "OUTCOME_PASS",
+        "superuser": "OUTCOME_PASS",
+        "telnetd": "OUTCOME_PASS",
+        "umask": "OUTCOME_PASS",
+        "usb-storage": "OUTCOME_FAIL"
+      }
+    }
+  ]
+}

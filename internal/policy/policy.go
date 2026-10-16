@@ -22,6 +22,7 @@ import (
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/dsse"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
+	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 	policyv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/policy/v1"
 )
 
@@ -33,6 +34,8 @@ const (
 	MaxEnvelopeBytes = MaxPayloadBytes + 4<<10
 	MaxSignatures    = 4
 )
+
+var checked = (&assessmentv1.Check{}).ProtoReflect().Descriptor().FullName()
 
 var (
 	ErrUnsigned     = errors.New("no signature on the policy was made by a key the agent accepts")
@@ -135,7 +138,13 @@ func (v *Verifier) Verify(served []byte) (Verified, error) {
 	return Verified{Policy: &policy, Envelope: served, Digest: hex.EncodeToString(whole[:]), SignedBy: signedBy}, nil
 }
 
+// A check is read on its own when it is run, and one this agent cannot read
+// whole is answered as unsupported rather than refused with the policy, so a
+// policy can carry checks some of the agents it names do not run.
 func known(message protoreflect.Message) error {
+	if message.Descriptor().FullName() == checked {
+		return nil
+	}
 	if len(message.GetUnknown()) > 0 {
 		return fmt.Errorf("%w: its %s holds settings this agent does not know", ErrMalformed, message.Descriptor().Name())
 	}

@@ -28,6 +28,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/governor"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules"
+	"github.com/dynasmon/Seagull-agent-v2/internal/modules/assessment"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/authentication"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/integrity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/modules/inventory"
@@ -237,12 +238,13 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	held.governor = governed
 	observed := &observing{began: began, path: path, state: state, installation: installation, spool: spooled, governor: governed, configuration: held,
 		boot: boot, granted: holds(granted), previous: &previous}
-	collected, err := collect(installation, held.active, spooled, governed, logger, state)
+	collected, err := collect(installation, held.active, spooled, governed, logger, state, held.checklist)
 	if err != nil {
 		return refused(err)
 	}
-	held.collection, held.files = collected.collection, collected.files
+	held.collection, held.files, held.assessment = collected.collection, collected.files, collected.assessment
 	observed.collection, observed.authentication, observed.inventory, observed.processes, observed.files, observed.network = collected.collection, collected.authentication, collected.inventory, collected.processes, collected.files, collected.network
+	observed.assessment = collected.assessment
 	composed := append([]agentruntime.Component{held.component(asked), {Name: "collection", Policy: agentruntime.Optional, Run: collected.collection.Run}}, components...)
 	if isEnrolled {
 		client, err := platform(settings, chosen.authorities, credential)
@@ -366,13 +368,13 @@ func unstarted(stderr io.Writer, path string, err error) int {
 // inventory collector reads what the host shows any account, as the processes
 // collector does once the service lets procfs show the agent every process.
 // The files collector watches what that account may read, and reads what only
-// root may once an operator grants it CAP_DAC_READ_SEARCH, and the network
-// collector names the process holding a socket of another account once an
-// operator grants it that and CAP_SYS_PTRACE, which are then no more than they
-// need.
+// root may once an operator grants it CAP_DAC_READ_SEARCH, as the assessment
+// module judges, and the network collector names the process holding a socket
+// of another account once an operator grants it that and CAP_SYS_PTRACE, which
+// are then no more than they need.
 func needed(settings config.Config) []string {
 	var granted []string
-	if settings.Modules[integrity.Name].Enabled || settings.Modules[network.Name].Enabled {
+	if settings.Modules[integrity.Name].Enabled || settings.Modules[network.Name].Enabled || settings.Modules[assessment.Name].Enabled {
 		granted = append(granted, "CAP_DAC_READ_SEARCH")
 	}
 	if settings.Modules[network.Name].Enabled {
@@ -451,6 +453,7 @@ type configuration struct {
 	governor   *governor.Governor
 	collection *modules.Collection
 	files      *integrity.Collector
+	assessment *assessment.Collector
 
 	mu        sync.Mutex
 	applied   time.Time
@@ -551,6 +554,9 @@ func (c *configuration) activate(candidate config.Config) error {
 	if c.files != nil {
 		c.files.Rescope()
 	}
+	if c.assessment != nil {
+		c.assessment.Again()
+	}
 	return nil
 }
 
@@ -561,9 +567,11 @@ type collectors struct {
 	processes      *inventory.Collector
 	files          *integrity.Collector
 	network        *network.Collector
+	assessment     *assessment.Collector
 }
 
-func collect(installation *identity.Installation, active *config.Active, spooled *spool.Spool, governed *governor.Governor, logger *slog.Logger, state string) (collectors, error) {
+func collect(installation *identity.Installation, active *config.Active, spooled *spool.Spool, governed *governor.Governor, logger *slog.Logger, state string,
+	asked func() assessment.Asked) (collectors, error) {
 	directory, err := installation.Directory(collectionDirectory)
 	if err != nil {
 		return collectors{}, err
@@ -618,6 +626,19 @@ func collect(installation *identity.Installation, active *config.Active, spooled
 	if err != nil {
 		return collectors{}, err
 	}
+	assessing, err := assessment.New(assessment.Options{
+		Installation: installation.ID(),
+		Spool:        spooled,
+		Governor:     governed,
+		Directory:    directory,
+		Logger:       logger,
+		Asked:        asked,
+		Interval:     func() time.Duration { return time.Duration(active.Settings().Modules[assessment.Name].Interval) },
+		Largest:      func() int64 { return int64(active.Settings().Transport.MaxBatchBytes) - protocol.BatchEnvelopeBytes },
+	})
+	if err != nil {
+		return collectors{}, err
+	}
 	settings := active.Settings()
 	collection, err := modules.New(logger, modules.Policy{},
 		modules.Module{Name: authentication.Name, Enabled: slices.Contains(enabled(settings), authentication.Name), Collect: authenticating.Collect},
@@ -625,11 +646,13 @@ func collect(installation *identity.Installation, active *config.Active, spooled
 		modules.Module{Name: inventory.Processes, Enabled: slices.Contains(enabled(settings), inventory.Processes), Collect: stocked[inventory.Processes].Collect},
 		modules.Module{Name: integrity.Name, Enabled: slices.Contains(enabled(settings), integrity.Name), Collect: watching.Collect},
 		modules.Module{Name: network.Name, Enabled: slices.Contains(enabled(settings), network.Name), Collect: listening.Collect},
+		modules.Module{Name: assessment.Name, Enabled: slices.Contains(enabled(settings), assessment.Name), Collect: assessing.Collect},
 	)
 	if err != nil {
 		return collectors{}, err
 	}
-	return collectors{collection: collection, authentication: authenticating, inventory: stocked[inventory.Name], processes: stocked[inventory.Processes], files: watching, network: listening}, nil
+	return collectors{collection: collection, authentication: authenticating, inventory: stocked[inventory.Name], processes: stocked[inventory.Processes],
+		files: watching, network: listening, assessment: assessing}, nil
 }
 
 func enabled(settings config.Config) []string {
@@ -762,8 +785,9 @@ func limits(settings config.Config) spool.Limits {
 		MaxBytes:       int64(settings.Spool.MaxBytes),
 		MaxRecordBytes: int64(settings.Transport.MaxBatchBytes) - protocol.BatchEnvelopeBytes,
 		MaxAge: map[spool.Stream]time.Duration{
-			spool.Events:    min(kept, protocol.MaxEventAge),
-			spool.Inventory: min(kept, protocol.MaxInventoryAge),
+			spool.Events:      min(kept, protocol.MaxEventAge),
+			spool.Inventory:   min(kept, protocol.MaxInventoryAge),
+			spool.Assessments: min(kept, protocol.MaxAssessmentAge),
 		},
 	}
 }
@@ -1370,5 +1394,6 @@ func wireVersions() []wireVersion {
 		{name: "status_schema_version", version: protocol.StatusSchemaVersion},
 		{name: "policy_schema_version", version: policy.SchemaVersion},
 		{name: "update_schema_version", version: update.SchemaVersion},
+		{name: "assessment_schema_version", version: protocol.AssessmentSchemaVersion},
 	}
 }

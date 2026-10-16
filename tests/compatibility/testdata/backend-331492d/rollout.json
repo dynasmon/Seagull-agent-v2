@@ -1,0 +1,245 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "331492dfdaaa7d1ac80cffe4d61c3868835a5e3d",
+    "contracts": "v0.19.0",
+    "broker": "redpandadata/redpanda:v24.2.20",
+    "store": "clickhouse/clickhouse-server:24.8",
+    "registry": "postgres:16.4-alpine"
+  },
+  "recorded_at": "2026-10-15T22:12:28.726591136Z",
+  "agent": "web-01",
+  "agents": [
+    "web-01",
+    "web-02",
+    "web-03",
+    "web-04",
+    "web-05",
+    "web-06",
+    "web-07",
+    "web-08",
+    "web-09",
+    "web-10",
+    "web-11",
+    "web-12",
+    "web-13",
+    "web-14",
+    "web-15",
+    "web-16",
+    "web-17",
+    "web-18",
+    "web-19",
+    "web-20"
+  ],
+  "base": "v0.0.0-20261015215544-ddedf57cabc5",
+  "rollouts": [
+    {
+      "name": "forward",
+      "rollout_id": "03baf771-b116-4c0c-81ad-0ee94ef97538",
+      "version": "v1.999.0-gate",
+      "waves": [
+        {
+          "agent_ids": [
+            "web-01"
+          ],
+          "soak": "1h0m0s",
+          "running": 1
+        },
+        {
+          "percent": 50
+        },
+        {
+          "percent": 100
+        }
+      ],
+      "failures": 1,
+      "steps": [
+        {
+          "after": "batch-000.pb",
+          "sequence": 58,
+          "state": "STATE_ACTIVE",
+          "wave": 0,
+          "reason": "the agent the native gate updated is the canary",
+          "reached": 1,
+          "running": 0,
+          "failed": 0,
+          "pending": 1,
+          "offered": {
+            "web-01": "v1.999.0-gate",
+            "web-02": "",
+            "web-03": "",
+            "web-04": "",
+            "web-05": "",
+            "web-06": "",
+            "web-07": "",
+            "web-08": "",
+            "web-09": "",
+            "web-10": "",
+            "web-11": "",
+            "web-12": "",
+            "web-13": "",
+            "web-14": "",
+            "web-15": "",
+            "web-16": "",
+            "web-17": "",
+            "web-18": "",
+            "web-19": "",
+            "web-20": ""
+          }
+        },
+        {
+          "after": "batch-001.pb",
+          "sequence": 60,
+          "state": "STATE_ACTIVE",
+          "wave": 1,
+          "reason": "wave 0 ran for 1h0m0s with 1 of the agents reached running v1.999.0-gate",
+          "reached": 1,
+          "running": 1,
+          "failed": 0,
+          "pending": 0,
+          "offered": {
+            "web-01": "v1.999.0-gate",
+            "web-02": "",
+            "web-03": "",
+            "web-04": "",
+            "web-05": "",
+            "web-06": "v1.999.0-gate",
+            "web-07": "v1.999.0-gate",
+            "web-08": "v1.999.0-gate",
+            "web-09": "",
+            "web-10": "",
+            "web-11": "v1.999.0-gate",
+            "web-12": "v1.999.0-gate",
+            "web-13": "",
+            "web-14": "",
+            "web-15": "",
+            "web-16": "",
+            "web-17": "",
+            "web-18": "v1.999.0-gate",
+            "web-19": "v1.999.0-gate",
+            "web-20": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "broken",
+      "rollout_id": "ff679035-1a5e-4938-92a0-ddeac4a62a99",
+      "version": "v1.999.1-gate",
+      "waves": [
+        {
+          "agent_ids": [
+            "web-01"
+          ],
+          "soak": "1h0m0s",
+          "running": 1
+        },
+        {
+          "percent": 100
+        }
+      ],
+      "failures": 1,
+      "steps": [
+        {
+          "after": "batch-002.pb",
+          "sequence": 61,
+          "state": "STATE_ACTIVE",
+          "wave": 0,
+          "reason": "the agent the native gate updated is the canary",
+          "reached": 1,
+          "running": 0,
+          "failed": 0,
+          "pending": 1,
+          "offered": {
+            "web-01": "v1.999.1-gate",
+            "web-02": "",
+            "web-03": "",
+            "web-04": "",
+            "web-05": "",
+            "web-06": "",
+            "web-07": "",
+            "web-08": "",
+            "web-09": "",
+            "web-10": "",
+            "web-11": "",
+            "web-12": "",
+            "web-13": "",
+            "web-14": "",
+            "web-15": "",
+            "web-16": "",
+            "web-17": "",
+            "web-18": "",
+            "web-19": "",
+            "web-20": ""
+          }
+        },
+        {
+          "after": "batch-003.pb",
+          "sequence": 63,
+          "state": "STATE_PAUSED",
+          "wave": 0,
+          "reason": "1 of the agents reached failed v1.999.1-gate, and 1 failing pause the rollout",
+          "reached": 1,
+          "running": 0,
+          "failed": 1,
+          "pending": 0,
+          "offered": {
+            "web-01": "",
+            "web-02": "",
+            "web-03": "",
+            "web-04": "",
+            "web-05": "",
+            "web-06": "",
+            "web-07": "",
+            "web-08": "",
+            "web-09": "",
+            "web-10": "",
+            "web-11": "",
+            "web-12": "",
+            "web-13": "",
+            "web-14": "",
+            "web-15": "",
+            "web-16": "",
+            "web-17": "",
+            "web-18": "",
+            "web-19": "",
+            "web-20": ""
+          }
+        },
+        {
+          "after": "batch-004.pb",
+          "sequence": 64,
+          "state": "STATE_PAUSED",
+          "wave": 0,
+          "reason": "1 of the agents reached failed v1.999.1-gate, and 1 failing pause the rollout",
+          "reached": 1,
+          "running": 0,
+          "failed": 1,
+          "pending": 0,
+          "offered": {
+            "web-01": "",
+            "web-02": "",
+            "web-03": "",
+            "web-04": "",
+            "web-05": "",
+            "web-06": "",
+            "web-07": "",
+            "web-08": "",
+            "web-09": "",
+            "web-10": "",
+            "web-11": "",
+            "web-12": "",
+            "web-13": "",
+            "web-14": "",
+            "web-15": "",
+            "web-16": "",
+            "web-17": "",
+            "web-18": "",
+            "web-19": "",
+            "web-20": ""
+          }
+        }
+      ]
+    }
+  ]
+}

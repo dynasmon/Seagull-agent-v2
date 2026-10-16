@@ -24,9 +24,10 @@ type Stream uint8
 const (
 	Events Stream = iota + 1
 	Inventory
+	Assessments
 )
 
-var streams = []Stream{Events, Inventory}
+var streams = []Stream{Events, Inventory, Assessments}
 
 func (s Stream) String() string {
 	switch s {
@@ -34,6 +35,8 @@ func (s Stream) String() string {
 		return "events"
 	case Inventory:
 		return "inventory"
+	case Assessments:
+		return "assessments"
 	default:
 		return fmt.Sprintf("stream(%d)", uint8(s))
 	}
@@ -41,11 +44,16 @@ func (s Stream) String() string {
 
 // The part of the budget a stream may hold. Events are what a host cannot
 // produce again, so they may take seven eighths of it; inventory is collected
-// again on the next scan, and takes at most half. Each is left room the other
-// cannot take, so neither waits on the other for as long as the platform does.
+// again on the next scan, and takes at most half; an assessment is a few
+// hundred kilobytes at most, made again at the next round, and takes at most a
+// sixteenth. Each is left room the others cannot take, so none waits on another
+// for as long as the platform does.
 func (s Stream) share() (int64, int64) {
-	if s == Inventory {
+	switch s {
+	case Inventory:
 		return 1, 2
+	case Assessments:
+		return 1, 16
 	}
 	return 7, 8
 }

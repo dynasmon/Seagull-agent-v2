@@ -50,6 +50,13 @@ func (s *Schedule) Next(after time.Time) time.Time {
 // work kept waiting past the one after it is not made up, and a clock set back
 // does not bring back a run that already happened.
 func (s *Schedule) Wait(ctx context.Context) (time.Time, error) {
+	return s.Until(ctx, nil)
+}
+
+// Until is Wait that also returns, with no moment, once sooner delivers: work
+// asked for out of its turn runs at once, and the turns after it stay where
+// they were.
+func (s *Schedule) Until(ctx context.Context, sooner <-chan struct{}) (time.Time, error) {
 	now := time.Now()
 	due := s.Next(now)
 	if !s.last.IsZero() && !due.After(s.last) {
@@ -60,6 +67,8 @@ func (s *Schedule) Wait(ctx context.Context) (time.Time, error) {
 	select {
 	case <-ctx.Done():
 		return time.Time{}, ctx.Err()
+	case <-sooner:
+		return time.Time{}, nil
 	case <-timer.C:
 	}
 	s.last = due

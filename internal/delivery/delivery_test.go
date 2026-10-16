@@ -27,16 +27,21 @@ func TestEveryRecordIsDeliveredInBoundedBatchesAndSettledOnceAcknowledged(t *tes
 	held := spoolIn(t, spoolDirectory(t))
 	events := admitEvents(t, held, "event", 2500)
 	inventory := admitInventory(t, held, "snapshot", 120, 400)
+	postures := admitAssessments(t, held, "assessment", 40)
 	deliver(t, held, serving, enrolled(t, serving), func(s *setup) { s.batching.MaxBytes = 64 << 10 })
 
 	eventually(t, "delivering every record", func() bool {
-		return outstanding(held, spool.Events).Outstanding == 0 && outstanding(held, spool.Inventory).Outstanding == 0
+		return outstanding(held, spool.Events).Outstanding == 0 && outstanding(held, spool.Inventory).Outstanding == 0 &&
+			outstanding(held, spool.Assessments).Outstanding == 0
 	})
 	if stored := serving.storedIDs(protocol.Events); !slices.Equal(stored, events) {
 		t.Fatalf("the platform stores %d events, and %d were admitted", len(stored), len(events))
 	}
 	if stored := serving.storedIDs(protocol.Inventory); !slices.Equal(stored, inventory) {
 		t.Fatalf("the platform stores %d inventory records, and %d were admitted", len(stored), len(inventory))
+	}
+	if stored := serving.storedIDs(protocol.Assessments); !slices.Equal(stored, postures) {
+		t.Fatalf("the platform stores %d assessments, and %d were admitted", len(stored), len(postures))
 	}
 	seen := map[string]bool{}
 	for _, arrived := range serving.received() {
@@ -64,6 +69,10 @@ func TestEveryRecordIsDeliveredInBoundedBatchesAndSettledOnceAcknowledged(t *tes
 			if len(arrived.ids) > 64 || items > protocol.MaxInventoryItemsPerBatch {
 				t.Errorf("a batch carried %d inventory records and %d items", len(arrived.ids), items)
 			}
+		case protocol.Assessments:
+			if len(arrived.ids) > protocol.MaxAssessmentsPerBatch {
+				t.Errorf("a batch carried %d assessments", len(arrived.ids))
+			}
 		}
 	}
 	for _, id := range events {
@@ -75,6 +84,9 @@ func TestEveryRecordIsDeliveredInBoundedBatchesAndSettledOnceAcknowledged(t *tes
 		t.Fatalf("the spool counts %+v", kept)
 	}
 	if kept := outstanding(held, spool.Inventory); kept.Delivered != 120 || kept.Quarantined != 0 {
+		t.Fatalf("the spool counts %+v", kept)
+	}
+	if kept := outstanding(held, spool.Assessments); kept.Delivered != 40 || kept.Quarantined != 0 {
 		t.Fatalf("the spool counts %+v", kept)
 	}
 }

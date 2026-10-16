@@ -33,6 +33,7 @@ func TestAListenerThatFailsIsTriedByOneRequestAtATimeAndReachedByEveryRouteOnceI
 	before := time.Now()
 	events := admitEvents(t, held, "event", 20)
 	snapshots := admitInventory(t, held, "snapshot", 3, 10)
+	postures := admitAssessments(t, held, "assessment", 2)
 	admitted := time.Now()
 	running := deliver(t, held, serving, enrolled(t, serving), func(chosen *setup) {
 		chosen.url, chosen.uploads, chosen.timeout = network.url(), 2, 500*time.Millisecond
@@ -51,21 +52,32 @@ func TestAListenerThatFailsIsTriedByOneRequestAtATimeAndReachedByEveryRouteOnceI
 	if failing.Listener.Failure != link.Transport || failing.Listener.Failing.IsZero() || !failing.Listener.Answered.IsZero() || failing.Listener.Listener != "ingest" {
 		t.Fatalf("while nothing answered, the listener stands at %+v", failing.Listener)
 	}
+	tried := 0
 	for _, route := range failing.Routes {
-		if route.Oldest.Before(before) || route.Oldest.After(admitted) || !route.Delivered.IsZero() || route.Attempts < 1 || route.Failure != link.Transport {
+		if route.Oldest.Before(before) || route.Oldest.After(admitted) || !route.Delivered.IsZero() || route.Attempts > 0 && route.Failure != link.Transport {
 			t.Fatalf("while nothing answered, route %s stands at %+v", route.Stream, route)
 		}
+		if route.Attempts > 0 {
+			tried++
+		}
+	}
+	if tried < 2 {
+		t.Fatalf("while nothing answered, %d routes tried the listener", tried)
 	}
 
 	network.set(passing)
-	eventually(t, "delivering both routes", func() bool {
-		return outstanding(held, spool.Events).Outstanding == 0 && outstanding(held, spool.Inventory).Outstanding == 0
+	eventually(t, "delivering every route", func() bool {
+		return outstanding(held, spool.Events).Outstanding == 0 && outstanding(held, spool.Inventory).Outstanding == 0 &&
+			outstanding(held, spool.Assessments).Outstanding == 0
 	})
 	if stored := serving.storedIDs(protocol.Events); !slices.Equal(stored, events) {
 		t.Fatalf("the platform stores events %v", stored)
 	}
 	if stored := serving.storedIDs(protocol.Inventory); !slices.Equal(stored, snapshots) {
 		t.Fatalf("the platform stores inventory %v", stored)
+	}
+	if stored := serving.storedIDs(protocol.Assessments); !slices.Equal(stored, postures) {
+		t.Fatalf("the platform stores assessments %v", stored)
 	}
 	eventually(t, "noting what was delivered", func() bool {
 		for _, route := range running.delivery.Stats().Routes {

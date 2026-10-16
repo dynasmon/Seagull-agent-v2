@@ -1,26 +1,29 @@
 
-'22beb95d-201d-4afb-9bb2-f2b03b050663.47â	$22beb95d-201d-4afb-9bb2-f2b03b050663/"≈»π÷Û˙ˇU*<2
-ec421e395e06linux"amd64B_
-$fee2269c-4702-4508-a23b-30bf76e054b4≈»π÷Åﬁõ>"≈»π÷á£ú*the agent was asked to stopJf
-"v0.0.0-20261013165626-bf58c1d2857d(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
-configuration≈»π÷Åﬁõ>Z
+'65e4afeb-72be-4bcd-91df-1fb40d695704.47Ó$65e4afeb-72be-4bcd-91df-1fb40d695704/"¡õ≈÷Ö∞Œ}*<2
+0cf1ab12e505linux"amd64B_
+$57c59c5d-a6df-45b2-b1f2-a038a8bd3a4e¡õ≈÷Ûπßj"¡õ≈÷ë··L*the agent was asked to stopJf
+"v0.0.0-20261015215544-ddedf57cabc5(ddedf57cabc5aa6084e57a99851bc8a30fe1cb11go1.26.9"linux*amd64PZ
+configuration¡õ≈÷ÛπßjZ
 
 collectionZ	
 spoolZ
 deliveryZ
 
 credentialZ
-	resourcesZˇ
-policy≈»π÷∆Ä›B"Âthe agent runs on revision 1 of gate-servers, signed by 31b8050d56f75128eb35ef064a2ee6979116d1ac49dfcfd4d776b708688572b3, until 2026-10-14T17:03:01Z; its own configuration keeps resources.max_concurrent_uploads at 1 rather than 8Z
+	resourcesZQ
+policy"Eno policy is in force: the agent runs on its configuration file aloneZ
 	reportingZÄ
 update"tupdates.enabled is false or the installation is not enrolled, so the agent installs no release the platform hands itb
-authentication≈»π÷ÕáAb
-	inventory≈»π÷∂‹ù@b
-	processes≈»π÷Õ›ù@b
-files≈»π÷±ﬁù@b
-network≈»π÷Ωﬂù@j'pÄÄÄÄ
+authentication¡õ≈÷É€Ámb
+	inventory¡õ≈÷Ô†Àlb
+	processes¡õ≈÷Ü¢Àlb
+files¡õ≈÷÷¢Àlb
+network¡õ≈÷ÿ£Àlb
+
+assessment¡õ≈÷∆§Àlj9®ÄÄÄÄ
 events8@#
-	inventory8@r∑˛π÷ıÊπ÷«” ¡z_
-@e62bff8199e4ea6d98464c774986cb9765f63e42645769ab5b80e631360bb326gate-servers"≈Îæ÷ê∂ÅÇ
-997997999 *filterí
-v0.18.0 (0:
+	inventory8@
+assessments8rö—≈÷ªª≈÷œı•±zB
+@05991645ced21ad513c353d3debc087bcb53e462bb4bde3cf691a4d99fced97dÇ
+997997999 *filterí
+v0.19.0 (0:@

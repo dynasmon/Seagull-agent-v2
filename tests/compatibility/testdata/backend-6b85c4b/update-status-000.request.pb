@@ -1,9 +1,9 @@
 
-'22beb95d-201d-4afb-9bb2-f2b03b050663.55¹$22beb95d-201d-4afb-9bb2-f2b03b0506637"‘É¹Ö‰­¨©*<2
-ec421e395e06linux"amd64Ba
-$fee2269c-4702-4508-a23b-30bf76e054b4É¹ÖÇ£ò"†É¹Ö£“žÖ*the agent was asked to stopJf
-"v0.0.0-20261013165626-bf58c1d2857d(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
-configurationÉ¹ÖÇ£òZ
+'65e4afeb-72be-4bcd-91df-1fb40d695704.58ì$65e4afeb-72be-4bcd-91df-1fb40d695704:"ÊœÅÖ›ú²‚*<2
+0cf1ab12e505linux"amd64B`
+$57c59c5d-a6df-45b2-b1f2-a038a8bd3a4eÈœÅÖ«„æ»"ÀœÅÖ”¨æ*the agent was asked to stopJf
+"v0.0.0-20261015215544-ddedf57cabc5(ddedf57cabc5aa6084e57a99851bc8a30fe1cb11go1.26.9"linux*amd64PZ
+configurationÈœÅÖ«„æ»Z
 
 collectionZ	
 spoolZ
@@ -12,16 +12,19 @@ collectionZ
 credentialZ
 	resourcesZ\
 policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
-	reportingÉ¹Ö°õÐ¤Z/
-updateÉ¹Ö È†Ý"v1.999.0-gate: stagedb 
-authenticationÉ¹ÖÍÆœ¡b
-	inventoryÉ¹ÖÈùãŸb
-	processesÉ¹ÖÊúãŸb
-filesÉ¹Ö¹ûãŸb
-networkÉ¹Ö»üãŸj'p€€€€
+	reportingÈœÅÖ«ˆ¢ÚZ/
+updateÈœÅÖøæ¹–"v1.999.0-gate: stagedb 
+authenticationÈœÅÖªÅª¿b
+	inventoryÈœÅÖêðÊ½b
+	processesÈœÅÖ‹òÊ½b
+filesÈœÅÖƒóÊ½b
+networkÈœÅÖôÊ½b
+
+assessmentÈœÅÖ‡õÊ½j;¨€€€€
 events8@#
-	inventory8@r·þ¹Öõæ¹ÖÇÓÊÁzB
-@19bafc04cb0658fa00a86a83b13703e1e66dcad1362a684096f2e4262bde7a78‚
-997997999 *filterŠ#v1.999.0-gate *É¹Ö È†Ý’
-v0.18.0 (0:
- (
+	inventory8@
+assessments8@ršÑÅÖ»»ÅÖÏõ¥±zB
+@3b17dd44ed579f715b6feddc1ea7ce4fcdb7e9375fa54e279c545348d05ee439‚
+997997999 *filterŠ#v1.999.0-gate *ÈœÅÖøæ¹–’!
+v0.19.0 (0:
+ (@

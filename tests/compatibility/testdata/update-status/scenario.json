@@ -1,39 +1,39 @@
 {
-  "recorded_at": "2026-10-13T17:08:30.638641817Z",
-  "installation_id": "22beb95d-201d-4afb-9bb2-f2b03b050663",
+  "recorded_at": "2026-10-15T22:10:50.689764242Z",
+  "installation_id": "65e4afeb-72be-4bcd-91df-1fb40d695704",
   "agent_id": "web-01",
   "reports": [
     {
       "batch": "batch-000.pb",
-      "sequence": 55,
+      "sequence": 58,
       "stage": "STAGE_STAGED",
       "version": "v1.999.0-gate",
       "failure": "FAILURE_UNSPECIFIED"
     },
     {
       "batch": "batch-001.pb",
-      "sequence": 57,
+      "sequence": 60,
       "stage": "STAGE_INSTALLED",
       "version": "v1.999.0-gate",
       "failure": "FAILURE_UNSPECIFIED"
     },
     {
       "batch": "batch-002.pb",
-      "sequence": 58,
+      "sequence": 61,
       "stage": "STAGE_STAGED",
       "version": "v1.999.1-gate",
       "failure": "FAILURE_UNSPECIFIED"
     },
     {
       "batch": "batch-003.pb",
-      "sequence": 60,
+      "sequence": 63,
       "stage": "STAGE_ROLLED_BACK",
       "version": "v1.999.1-gate",
       "failure": "FAILURE_UNHEALTHY"
     },
     {
       "batch": "batch-004.pb",
-      "sequence": 61,
+      "sequence": 64,
       "stage": "STAGE_ROLLED_BACK",
       "version": "v1.999.1-gate",
       "failure": "FAILURE_UNHEALTHY"

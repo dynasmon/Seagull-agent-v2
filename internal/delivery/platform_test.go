@@ -38,6 +38,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/spool"
 	"github.com/dynasmon/Seagull-agent-v2/internal/transport"
+	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 	eventv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/event/v1"
 	ingestv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/ingest/v1"
 	inventoryv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/inventory/v1"
@@ -110,7 +111,7 @@ func (p *platform) serve(w http.ResponseWriter, r *http.Request) {
 	if intercept != nil && intercept(w, r) {
 		return
 	}
-	route := map[string]protocol.Route{"/v1/events": protocol.Events, "/v1/inventory": protocol.Inventory}[r.URL.Path]
+	route := map[string]protocol.Route{"/v1/events": protocol.Events, "/v1/inventory": protocol.Inventory, "/v1/assessments": protocol.Assessments}[r.URL.Path]
 	if route == 0 || r.Method != http.MethodPost {
 		http.NotFound(w, r)
 		return
@@ -167,6 +168,15 @@ func decode(route protocol.Route, body []byte) (*received, func(http.ResponseWri
 		arrived.id, version = batch.GetBatchId(), batch.GetProtocolVersion()
 		for _, record := range batch.GetRecords() {
 			arrived.ids = append(arrived.ids, record.GetRecordId())
+		}
+	case protocol.Assessments:
+		var batch assessmentv1.AssessmentBatch
+		if err := proto.Unmarshal(body, &batch); err != nil {
+			return nil, func(w http.ResponseWriter) { refuse(w, http.StatusBadRequest, "malformed_payload", "", -1) }
+		}
+		arrived.id, version = batch.GetBatchId(), batch.GetProtocolVersion()
+		for _, assessed := range batch.GetAssessments() {
+			arrived.ids = append(arrived.ids, assessed.GetAssessmentId())
 		}
 	}
 	switch {
@@ -496,6 +506,33 @@ func admitInventory(t testing.TB, held *spool.Spool, prefix string, count, items
 	}
 	if _, err := held.Admit(spool.Inventory, records...); err != nil {
 		t.Fatalf("admit %d inventory records: %v", count, err)
+	}
+	return ids
+}
+
+func assessment(id string, at time.Time) *assessmentv1.Assessment {
+	return &assessmentv1.Assessment{
+		AssessmentId:   id,
+		SchemaVersion:  protocol.AssessmentSchemaVersion,
+		PolicyId:       "linux-baseline",
+		PolicyRevision: 1,
+		AssessedAt:     timestamppb.New(at),
+		Collection:     &eventv1.Collection{Collector: "assessment"},
+		Results:        []*assessmentv1.Result{{CheckId: "ssh.root-login", Outcome: assessmentv1.Outcome_OUTCOME_FAIL, Evidence: "PermitRootLogin is yes"}},
+	}
+}
+
+func admitAssessments(t testing.TB, held *spool.Spool, prefix string, count int) []string {
+	t.Helper()
+	var records []spool.Record
+	var ids []string
+	for i := range count {
+		id := fmt.Sprintf("%s-%06d", prefix, i)
+		records = append(records, spool.Record{ID: id, Payload: marshal(t, assessment(id, time.Now()))})
+		ids = append(ids, id)
+	}
+	if _, err := held.Admit(spool.Assessments, records...); err != nil {
+		t.Fatalf("admit %d assessments: %v", count, err)
 	}
 	return ids
 }

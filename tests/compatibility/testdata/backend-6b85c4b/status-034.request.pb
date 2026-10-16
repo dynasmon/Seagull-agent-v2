@@ -1,9 +1,9 @@
 
-'22beb95d-201d-4afb-9bb2-f2b03b050663.35õ$22beb95d-201d-4afb-9bb2-f2b03b050663#"ÁÇ¹Ö‰ûÐ*<2
-ec421e395e06linux"amd64B_
-$fee2269c-4702-4508-a23b-30bf76e054b4ÀÇ¹ÖÒò»A"ÀÇ¹Ö§¼Ø%*the agent was asked to stopJf
-"v0.0.0-20261013165626-bf58c1d2857d(bf58c1d2857d4132448e9f4dc458cb81a3db7a67go1.26.9"linux*amd64PZ
-configurationÀÇ¹ÖÒò»AZ
+'65e4afeb-72be-4bcd-91df-1fb40d695704.35°	$65e4afeb-72be-4bcd-91df-1fb40d695704#"ÇšÅÖž²®B*<2
+0cf1ab12e505linux"amd64Ba
+$57c59c5d-a6df-45b2-b1f2-a038a8bd3a4e§šÅÖÎ¹Õº"§šÅÖÅÄé˜*the agent was asked to stopJf
+"v0.0.0-20261015215544-ddedf57cabc5(ddedf57cabc5aa6084e57a99851bc8a30fe1cb11go1.26.9"linux*amd64PZ
+configuration§šÅÖÎ¹ÕºZ
 
 collectionZ	
 spoolZ
@@ -11,16 +11,19 @@ collectionZ
 
 credentialZ
 	resourcesZ\
-policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
-	reportingÀÇ¹Ö‰¬ñFZ€
-update"tupdates.enabled is false or the installation is not enrolled, so the agent installs no release the platform hands itb
-authenticationÀÇ¹Ö—óòCb
-	inventoryÀÇ¹ÖÛ×ùBb
-	processesÀÇ¹ÖçØùBb 
-filesÀÇ¹ÖŽ—óC*‡watching 12 entries of 2 paths, 5 directories as they change; 1 changes found since the agent started, the last at 2026-10-13T17:00:49Zb
-networkÀÇ¹ÖÃÚùBj'p€€€€
+policy"Pthe agent asks for no policy: it is not enrolled, or policy.signers names no keyZ
+	reporting§šÅÖšÆÄÙZ€
+update"tupdates.enabled is false or the installation is not enrolled, so the agent installs no release the platform hands itb 
+authentication§šÅÖÚÛ¨½b
+	inventory§šÅÖèò·¼b
+	processes§šÅÖ°ô·¼b¡
+files§šÅÖþŠ©½*‡watching 12 entries of 2 paths, 5 directories as they change; 1 changes found since the agent started, the last at 2026-10-15T22:01:43Zb
+network§šÅÖö·¼b
+
+assessment§šÅÖÝö·¼j9¨€€€€
 events8@#
-	inventory8@r·þ¹Öõæ¹ÖÇÓÊÁzB
-@cca740f7f64f81648f01dc569afa05b11d5b3db0e58f1178d0db4937581ce3f2‚.
-997997999CAP_DAC_READ_SEARCH *filter’
-v0.18.0 (0:
+	inventory8@
+assessments8ršÑÅÖ»»ÅÖÏõ¥±zB
+@f8a483415ed5dc77579d64a6a0145f98db2173e980a23ea07fb71e0357697e77‚.
+997997999CAP_DAC_READ_SEARCH *filter’
+v0.19.0 (0:@

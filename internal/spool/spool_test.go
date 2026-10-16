@@ -151,8 +151,8 @@ func TestRecordsAcknowledgedOutOfOrderKeepTheOnesBetweenThem(t *testing.T) {
 
 func TestRecordsAdmittedWhileOthersAreDeliveredAreAllDeliveredOnce(t *testing.T) {
 	held, _ := open(t, spoolDirectory(t), 16<<20)
-	streams := []spool.Stream{spool.Events, spool.Inventory}
-	admitted := map[spool.Stream]*atomic.Uint64{spool.Events: {}, spool.Inventory: {}}
+	streams := []spool.Stream{spool.Events, spool.Inventory, spool.Assessments}
+	admitted := map[spool.Stream]*atomic.Uint64{spool.Events: {}, spool.Inventory: {}, spool.Assessments: {}}
 	var writers sync.WaitGroup
 	for writer := range 4 {
 		writers.Go(func() {
@@ -172,7 +172,7 @@ func TestRecordsAdmittedWhileOthersAreDeliveredAreAllDeliveredOnce(t *testing.T)
 		writers.Wait()
 		close(done)
 	}()
-	delivered := map[spool.Stream]map[uint64]bool{spool.Events: {}, spool.Inventory: {}}
+	delivered := map[spool.Stream]map[uint64]bool{spool.Events: {}, spool.Inventory: {}, spool.Assessments: {}}
 	for finished := false; !finished; {
 		select {
 		case <-done:
