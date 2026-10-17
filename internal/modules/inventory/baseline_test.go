@@ -1,6 +1,8 @@
 package inventory
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -135,4 +137,42 @@ func TestAnInterruptedWriteOfTheBaselineIsDiscardedAndNothingElse(t *testing.T) 
 	if want := slices.Sorted(slices.Values(names[1:])); !slices.Equal(left, want) {
 		t.Errorf("after discarding, %s holds %v, want %v", path, left, want)
 	}
+}
+
+// Whatever the baseline holds, what reads as one is written back as bytes that
+// read as the same baseline, and anything else is refused as damaged or newer,
+// so the collector sends whole snapshots again rather than trust it.
+func FuzzDecode(f *testing.F) {
+	digest := strings.Repeat("ab", 32)
+	for _, seed := range []string{
+		`{"format":1,"kinds":{"package":{"collected_at":"2026-10-05T12:00:00Z","record_id":"0190f5d2-7c3e-7a41-9b6e-2f4d8c1a3f01","items":2099,"bytes":185000,"digest":"` + digest + `"}}}`,
+		`{"format":1,"kinds":{"process":{"collected_at":"2026-10-05T12:00:00Z","record_id":"r","items":1,"bytes":1,"digest":"` + digest + `"}}}`,
+		`{"format":1,"kinds":{}}`,
+		`{"format":2}`,
+		`{"format":1,"kinds":{"package":{"collected_at":"2026-10-05T12:00:00Z","record_id":"r","items":-1,"bytes":1,"digest":"` + digest + `"}}}`,
+	} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, content []byte) {
+		for _, module := range []string{"inventory", Processes} {
+			held, err := decode(content, module)
+			if err != nil {
+				if !errors.Is(err, ErrDamaged) && !errors.Is(err, ErrNewer) {
+					t.Fatalf("a refusal that names no reason: %v", err)
+				}
+				continue
+			}
+			written, err := json.Marshal(held)
+			if err != nil {
+				t.Fatal(err)
+			}
+			again, err := decode(written, module)
+			if err != nil {
+				t.Fatalf("a baseline was written as %s, which does not read: %v", written, err)
+			}
+			if rewritten, err := json.Marshal(again); err != nil || !bytes.Equal(rewritten, written) {
+				t.Fatalf("a baseline was written as %s, and once read again as %s: %v", written, rewritten, err)
+			}
+		}
+	})
 }
