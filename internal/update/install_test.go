@@ -7,14 +7,17 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/encoding/protowire"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/update"
 	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
@@ -282,6 +285,28 @@ func TestAnInstallationACrashInterruptedIsTakenToItsEnd(t *testing.T) {
 				t.Fatalf("resuming at %s ended at %s after installing %v, want %s after %v", stage, journal.Stage, installing.manager.installed, want.end, expected)
 			}
 		})
+	}
+}
+
+func TestAnOfferWrittenToCostMemoryCostsTheInstallerLittleMoreThanItsBytes(t *testing.T) {
+	installing := newEstate(t).installing(t, "v0.3.0")
+	var offer []byte
+	for len(offer)+2 <= update.MaxOfferBytes {
+		offer = protowire.AppendVarint(protowire.AppendTag(offer, 1, protowire.BytesType), 0)
+	}
+	if err := update.OpenStaging(installing.staged).Hand(offer); err != nil {
+		t.Fatal(err)
+	}
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	err := installing.installer.Run(t.Context())
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, protocol.ErrExcessive) || len(installing.manager.installed) != 0 {
+		t.Fatalf("an offer of %d empty roots was read, installing %v: %v", len(offer)/2, installing.manager.installed, err)
+	}
+	if spent := after.TotalAlloc - before.TotalAlloc; spent > 8*update.MaxOfferBytes {
+		t.Fatalf("refusing an offer of %d bytes allocated %d", len(offer), spent)
 	}
 }
 
