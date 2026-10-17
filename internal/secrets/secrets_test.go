@@ -103,6 +103,14 @@ func TestAnAddressAMessageNamesCarriesNoCredentials(t *testing.T) {
 			given: "gateway.example:8443",
 			want:  `"gateway.example:8443"`,
 		},
+		"an address written without its scheme": {
+			given: "agent:" + password + "@gateway.example:8443",
+			want:  `"(redacted)@gateway.example:8443"`,
+		},
+		"an address whose path holds two slashes": {
+			given: "agent:" + password + "@gateway.example:8443//v1",
+			want:  `"(redacted)@gateway.example:8443//v1"`,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			address := secrets.Address(held.given)
@@ -121,6 +129,25 @@ func TestALongCredentialIsRemovedBeforeAMessageIsCutToItsBound(t *testing.T) {
 	if address != `"https://(redacted)@gateway.example:8443/v1"` {
 		t.Fatalf("an address with a long password reads as %s", address)
 	}
+}
+
+// Whatever an address holds around them, what was written before the at sign
+// of its authority never reaches a message.
+func FuzzAnAddressCarriesNoCredential(f *testing.F) {
+	f.Add("https://", "agent", "gateway.example:8443/v1")
+	f.Add("", "agent", "gateway.example:8443")
+	f.Add("ht tp://", "", "[2001:db8::1]:8446?query")
+	f.Fuzz(func(t *testing.T, scheme, user, rest string) {
+		const password = "s3cr3t-token"
+		if strings.Contains(scheme+user+rest, password[:6]) || strings.ContainsAny(user, "/?#@") || strings.Contains(scheme, "@") ||
+			scheme != "" && (!strings.HasSuffix(scheme, "//") || strings.Index(scheme, "//") != len(scheme)-2) {
+			return
+		}
+		given := scheme + user + ":" + password + "@" + rest
+		if shown := secrets.Address(given); strings.Contains(shown, password[:6]) {
+			t.Fatalf("Address(%q) = %s", given, shown)
+		}
+	})
 }
 
 func FuzzNothingTheAgentReadsDecidesHowLongAMessageIs(f *testing.F) {
