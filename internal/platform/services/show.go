@@ -57,30 +57,41 @@ func Show(ctx context.Context, units []string) ([]Unit, error) {
 		case err != nil:
 			return nil, fmt.Errorf("show the units systemd holds: %w", err)
 		}
-		blocks := strings.Split(strings.TrimSpace(string(written)), "\n\n")
-		if len(blocks) != len(asked) {
-			return nil, fmt.Errorf("%w: it said %d things of %d units", ErrUnreadable, len(blocks), len(asked))
+		units, err := shownOf(written, asked)
+		if err != nil {
+			return nil, err
 		}
-		for index, block := range blocks {
-			held := Unit{Asked: asked[index]}
-			for line := range strings.SplitSeq(block, "\n") {
-				key, value, _ := strings.Cut(line, "=")
-				switch key {
-				case "Id":
-					held.ID = value
-				case "LoadState":
-					held.Load = value
-				case "ActiveState":
-					held.Active = value
-				case "UnitFileState":
-					held.File = value
-				}
+		shown = append(shown, units...)
+	}
+	return shown, nil
+}
+
+func shownOf(written []byte, asked []string) ([]Unit, error) {
+	blocks := strings.Split(strings.TrimSpace(string(written)), "\n\n")
+	if len(blocks) != len(asked) {
+		return nil, fmt.Errorf("%w: it said %d things of %d units", ErrUnreadable, len(blocks), len(asked))
+	}
+	shown := make([]Unit, 0, len(blocks))
+	for index, block := range blocks {
+		held := Unit{Asked: asked[index]}
+		for line := range strings.SplitSeq(block, "\n") {
+			key, value, _ := strings.Cut(line, "=")
+			value = strings.TrimSpace(value)
+			switch key {
+			case "Id":
+				held.ID = value
+			case "LoadState":
+				held.Load = value
+			case "ActiveState":
+				held.Active = value
+			case "UnitFileState":
+				held.File = value
 			}
-			if held.ID == "" || held.Load == "" || held.Active == "" {
-				return nil, fmt.Errorf("%w: what it said of %s is %s", ErrUnreadable, secrets.Shown(asked[index]), secrets.Shown(block))
-			}
-			shown = append(shown, held)
 		}
+		if held.ID == "" || held.Load == "" || held.Active == "" {
+			return nil, fmt.Errorf("%w: what it said of %s is %s", ErrUnreadable, secrets.Shown(asked[index]), secrets.Shown(block))
+		}
+		shown = append(shown, held)
 	}
 	return shown, nil
 }
