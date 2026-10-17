@@ -381,12 +381,40 @@ func (g *gate) updates(t *testing.T) {
 	g.statusSays(t, false, "\nupdate: degraded since ", broken+": rolled_back, unhealthy")
 
 	run(t, "systemctl", "stop", unit)
+	g.heldNothing(t)
 	g.platform.offering(nil)
 	g.updating = false
 	g.write(t)
 	if *evidence != "" {
 		g.recordUpdates(t, heard)
 	}
+}
+
+func (g *gate) heldNothing(t *testing.T) {
+	t.Helper()
+	staged := filepath.Join(state, "staged")
+	for _, planted := range [][]string{{"mkfifo", filepath.Join(staged, "offer.pb")}, {"touch", filepath.Join(staged, "ready")}} {
+		if said, err := exec.Command("runuser", append([]string{"-u", account, "--"}, planted...)...).CombinedOutput(); err != nil {
+			t.Fatalf("%s as %s: %v: %s", strings.Join(planted, " "), account, err, said)
+		}
+	}
+	deadline := time.Now().Add(time.Minute)
+	for {
+		_, readyErr := os.Lstat(filepath.Join(staged, "ready"))
+		_, offerErr := os.Lstat(filepath.Join(staged, "offer.pb"))
+		active := answer("systemctl", "is-active", installerUnit)
+		if os.IsNotExist(readyErr) && os.IsNotExist(offerErr) && active != "active" && active != "activating" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the installer is %s a minute after a FIFO was staged as the offer:\n%s", active, installerLog())
+		}
+		time.Sleep(time.Second)
+	}
+	if log := installerLog(); !strings.Contains(log, "update_not_installed") || !strings.Contains(log, "offer.pb is not a regular file") {
+		t.Errorf("the installer said nothing of the FIFO staged as the offer:\n%s", log)
+	}
+	run(t, "systemctl", "reset-failed", installerUnit)
 }
 
 func (g *gate) recordUpdates(t *testing.T, from int) {
