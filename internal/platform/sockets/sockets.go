@@ -15,6 +15,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -34,6 +35,8 @@ const (
 )
 
 var proc = "/proc"
+
+var bootPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 var errMoved = errors.New("the process moved to another network namespace as its sockets were read")
 
@@ -231,7 +234,7 @@ func pointed(target string) (uint64, bool) {
 	written, found := strings.CutPrefix(target, "socket:[")
 	written, closed := strings.CutSuffix(written, "]")
 	inode, err := strconv.ParseUint(written, 10, 64)
-	return inode, found && closed && err == nil && inode > 0
+	return inode, found && closed && err == nil && inode > 0 && strconv.FormatUint(inode, 10) == written
 }
 
 func went(err error) bool {
@@ -274,7 +277,7 @@ func booted(held *os.Root) string {
 	defer file.Close()
 	content, err := io.ReadAll(io.LimitReader(file, maxBootBytes))
 	written := strings.TrimSpace(string(content))
-	if err != nil || len(written) != 36 || strings.Trim(written, "0123456789abcdef-") != "" {
+	if err != nil || !bootPattern.MatchString(written) {
 		return ""
 	}
 	return written
