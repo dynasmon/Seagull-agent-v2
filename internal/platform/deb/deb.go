@@ -77,12 +77,17 @@ func Inspect(ctx context.Context, path string) (Fields, error) {
 	if err != nil {
 		return Fields{}, err
 	}
+	return fieldsOf(written)
+}
+
+func fieldsOf(written []byte) (Fields, error) {
 	var fields Fields
 	for line := range strings.SplitSeq(string(bytes.TrimSpace(written)), "\n") {
 		name, value, found := strings.Cut(line, ": ")
 		if !found {
 			return Fields{}, fmt.Errorf("%w: %s", ErrUnreadable, secrets.Shown(line))
 		}
+		value = strings.TrimSpace(value)
 		switch name {
 		case "Package":
 			fields.Package = value
