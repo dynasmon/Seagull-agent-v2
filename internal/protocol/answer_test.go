@@ -1,11 +1,15 @@
 package protocol_test
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
@@ -16,7 +20,7 @@ import (
 
 var answeredAt = time.Date(2026, time.September, 27, 14, 3, 9, 0, time.UTC)
 
-func sentEvents(t *testing.T, events ...*eventv1.Event) []protocol.Sent {
+func sentEvents(t testing.TB, events ...*eventv1.Event) []protocol.Sent {
 	t.Helper()
 	sent := make([]protocol.Sent, len(events))
 	for i, event := range events {
@@ -247,4 +251,63 @@ func TestEveryOutcomeHasAName(t *testing.T) {
 			t.Errorf("outcome %d is called %q", int(outcome), name)
 		}
 	}
+}
+
+// Whatever the platform answers a batch with, only an acknowledgement of every
+// record it carried lets the agent drop them, a refusal names a record the
+// batch carried or none, and the same answer is judged the same way twice.
+func FuzzJudge(f *testing.F) {
+	manifests, err := filepath.Glob("../../tests/compatibility/testdata/backend-*/exchanges.json")
+	if err != nil || len(manifests) == 0 {
+		f.Fatalf("find the recorded exchanges: %v", err)
+	}
+	for _, manifest := range manifests {
+		content, err := os.ReadFile(manifest)
+		if err != nil {
+			f.Fatal(err)
+		}
+		var recorded struct {
+			Exchanges []struct {
+				Name   string `json:"name"`
+				Status int    `json:"status"`
+			} `json:"exchanges"`
+		}
+		if err := json.Unmarshal(content, &recorded); err != nil {
+			f.Fatal(err)
+		}
+		for _, exchange := range recorded.Exchanges {
+			reply, err := os.ReadFile(filepath.Join(filepath.Dir(manifest), exchange.Name+".reply.pb"))
+			if err != nil {
+				f.Fatal(err)
+			}
+			f.Add(exchange.Status, protocol.ContentType, reply, answeredAt.Unix())
+		}
+	}
+	f.Add(200, protocol.ContentType, encoded(f, &ingestv1.BatchAck{Accepted: true, Durable: true, Received: 3}), answeredAt.Unix())
+	f.Add(422, protocol.ContentType, encoded(f, &ingestv1.Rejection{Code: "invalid_event", Field: "time.event_time", EventIndex: 2}), int64(0))
+	routes := map[protocol.Route][]protocol.Sent{
+		protocol.Events: sentEvents(f, numberedEvents(3)...),
+		protocol.Inventory: {{Record: encoded(f, services(inventoryv1.Service_STATE_RUNNING)), Admitted: answeredAt},
+			{Record: encoded(f, services(inventoryv1.Service_STATE_STOPPED)), Admitted: answeredAt}},
+	}
+	f.Fuzz(func(t *testing.T, status int, contentType string, body []byte, date int64) {
+		answer := protocol.Answer{Status: status, ContentType: contentType, Body: body, Date: time.Unix(date, 0).UTC()}
+		for route, sent := range routes {
+			verdict, again := route.Judge(sent, answer), route.Judge(sent, answer)
+			var acknowledgement ingestv1.BatchAck
+			switch {
+			case verdict.Outcome != again.Outcome || verdict.Record != again.Record:
+				t.Fatalf("%s: one answer was judged %v and then %v", route, verdict, again)
+			case verdict.Record < -1 || verdict.Record >= len(sent):
+				t.Fatalf("%s: the answer was judged to name record %d of %d", route, verdict.Record, len(sent))
+			case verdict.Outcome != protocol.Durable && verdict.Reason == nil:
+				t.Fatalf("%s: the answer was judged %s with no reason", route, verdict.Outcome)
+			case verdict.Reason != nil && len(verdict.Reason.Error()) > 2<<10:
+				t.Fatalf("%s: the reason holds %d bytes", route, len(verdict.Reason.Error()))
+			case verdict.Outcome == protocol.Durable && (status != 200 || proto.Unmarshal(body, &acknowledgement) != nil ||
+				!acknowledgement.GetAccepted() || !acknowledgement.GetDurable() || int64(acknowledgement.GetReceived()) != int64(len(sent))):
+				t.Fatalf("%s: %d records were dropped on an answer %d that acknowledges %v", route, len(sent), status, &acknowledgement)
+			}
+		}
+	})
 }
