@@ -263,7 +263,7 @@ func identified(root, pid string) string {
 	link, err := os.Readlink(filepath.Join(root, pid, "ns", "net"))
 	written, found := strings.CutPrefix(link, "net:[")
 	written, closed := strings.CutSuffix(written, "]")
-	if _, number := strconv.ParseUint(written, 10, 64); err != nil || !found || !closed || number != nil {
+	if number, unread := strconv.ParseUint(written, 10, 64); err != nil || !found || !closed || unread != nil || strconv.FormatUint(number, 10) != written {
 		return ""
 	}
 	return link
