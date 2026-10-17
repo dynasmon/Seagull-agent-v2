@@ -31,7 +31,11 @@ var (
 
 var environment = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "DEBIAN_FRONTEND=noninteractive", "LC_ALL=C"}
 
-var semantic = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$`)
+var (
+	semantic = regexp.MustCompile(`^v(0|[1-9][0-9]{0,18})\.(0|[1-9][0-9]{0,18})\.(0|[1-9][0-9]{0,18})(?:-(.+))?$`)
+	staged   = `[A-Za-z]+(?:\.(?:0|[1-9][0-9]{0,8}))*`
+	ordered  = regexp.MustCompile(`^(?:` + staged + `|(?:(?:` + staged + `\.)?0\.)?[0-9]{14}-[0-9a-f]{12})$`)
+)
 
 var architectures = map[string]string{"amd64": "amd64", "arm64": "arm64"}
 
@@ -39,11 +43,13 @@ var ErrUnreadable = errors.New("dpkg-deb wrote what is not the fields of a packa
 
 // Version is the Debian version an agent built as stamped is packaged as: its
 // release, with a prerelease after a tilde so dpkg orders it before the release
-// itself, and one packaging revision.
+// itself, and one packaging revision. A prerelease is a word and its numbers,
+// such as rc.2, or what Go stamps a commit with, the only ones dpkg orders as
+// the agent orders releases and no two of which share a package version.
 func Version(stamped string) (string, error) {
 	parts := semantic.FindStringSubmatch(stamped)
-	if parts == nil {
-		return "", fmt.Errorf("it was built as %s, which names no release or commit of the agent", secrets.Shown(stamped))
+	if parts == nil || parts[4] != "" && !ordered.MatchString(parts[4]) {
+		return "", fmt.Errorf("it was built as %s, which names no release or commit of the agent dpkg orders as the agent does", secrets.Shown(stamped))
 	}
 	upstream := strings.Join(parts[1:4], ".")
 	if parts[4] != "" {
