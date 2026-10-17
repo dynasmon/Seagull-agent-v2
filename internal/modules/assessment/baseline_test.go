@@ -1,6 +1,8 @@
 package assessment
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -82,4 +84,38 @@ func TestABaselineAnotherAccountCouldWriteIsNotRead(t *testing.T) {
 	if _, err := load(root); !errors.Is(err, ErrInsecure) {
 		t.Fatalf("a baseline others may read was answered %v", err)
 	}
+}
+
+// Whatever the baseline holds, what reads as one is written back as bytes that
+// read as the same baseline, and anything else is refused as damaged or newer,
+// so the module admits its assessment again rather than trust it.
+func FuzzDecode(f *testing.F) {
+	digest := strings.Repeat("cd", 32)
+	for _, seed := range []string{
+		`{"format":1,"assessed_at":"2026-10-15T12:00:00Z","assessment_id":"0190f5d2-7c3e-7a41-9b6e-2f4d8c1a3f01","policy_id":"linux-web","policy_revision":3,"checks":21,"bytes":4096,"digest":"` + digest + `"}`,
+		`{"format":1}`,
+		`{"format":2}`,
+	} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, content []byte) {
+		held, err := decode(content)
+		if err != nil {
+			if !errors.Is(err, ErrDamaged) && !errors.Is(err, ErrNewer) {
+				t.Fatalf("a refusal that names no reason: %v", err)
+			}
+			return
+		}
+		written, err := json.Marshal(held)
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, err := decode(written)
+		if err != nil {
+			t.Fatalf("a baseline was written as %s, which does not read: %v", written, err)
+		}
+		if rewritten, err := json.Marshal(again); err != nil || !bytes.Equal(rewritten, written) {
+			t.Fatalf("a baseline was written as %s, and once read again as %s: %v", written, rewritten, err)
+		}
+	})
 }
