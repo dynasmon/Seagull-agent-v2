@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -104,6 +105,25 @@ func TestAPolicyIsVerifiedUnderAKeyTheAgentAccepts(t *testing.T) {
 		t.Fatalf("the policy is said to be signed by %v", verified.SignedBy)
 	case verified.Digest != hex.EncodeToString(sum[:]) || !slices.Equal(verified.Envelope, served):
 		t.Fatalf("the envelope is held as %s", verified.Digest)
+	}
+}
+
+func TestAnEnvelopeWrittenToCostMemoryIsRefusedBeforeItIsDecoded(t *testing.T) {
+	var served []byte
+	for len(served)+2 <= policy.MaxEnvelopeBytes {
+		served = protowire.AppendVarint(protowire.AppendTag(served, 3, protowire.BytesType), 0)
+	}
+	held := verifier(t, signingKey(t))
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err := held.Verify(served)
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, policy.ErrMalformed) {
+		t.Fatalf("an envelope of %d empty signatures was read: %v", len(served)/2, err)
+	}
+	if spent := after.TotalAlloc - before.TotalAlloc; spent > 1<<20 {
+		t.Fatalf("refusing an envelope of %d bytes allocated %d", len(served), spent)
 	}
 }
 
