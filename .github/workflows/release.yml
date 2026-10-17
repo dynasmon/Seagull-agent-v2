@@ -162,6 +162,8 @@ jobs:
           MATERIALS: ${{ steps.materials.outputs.bundle-path }}
         run: |
           name="$(basename "$PACKAGE")"
+          listed="$(basename "$SBOM")"
+          served="${name//\~/.}"
           cp "$PROVENANCE" "$PACKAGE.sigstore.json"
           cp "$MATERIALS" "$PACKAGE.spdx.sigstore.json"
           cat > notes.md <<EOF
@@ -169,9 +171,9 @@ jobs:
 
           Verify the package before installing it:
 
-              gh attestation verify $name --repo $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref $GITHUB_REF --source-digest $GITHUB_SHA --deny-self-hosted-runners
+              gh attestation verify $served --repo $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref $GITHUB_REF --source-digest $GITHUB_SHA --deny-self-hosted-runners
 
-          The same command with --predicate-type https://spdx.dev/Document/v2.3 verifies $(basename "$SBOM"), the bill of materials of what the package holds.
+          The same command with --predicate-type https://spdx.dev/Document/v2.3 verifies ${listed//\~/.}, the bill of materials of what the package holds.
 
           Two builders packaged commit $GITHUB_SHA into these same bytes, and make package at $GITHUB_REF_NAME, with Go $GO_VERSION, writes them again.
 
