@@ -15,9 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/dynasmon/Seagull-agent-v2/internal/link"
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	"github.com/dynasmon/Seagull-agent-v2/internal/transport"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
@@ -214,7 +213,7 @@ func (f *Follower) consider(ctx context.Context, now time.Time) {
 	}
 
 	var offer updatev1.Offer
-	if err := proto.Unmarshal(f.offered, &offer); err != nil {
+	if err := protocol.Decode(f.offered, &offer, MaxOfferValues); err != nil {
 		f.reported(State{Stage: Failed, Since: now, Failure: Unverified, Reason: "the platform's offer is not one the agent reads"})
 		return
 	}
@@ -353,7 +352,7 @@ func failureOf(err error) Failure {
 
 func refusal(reply transport.Reply) *controlv1.Refusal {
 	var said controlv1.Refusal
-	if proto.Unmarshal(reply.Body, &said) != nil {
+	if protocol.Decode(reply.Body, &said, protocol.MaxAnswerValues) != nil {
 		return &controlv1.Refusal{}
 	}
 	return &said
