@@ -24,7 +24,7 @@ import (
 
 var written = time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 
-func signingKey(t *testing.T) *ecdsa.PrivateKey {
+func signingKey(t testing.TB) *ecdsa.PrivateKey {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -33,7 +33,7 @@ func signingKey(t *testing.T) *ecdsa.PrivateKey {
 	return key
 }
 
-func verifier(t *testing.T, keys ...*ecdsa.PrivateKey) *policy.Verifier {
+func verifier(t testing.TB, keys ...*ecdsa.PrivateKey) *policy.Verifier {
 	t.Helper()
 	public := make([]*ecdsa.PublicKey, 0, len(keys))
 	for _, key := range keys {
@@ -58,7 +58,7 @@ func named(revision uint64, targets ...string) *policyv1.Policy {
 	}
 }
 
-func sealed(t *testing.T, payloadType string, payload []byte, keys ...*ecdsa.PrivateKey) []byte {
+func sealed(t testing.TB, payloadType string, payload []byte, keys ...*ecdsa.PrivateKey) []byte {
 	t.Helper()
 	digest := sha256.Sum256(dsse.PAE(payloadType, payload))
 	envelope := &policyv1.SignedPolicy{Payload: payload, PayloadType: payloadType}
@@ -80,7 +80,7 @@ func sealed(t *testing.T, payloadType string, payload []byte, keys ...*ecdsa.Pri
 	return served
 }
 
-func signed(t *testing.T, held *policyv1.Policy, keys ...*ecdsa.PrivateKey) []byte {
+func signed(t testing.TB, held *policyv1.Policy, keys ...*ecdsa.PrivateKey) []byte {
 	t.Helper()
 	payload, err := proto.MarshalOptions{Deterministic: true}.Marshal(held)
 	if err != nil {
