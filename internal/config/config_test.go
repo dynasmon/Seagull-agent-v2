@@ -111,19 +111,21 @@ func TestASettingThisAgentDoesNotHaveIsRefused(t *testing.T) {
 }
 
 func TestASettingThatSaysTwoThingsAtOnceIsRefused(t *testing.T) {
-	for name, content := range map[string]string{
-		"a group written twice":   `{"format": 1, "spool": {"max_bytes": "64MiB"}, "spool": {"max_bytes": "128MiB"}}`,
-		"a setting written twice": `{"format": 1, "spool": {"max_bytes": "64MiB", "max_bytes": "128MiB"}}`,
-		"a setting left null":     `{"format": 1, "spool": {"max_bytes": null}}`,
-		"a group left null":       `{"format": 1, "spool": null}`,
-		"more than one document":  `{"format": 1} {"format": 1}`,
-		"a list of settings":      `[{"format": 1}]`,
-		"nothing at all":          ``,
+	for name, c := range map[string]struct{ content, says string }{
+		"a group written twice":                  {`{"format": 1, "spool": {"max_bytes": "64MiB"}, "spool": {"max_bytes": "128MiB"}}`, "spool is set twice"},
+		"a setting written twice":                {`{"format": 1, "spool": {"max_bytes": "64MiB", "max_bytes": "128MiB"}}`, "spool.max_bytes is set twice"},
+		"a setting written twice in other cases": {`{"format": 1, "spool": {"max_bytes": "64MiB", "MAX_BYTES": "128MiB"}}`, "spool.MAX_BYTES is set twice"},
+		"a group written twice in other letters": {`{"format": 1, "spool": {"max_bytes": "64MiB"}, "\u017fpool": {"max_bytes": "128MiB"}}`, "\u017fpool is set twice"},
+		"a setting left null":                    {`{"format": 1, "spool": {"max_bytes": null}}`, "spool.max_bytes is null"},
+		"a group left null":                      {`{"format": 1, "spool": null}`, "spool is null"},
+		"more than one document":                 {`{"format": 1} {"format": 1}`, "more than one document"},
+		"a list of settings":                     {`[{"format": 1}]`, "not a group of settings"},
+		"nothing at all":                         {``, "not a configuration"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := config.Load(written(t, trusted(t), content))
-			if !errors.Is(err, config.ErrInvalid) {
-				t.Fatalf("the agent read %s: %v", name, err)
+			_, err := config.Load(written(t, trusted(t), c.content))
+			if !errors.Is(err, config.ErrInvalid) || !strings.Contains(err.Error(), c.says) {
+				t.Fatalf("the agent read %s, or refused it for another reason: %v", name, err)
 			}
 		})
 	}
