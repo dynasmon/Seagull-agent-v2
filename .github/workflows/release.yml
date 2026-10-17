@@ -20,6 +20,8 @@ jobs:
     name: verify, package and gate the tagged commit
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    outputs:
+      packaged: ${{ steps.packaged.outputs.packaged }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -32,6 +34,7 @@ jobs:
       - name: source verification
         run: make verify
       - name: package the tagged commit
+        id: packaged
         run: |
           make package
           built="$(dist/linux-amd64/seagull-agent -version | head -n 1 | cut -d ' ' -f 2)"
@@ -39,7 +42,9 @@ jobs:
             echo "the agent was built as $built, and the tag is $GITHUB_REF_NAME" >&2
             exit 1
           fi
-          sha256sum dist/deb/*.deb
+          cd dist/deb
+          sha256sum -- *.deb *.spdx.json
+          echo "packaged=$(sha256sum -- *.deb *.spdx.json | tr '\n' ';')" >> "$GITHUB_OUTPUT"
       - name: package the tagged commit again as a later release, to update the agent to
         run: make ahead
       - name: install the package, run it as a service, update it and remove it
@@ -47,15 +52,47 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: debian-package
-          path: dist/deb/*.deb
+          path: |
+            dist/deb/*.deb
+            dist/deb/*.spdx.json
           if-no-files-found: error
           retention-days: 7
 
+  reproduce:
+    name: package the tagged commit on another builder
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container: golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c
+    outputs:
+      packaged: ${{ steps.packaged.outputs.packaged }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: package the tagged commit as another account, elsewhere, under another clock, locale and umask
+        id: packaged
+        shell: bash
+        run: |
+          useradd --uid 4242 --create-home builder
+          git config --system --add safe.directory "$GITHUB_WORKSPACE"
+          git config --system --add safe.directory "$GITHUB_WORKSPACE/.git"
+          runuser -u builder -- env -i HOME=/home/builder PATH=/usr/local/go/bin:/usr/bin:/bin TZ=Pacific/Kiritimati LANG=C.UTF-8 GOTOOLCHAIN=local SOURCE="$GITHUB_WORKSPACE" \
+            bash -euo pipefail -s <<'BUILD'
+          umask 077
+          git clone --quiet --no-local "$SOURCE" "$HOME/elsewhere/agent"
+          make -C "$HOME/elsewhere/agent" package DIST="$HOME/elsewhere/dist" >&2
+          BUILD
+          cd /home/builder/elsewhere/dist/deb
+          sha256sum -- *.deb *.spdx.json
+          echo "packaged=$(sha256sum -- *.deb *.spdx.json | tr '\n' ';')" >> "$GITHUB_OUTPUT"
+
   release:
     name: attest the package and draft its release
-    needs: package
+    needs: [package, reproduce]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    environment: release
     permissions:
       contents: write
       id-token: write
@@ -65,36 +102,81 @@ jobs:
         with:
           name: debian-package
           path: dist/deb
-      - id: attest
+      - id: held
+        name: hold the package to what both builders packaged and its bill of materials names
+        env:
+          PACKAGED: ${{ needs.package.outputs.packaged }}
+          REPRODUCED: ${{ needs.reproduce.outputs.packaged }}
+        run: |
+          echo "ubuntu 24.04 runner:  $PACKAGED"
+          echo "golang trixie image: $REPRODUCED"
+          test -n "$PACKAGED"
+          test "$PACKAGED" = "$REPRODUCED"
+          cd dist/deb
+          test "$(sha256sum -- *.deb *.spdx.json | tr '\n' ';')" = "$PACKAGED"
+          package="$(ls -- *.deb)"
+          listed="$(ls -- *.spdx.json)"
+          named="$(jq -r '.packages[] | select(.SPDXID == "SPDXRef-Package") | .checksums[] | select(.algorithm == "SHA256") | .checksumValue' "$listed")"
+          test "$named" = "$(sha256sum "$package" | cut -d ' ' -f 1)"
+          echo "package=dist/deb/$package" >> "$GITHUB_OUTPUT"
+          echo "sbom=dist/deb/$listed" >> "$GITHUB_OUTPUT"
+      - id: provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
-          subject-path: dist/deb/*.deb
-      - name: verify the package as an operator does
+          subject-path: ${{ steps.held.outputs.package }}
+      - id: materials
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: ${{ steps.held.outputs.package }}
+          sbom-path: ${{ steps.held.outputs.sbom }}
+      - name: verify the package as an operator does, and refuse a changed one
         env:
           GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ steps.held.outputs.package }}
+          SBOM: ${{ steps.held.outputs.sbom }}
         run: |
-          sha256sum dist/deb/*.deb
-          gh attestation verify dist/deb/*.deb \
-            --repo "$GITHUB_REPOSITORY" \
-            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
-            --source-ref "$GITHUB_REF" \
-            --deny-self-hosted-runners
+          verify() {
+            gh attestation verify "$@" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" \
+              --deny-self-hosted-runners
+          }
+          verify "$PACKAGE"
+          verify "$PACKAGE" --predicate-type https://spdx.dev/Document/v2.3 --format json > "$RUNNER_TEMP/verified.json"
+          jq -S '[.. | objects | select(.predicateType? == "https://spdx.dev/Document/v2.3")][0].predicate' "$RUNNER_TEMP/verified.json" > "$RUNNER_TEMP/attested.spdx.json"
+          diff <(jq -S . "$SBOM") "$RUNNER_TEMP/attested.spdx.json"
+          changed="$RUNNER_TEMP/$(basename "$PACKAGE")"
+          cp "$PACKAGE" "$changed"
+          printf '\0' >> "$changed"
+          if verify "$changed"; then
+            echo "a package whose bytes changed verifies" >&2
+            exit 1
+          fi
       - name: draft the release
         env:
           GH_TOKEN: ${{ github.token }}
-          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+          PACKAGE: ${{ steps.held.outputs.package }}
+          SBOM: ${{ steps.held.outputs.sbom }}
+          PROVENANCE: ${{ steps.provenance.outputs.bundle-path }}
+          MATERIALS: ${{ steps.materials.outputs.bundle-path }}
         run: |
-          package="$(ls dist/deb/*.deb)"
-          name="$(basename "$package")"
-          cp "$BUNDLE" "$package.sigstore.json"
+          name="$(basename "$PACKAGE")"
+          cp "$PROVENANCE" "$PACKAGE.sigstore.json"
+          cp "$MATERIALS" "$PACKAGE.spdx.sigstore.json"
           cat > notes.md <<EOF
           Seagull Agent $GITHUB_REF_NAME, packaged for Ubuntu 24.04 on amd64.
 
           Verify the package before installing it:
 
-              gh attestation verify $name --repo $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref $GITHUB_REF --deny-self-hosted-runners
+              gh attestation verify $name --repo $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref $GITHUB_REF --source-digest $GITHUB_SHA --deny-self-hosted-runners
+
+          The same command with --predicate-type https://spdx.dev/Document/v2.3 verifies $(basename "$SBOM"), the bill of materials of what the package holds.
+
+          Two builders packaged commit $GITHUB_SHA into these same bytes, and make package at $GITHUB_REF_NAME, with Go $GO_VERSION, writes them again.
 
           The README says how to install, configure and enroll it.
           EOF
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
-            --title "$GITHUB_REF_NAME" --notes-file notes.md "$package" "$package.sigstore.json"
+            --title "$GITHUB_REF_NAME" --notes-file notes.md \
+            "$PACKAGE" "$PACKAGE.sigstore.json" "$SBOM" "$PACKAGE.spdx.sigstore.json"

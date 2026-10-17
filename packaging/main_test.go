@@ -62,6 +62,54 @@ func TestOnlyAPortableLinuxBuildOfACommitIsPackaged(t *testing.T) {
 	}
 }
 
+func TestAnAgentBuiltAgainstADirectoryInsteadOfAModuleIsNotPackaged(t *testing.T) {
+	info := built(nil)
+	info.Deps = []*debug.Module{{Path: "github.com/dynasmon/Seagull-contracts", Version: "v0.19.0", Replace: &debug.Module{Path: "../Seagull-contracts"}}}
+	if described, err := describe(info); err == nil || !strings.Contains(err.Error(), "replaced by the directory ../Seagull-contracts") {
+		t.Errorf("a build against a directory is packaged as %+v (%v)", described, err)
+	}
+	info.Deps[0].Replace = &debug.Module{Path: "github.com/example/contracts", Version: "v0.19.1", Sum: "h1:Zm9yaw=="}
+	if _, err := describe(info); err != nil {
+		t.Errorf("a build against a module replaced by another module's version is refused: %v", err)
+	}
+}
+
+func TestOnlyAnAgentBuiltWithoutItsSymbolsIsPackaged(t *testing.T) {
+	source := t.TempDir()
+	for name, content := range map[string]string{"go.mod": "module example.com/agent\n\ngo 1.21\n", "main.go": "package main\n\nfunc main() {}\n"} {
+		if err := os.WriteFile(filepath.Join(source, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []struct {
+		flags   []string
+		refused bool
+	}{
+		{flags: []string{"-trimpath"}, refused: true},
+		{flags: []string{"-trimpath", "-ldflags=-w"}, refused: true},
+		{flags: []string{"-trimpath", "-ldflags=-s -w"}, refused: false},
+	} {
+		binary := filepath.Join(t.TempDir(), "agent")
+		build := exec.Command("go", append(append([]string{"build"}, c.flags...), "-o", binary, ".")...)
+		build.Dir = source
+		build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOWORK=off", "GOFLAGS=", "GOTOOLCHAIN=local")
+		if said, err := build.CombinedOutput(); err != nil {
+			t.Fatalf("build an executable with %v: %v\n%s", c.flags, err, said)
+		}
+		err := stripped(binary)
+		if c.refused != (err != nil) || c.refused && !strings.Contains(err.Error(), "-ldflags='-s -w'") {
+			t.Errorf("an executable built with %v is packaged as %v", c.flags, err)
+		}
+	}
+	script := filepath.Join(t.TempDir(), "agent")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := stripped(script); err == nil {
+		t.Error("a script is packaged as the agent")
+	}
+}
+
 func TestThePackageHoldsTheAgentItsServiceAndNothingElse(t *testing.T) {
 	requireDpkgDeb(t)
 	agent := []byte("\x7fELF the agent")

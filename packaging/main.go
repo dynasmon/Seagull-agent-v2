@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/md5"
 	"debug/buildinfo"
+	"debug/elf"
 	"embed"
 	"errors"
 	"flag"
@@ -91,6 +92,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	described, err := describe(built)
+	if err == nil {
+		err = stripped(*binary)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "package: %s: %v\n", *binary, err)
 		return 1
@@ -100,7 +104,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "package: %v\n", err)
 		return 1
 	}
+	listed, err := account(built, described, *binary, written)
+	if err != nil {
+		fmt.Fprintf(stderr, "package: %v\n", err)
+		return 1
+	}
 	fmt.Fprintln(stdout, written)
+	fmt.Fprintln(stdout, listed)
 	return 0
 }
 
@@ -131,6 +141,11 @@ func describe(built *debug.BuildInfo) (release, error) {
 		return release{}, errors.New("it names no commit it was built from")
 	case settings["vcs.modified"] != "false":
 		return release{}, errors.New("it was built from changes no commit holds")
+	}
+	for _, module := range built.Deps {
+		if module.Replace != nil && module.Replace.Version == "" {
+			return release{}, fmt.Errorf("it was built with %s replaced by the directory %s, which no module version names", module.Path, module.Replace.Path)
+		}
 	}
 	version, err := deb.Version(built.Main.Version)
 	if err != nil {
@@ -220,6 +235,20 @@ func assemble(built release, binary, out string) (string, error) {
 		return "", fmt.Errorf("dpkg-deb builds the package: %w\n%s", err, bytes.TrimSpace(said))
 	}
 	return target, nil
+}
+
+func stripped(binary string) error {
+	file, err := elf.Open(binary)
+	if err != nil {
+		return fmt.Errorf("read it as an executable: %w", err)
+	}
+	defer file.Close()
+	for _, section := range file.Sections {
+		if section.Name == ".symtab" || strings.HasPrefix(section.Name, ".debug_") || strings.HasPrefix(section.Name, ".zdebug_") {
+			return fmt.Errorf("it holds its %s section, which a package leaves out: build it with -ldflags='-s -w'", section.Name)
+		}
+	}
+	return nil
 }
 
 func place(stage, name string, content []byte, mode fs.FileMode) error {

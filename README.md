@@ -186,11 +186,13 @@ supported.
 ## Verify a release
 
 A release is a tag `vX.Y.Z`. Its workflow verifies the commit, packages it, runs
-the package through the native gate, and only then attests SLSA provenance for
-it through Sigstore. The package and that statement, as a `.sigstore.json`
-bundle, are attached to a draft release that a maintainer publishes. Verify a
-package before installing it, with a GitHub CLI that has `gh attestation`
-(Ubuntu 24.04's own, 2.45, predates it):
+the package through the native gate and packages the commit again on a second
+builder. Only when both builders wrote the same bytes does it attest, through
+Sigstore, SLSA provenance for the package and the SPDX bill of materials of what
+the package holds. The package, its bill of materials and both statements, as
+`.sigstore.json` bundles, are attached to a draft release that a maintainer
+publishes. Verify a package before installing it, with a GitHub CLI that has
+`gh attestation` (Ubuntu 24.04's own, 2.45, predates it):
 
 ```bash
 gh attestation verify seagull-agent_0.1.0-1_amd64.deb \
@@ -199,12 +201,28 @@ gh attestation verify seagull-agent_0.1.0-1_amd64.deb \
   --source-ref refs/tags/v0.1.0 --deny-self-hosted-runners
 ```
 
-Verification fails for a package whose bytes changed and for one another
-repository, workflow or tag built; `--bundle` checks against the attached
-statement instead of asking GitHub. No signing key exists to be kept or lost:
-the workflow signs with a certificate that expires minutes later. The same
-commit always packages into the same bytes, and tag `v0.1.0` is package version
-`0.1.0-1`.
+The same command with `--predicate-type https://spdx.dev/Document/v2.3`
+verifies the bill of materials, `seagull-agent_0.1.0-1_amd64.spdx.json`: the
+package and its SHA-256, the agent and the commit it was built from, the Go
+toolchain and every module the agent links, with its version and `go.sum` hash.
+Verification fails for a package whose bytes changed, which the workflow checks
+with a changed copy before it drafts the release, for one another repository,
+workflow or tag built, and, given `--source-digest` with the commit the release
+notes name, for one built from another commit; `--bundle` checks against an
+attached statement instead of asking GitHub. No signing key exists to be kept or lost:
+the workflow signs with a certificate that expires minutes later. Tag `v0.1.0`
+is package version `0.1.0-1`, and a pre-release such as `v0.1.0-rc.1` is
+`0.1.0~rc.1-1`.
+
+A release can be rebuilt and compared with the one published: `make package`
+at its tag, with Go 1.26.9, writes the same package and bill of materials, byte
+for byte. CI checks it for every commit, packaging it on the Ubuntu 24.04 runner
+and again in the `golang:1.26.9-trixie` image as another account, in another
+directory and under another time zone, locale and umask; one commit packaged on
+Ubuntu 24.04 and 22.04 and on Debian 12 and 13 was the same bytes on all four.
+The agent is built without its symbol table and debugging information, which
+halves the package; a panic still names every function and line it went
+through.
 
 ## Installing
 
@@ -505,13 +523,14 @@ dependency from the module proxy, so a checkout is all a build needs.
 make build        # dist/seagull-agent
 make verify       # formatting, vet, module graph, tests, race detector and build
 make vulncheck    # known vulnerabilities reachable from the agent
-make package      # dist/deb/seagull-agent_<version>_amd64.deb, of the commit checked out
+make package      # dist/deb/seagull-agent_<version>_amd64.deb and .spdx.json, of the commit checked out
 make native-gate  # installs that package on this host, as root: use a disposable host
 ```
 
 `make verify` runs the unit, architecture and compatibility suites;
 `tests/architecture` holds the package boundaries as tests. CI also packages
-every commit twice and compares the bytes, and runs the native gate, which
+every commit twice on its runner and once more on a second builder and requires
+the same bytes from all three, and runs the native gate, which
 takes the installed service through enrollment, renewal, collection, delivery,
 upgrade, removal and purge on Ubuntu 24.04. While a contract change is in
 progress, a `go.work` may use a sibling contracts checkout; Git ignores it, and

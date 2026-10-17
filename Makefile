@@ -22,7 +22,7 @@ help:
 	@echo "test        run the unit, architecture and compatibility suites"
 	@echo "test-race   run the same suites under the race detector"
 	@echo "build       build the agent into $(DIST)"
-	@echo "package     build the Debian package of the commit checked out into $(DIST)/deb"
+	@echo "package     build the Debian package of the commit checked out, and its SPDX bill of materials, into $(DIST)/deb"
 	@echo "ahead       package the same commit as release $(AHEAD) into $(DIST)/ahead, which the native gate updates the agent to"
 	@echo "native-gate install that package on THIS host, as root, and run it as a service: use a disposable host"
 	@echo "vulncheck   scan reachable dependencies"
@@ -56,7 +56,7 @@ build:
 
 package:
 	@mkdir -p $(dir $(PACKAGED))
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) $(GO) build -trimpath -o $(PACKAGED) ./cmd/seagull-agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) $(GO) build -trimpath -ldflags='-s -w' -o $(PACKAGED) ./cmd/seagull-agent
 	rm -rf $(DIST)/deb
 	$(GO) run ./packaging -binary $(PACKAGED) -out $(DIST)/deb
 
