@@ -8,9 +8,9 @@ import (
 	"slices"
 	"time"
 
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
@@ -94,7 +94,7 @@ func (r *Root) Walk(roots []*updatev1.Envelope, now time.Time) *Root {
 
 func decodeRoot(payload []byte, now time.Time) (*updatev1.Root, map[string]*ecdsa.PublicKey, error) {
 	var root updatev1.Root
-	if err := proto.Unmarshal(payload, &root); err != nil {
+	if err := protocol.Decode(payload, &root, protocol.MaxAnswerValues); err != nil {
 		return nil, nil, fmt.Errorf("%w: its payload is not a root", ErrMalformed)
 	}
 	if err := known(root.ProtoReflect()); err != nil {
