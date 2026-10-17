@@ -64,17 +64,17 @@ func printable(held string) bool {
 }
 
 func withoutCredentials(raw string) string {
-	scheme, rest, found := strings.Cut(raw, "//")
-	if !found {
-		return raw
+	start := 0
+	if slashes := strings.Index(raw, "//"); slashes >= 0 && !strings.Contains(raw[:slashes], "@") {
+		start = slashes + 2
 	}
-	authority := rest
-	if ends := strings.IndexAny(rest, "/?#"); ends >= 0 {
-		authority = rest[:ends]
+	authority := raw[start:]
+	if ends := strings.IndexAny(authority, "/?#"); ends >= 0 {
+		authority = authority[:ends]
 	}
 	written := strings.LastIndex(authority, "@")
 	if written < 0 {
 		return raw
 	}
-	return scheme + "//" + withheld + "@" + rest[written+1:]
+	return raw[:start] + withheld + raw[start+written:]
 }
