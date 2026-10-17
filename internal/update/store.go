@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
@@ -22,6 +23,11 @@ const (
 	heldFile     = "held.json"
 	maxHeldBytes = 2 << 20
 )
+
+// The installer reads what the agent's account may have put in place, so a file
+// is opened without following a link or waiting for a writer, and read only once
+// it turns out to be a regular file: a FIFO put there cannot hold the installer.
+const reading = os.O_RDONLY | files.NoFollow | syscall.O_NONBLOCK
 
 var (
 	ErrDamaged = errors.New("what was verified of updates cannot be read back")
@@ -90,7 +96,7 @@ func (s *Store) Keep(held Held) error {
 }
 
 func read(root *os.Root, name string, most int64) ([]byte, bool, error) {
-	file, err := root.OpenFile(name, os.O_RDONLY|files.NoFollow, 0)
+	file, err := root.OpenFile(name, reading, 0)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, false, nil
