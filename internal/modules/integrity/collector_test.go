@@ -27,6 +27,29 @@ import (
 
 const installation = "7f3c1a2e-5b6d-4e8f-9a0b-1c2d3e4f5a6b"
 
+// The module also runs on its own at the points of the clock its installation
+// falls on, so a test runs as an installation whose hourly turn is not due while
+// it runs, whatever the time of day.
+func unhurried(t *testing.T) string {
+	t.Helper()
+	for attempt := range 100 {
+		candidate := fmt.Sprintf("%s-%d", installation, attempt)
+		governed, err := governor.New(slog.New(slog.DiscardHandler), candidate, governor.Budget{Scans: 1, ScanBytesPerSecond: 256 << 20, Uploads: 1, UploadBytesPerSecond: 1 << 20})
+		if err != nil {
+			t.Fatal(err)
+		}
+		schedule, err := governed.Periodic(integrity.Name, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if now := time.Now(); schedule.Next(now).Sub(now) > 10*time.Minute {
+			return candidate
+		}
+	}
+	t.Fatal("no installation has the module's turn more than ten minutes away")
+	return ""
+}
+
 type logged struct {
 	mu     sync.Mutex
 	buffer bytes.Buffer
@@ -80,7 +103,7 @@ func prepare(t *testing.T) *harness {
 	if err := os.Chmod(h.base, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	governed, err := governor.New(slog.New(slog.NewJSONHandler(h.log, nil)), installation, governor.Budget{Scans: 1, ScanBytesPerSecond: 256 << 20, Uploads: 1, UploadBytesPerSecond: 1 << 20})
+	governed, err := governor.New(slog.New(slog.NewJSONHandler(h.log, nil)), unhurried(t), governor.Budget{Scans: 1, ScanBytesPerSecond: 256 << 20, Uploads: 1, UploadBytesPerSecond: 1 << 20})
 	if err != nil {
 		t.Fatal(err)
 	}
