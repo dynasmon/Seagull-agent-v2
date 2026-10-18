@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
@@ -390,6 +391,9 @@ func (q *queue) admit(records []Record) (Receipt, error) {
 	if rotate {
 		if err := q.rotate(first); err != nil {
 			q.budget.add(q.stream, -needed)
+			if roomless(err) && q.admitting() {
+				return Receipt{}, q.budget.crowd(err)
+			}
 			return Receipt{}, err
 		}
 	}
@@ -406,16 +410,22 @@ func (q *queue) admit(records []Record) (Receipt, error) {
 	}
 	if err := writer.Flush(); err != nil {
 		q.budget.add(q.stream, -frames)
+		failed := fmt.Errorf("write to %s: %w", q.path(last.name()), err)
 		if undone := errors.Join(file.Truncate(last.size), q.host.sync(file)); undone != nil {
 			q.fail(fmt.Errorf("discard an unfinished write to %s: %w", q.path(last.name()), undone))
+			return Receipt{}, failed
 		}
-		return Receipt{}, fmt.Errorf("write to %s: %w", q.path(last.name()), err)
+		if roomless(err) {
+			return Receipt{}, q.budget.crowd(failed)
+		}
+		return Receipt{}, failed
 	}
 	if err := q.host.sync(file); err != nil {
 		failed := fmt.Errorf("sync %s: %w", q.path(last.name()), err)
 		q.fail(failed)
 		return Receipt{}, fmt.Errorf("%w: %w", ErrUnavailable, failed)
 	}
+	q.budget.relieve()
 	q.mu.Lock()
 	q.segments[len(q.segments)-1].size += frames
 	q.next += uint64(len(records))
@@ -423,6 +433,10 @@ func (q *queue) admit(records []Record) (Receipt, error) {
 	q.announce()
 	q.mu.Unlock()
 	return Receipt{Stream: q.stream, First: first, Last: first + uint64(len(records)) - 1}, nil
+}
+
+func roomless(err error) bool {
+	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)
 }
 
 func (q *queue) rotate(first uint64) error {
@@ -763,7 +777,7 @@ func (q *queue) pressure(records int, err error) {
 	switch {
 	case errors.Is(err, ErrFull) && paused.IsZero():
 		q.logger.Warn("spool_admission_paused", q.attributes(slog.Any("reason", err),
-			slog.String("recovery", "none: collectors keep their place in what they read and admit again once delivery frees room or records expire"))...)
+			slog.String("recovery", "none: collectors keep their place in what they read and admit again once delivery frees room, records expire or the filesystem has room again"))...)
 	case err == nil && !paused.IsZero():
 		q.logger.Info("spool_admission_resumed", q.attributes(slog.Duration("paused", now.Sub(paused)), slog.Uint64("refused", withheld))...)
 	}

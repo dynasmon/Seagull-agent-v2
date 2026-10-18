@@ -179,7 +179,7 @@ func open(root *os.Root, limits Limits, logger *slog.Logger, held host) (*Spool,
 		return nil, err
 	}
 	room := func() (int64, error) { return held.available(lock) }
-	spooled := &Spool{lock: lock, budget: &budget{room: room, held: map[Stream]int64{}}, unavailable: make(chan struct{})}
+	spooled := &Spool{lock: lock, budget: &budget{room: room, now: held.now, held: map[Stream]int64{}}, unavailable: make(chan struct{})}
 	spooled.budget.set(limits)
 	if err := spooled.recover(root, logger, held, limits); err != nil {
 		spooled.Close()
@@ -367,12 +367,15 @@ func (s *Spool) expire() bool {
 
 type budget struct {
 	room func() (int64, error)
+	now  func() time.Time
 
-	mu     sync.Mutex
-	limit  int64
-	record int64
-	used   int64
-	held   map[Stream]int64
+	mu      sync.Mutex
+	limit   int64
+	record  int64
+	used    int64
+	held    map[Stream]int64
+	crowded time.Time
+	wait    time.Duration
 }
 
 func (b *budget) set(limits Limits) {
@@ -395,6 +398,9 @@ func (b *budget) reserve(stream Stream, bytes int64) error {
 	case b.held[stream]+bytes > share:
 		return fmt.Errorf("%w: %s holds %d bytes, of the %d its share of the spool allows, and %d more do not fit",
 			ErrFull, stream, b.held[stream], share, bytes)
+	case b.waiting():
+		return fmt.Errorf("%w: the filesystem that holds it had no room for its last write, and it writes again from %s",
+			ErrFull, b.crowded.Add(b.wait).UTC().Format(time.RFC3339Nano))
 	}
 	free, err := b.room()
 	if err != nil {
@@ -413,12 +419,28 @@ func (b *budget) left(stream Stream) int64 {
 	b.mu.Lock()
 	numerator, denominator := stream.share()
 	left := min(b.limit-reserved-b.used, b.limit/denominator*numerator-b.held[stream])
+	waiting := b.waiting()
 	b.mu.Unlock()
 	free, err := b.room()
-	if err != nil {
+	if err != nil || waiting {
 		return 0
 	}
 	return max(min(left, free-minFree), 0)
+}
+
+func (b *budget) waiting() bool { return b.wait > 0 && b.now().Before(b.crowded.Add(b.wait)) }
+
+func (b *budget) crowd(err error) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.crowded, b.wait = b.now(), min(max(2*b.wait, time.Second), time.Minute)
+	return fmt.Errorf("%w: the filesystem that holds it had no room for a write, and it writes again in %s: %w", ErrFull, b.wait, err)
+}
+
+func (b *budget) relieve() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.wait = 0
 }
 
 func (b *budget) add(stream Stream, bytes int64) {
