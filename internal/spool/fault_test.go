@@ -121,6 +121,62 @@ func TestASyncThatFailsStopsTheStreamAdmittingUntilItIsReopened(t *testing.T) {
 	}
 }
 
+func TestASpoolThatCanNoLongerMakeRecordsDurableSaysSoToWhoeverWaitsOnIt(t *testing.T) {
+	for name, fail := range map[string]func(disk *faulty){
+		"a sync that fails":                            func(disk *faulty) { disk.syncs = 0 },
+		"an unfinished write that cannot be discarded": func(disk *faulty) { disk.writes, disk.syncs, disk.cut = 0, 0, 10 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := spoolDirectory(t)
+			disk := healthy()
+			held, _ := openWith(t, directory, disk)
+			admitted(t, held, "event-1", 100)
+			if _, err := held.Admit(Inventory, Record{ID: "inventory-1", Payload: []byte("kept")}); err != nil {
+				t.Fatalf("admit: %v", err)
+			}
+			unavailable := held.Unavailable()
+			if signalled(unavailable) {
+				t.Fatal("a spool that makes every record durable says it can no longer")
+			}
+			if err := held.Acknowledge(Inventory, 1); err != nil {
+				t.Fatalf("acknowledge: %v", err)
+			}
+			if signalled(unavailable) {
+				t.Fatal("an acknowledgement made the spool say it can no longer make records durable")
+			}
+
+			fail(disk)
+			if _, err := held.Admit(Events, Record{ID: "event-2", Payload: []byte(strings.Repeat("unconfirmed", 100))}); err == nil {
+				t.Fatal("a record the spool could not make durable was admitted")
+			}
+			if !signalled(unavailable) || !signalled(held.Unavailable()) {
+				t.Fatal("a spool whose stream can no longer make records durable does not say so")
+			}
+			if kept := held.Stats().Streams[0]; kept.Stream != Events || kept.Unavailable == nil {
+				t.Fatalf("the spool does not say which stream can no longer make records durable: %+v", kept)
+			}
+			closed(t, held)
+
+			held, _ = openWith(t, directory, healthy())
+			if signalled(held.Unavailable()) {
+				t.Fatal("a spool opened again on what it holds says it can no longer make records durable")
+			}
+			if got := identifiers(t, held); len(got) == 0 || got[0] != "event-1" || len(got) > 2 || len(got) == 2 && got[1] != "event-2" {
+				t.Fatalf("after reopening, read back %q", got)
+			}
+		})
+	}
+}
+
+func signalled(signal <-chan struct{}) bool {
+	select {
+	case <-signal:
+		return true
+	default:
+		return false
+	}
+}
+
 func TestAnAcknowledgementThatCannotBeWrittenLeavesTheRecordsOutstanding(t *testing.T) {
 	for name, fail := range map[string]func(disk *faulty){
 		"a write that fails": func(disk *faulty) { disk.writes = 0 },
