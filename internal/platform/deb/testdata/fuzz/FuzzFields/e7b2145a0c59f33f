@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("Version: 0\nArchitecture:  \nPackage: 0")

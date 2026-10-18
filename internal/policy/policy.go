@@ -17,10 +17,10 @@ import (
 	"fmt"
 	"slices"
 
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/dsse"
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	assessmentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/assessment/v1"
 	policyv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/policy/v1"
@@ -33,6 +33,7 @@ const (
 	MaxPayloadBytes  = 1 << 20
 	MaxEnvelopeBytes = MaxPayloadBytes + 4<<10
 	MaxSignatures    = 4
+	MaxPayloadValues = 1 << 16
 )
 
 var checked = (&assessmentv1.Check{}).ProtoReflect().Descriptor().FullName()
@@ -97,7 +98,7 @@ func (v *Verifier) Verify(served []byte) (Verified, error) {
 		return Verified{}, fmt.Errorf("%w: it is longer than %d bytes", ErrMalformed, MaxEnvelopeBytes)
 	}
 	var envelope policyv1.SignedPolicy
-	if err := proto.Unmarshal(served, &envelope); err != nil {
+	if err := protocol.Decode(served, &envelope, protocol.MaxAnswerValues); err != nil {
 		return Verified{}, fmt.Errorf("%w: it is not a signed policy", ErrMalformed)
 	}
 	payload, signatures := envelope.GetPayload(), envelope.GetSignatures()
@@ -128,7 +129,7 @@ func (v *Verifier) Verify(served []byte) (Verified, error) {
 	slices.Sort(signedBy)
 
 	var policy policyv1.Policy
-	if err := proto.Unmarshal(payload, &policy); err != nil {
+	if err := protocol.Decode(payload, &policy, MaxPayloadValues); err != nil {
 		return Verified{}, fmt.Errorf("%w: its payload is not a policy", ErrMalformed)
 	}
 	if err := known(policy.ProtoReflect()); err != nil {

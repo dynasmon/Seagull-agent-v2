@@ -1,0 +1,67 @@
+name: fuzz
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: how long each fuzz target runs
+        default: 2m
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.26.9"
+
+jobs:
+  fuzz:
+    name: every fuzz target for minutes, from what earlier nights found
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - id: corpus
+        name: find where Go keeps the inputs it found interesting
+        run: echo "path=$(go env GOCACHE)/fuzz" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ${{ steps.corpus.outputs.path }}
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+      - name: fuzz every target
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '2m' }}
+        run: |
+          if [[ ! "$FUZZTIME" =~ ^[1-9][0-9]*(s|m|h|x)$ ]]; then
+            echo "a fuzz target runs for a number of seconds, minutes, hours or runs, such as 2m, and not for $FUZZTIME" >&2
+            exit 1
+          fi
+          make fuzz FUZZTIME="$FUZZTIME"
+      - name: gather the inputs that failed, to be kept under testdata/fuzz once fixed
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/failed"
+          git ls-files --others --exclude-standard -z -- ':(glob)**/testdata/fuzz/**' | while IFS= read -r -d '' found; do
+            mkdir -p "$RUNNER_TEMP/failed/$(dirname "$found")"
+            cp -- "$found" "$RUNNER_TEMP/failed/$found"
+          done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: failure()
+        with:
+          name: failing-fuzz-inputs
+          path: ${{ runner.temp }}/failed
+          if-no-files-found: ignore
+          retention-days: 30

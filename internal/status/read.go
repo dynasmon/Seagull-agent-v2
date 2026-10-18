@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"syscall"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
@@ -39,6 +40,9 @@ func ReadOwned(directory string, account int) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("open %s: %w", directory, err)
 	}
 	defer root.Close()
+	if opened, err := root.Stat("."); err != nil || !os.SameFile(opened, described) {
+		return Snapshot{}, fmt.Errorf("%w: %s changed while it was being opened", ErrInsecure, directory)
+	}
 	path := filepath.Join(directory, name)
 	described, err = root.Lstat(name)
 	switch {
@@ -52,7 +56,7 @@ func ReadOwned(directory string, account int) (Snapshot, error) {
 	if err := private(path, described, account); err != nil {
 		return Snapshot{}, err
 	}
-	file, err := root.Open(name)
+	file, err := root.OpenFile(name, os.O_RDONLY|files.NoFollow|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("open %s: %w", path, err)
 	}

@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dynasmon/Seagull-agent-v2/internal/platform/files"
 	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
 
@@ -90,7 +89,7 @@ func (s *Staging) Offer() ([]byte, error) {
 func (s *Staging) Take(release *updatev1.Release, into *os.Root) error {
 	payload := release.GetPayload()
 	name := PackageName(payload.GetSha256())
-	source, err := s.root.OpenFile(name, os.O_RDONLY|files.NoFollow, 0)
+	source, err := s.root.OpenFile(name, reading, 0)
 	if err != nil {
 		return fmt.Errorf("%w: %s was not staged: %v", ErrUnverified, name, err)
 	}
@@ -106,7 +105,7 @@ func (s *Staging) Take(release *updatev1.Release, into *os.Root) error {
 }
 
 func verified(root *os.Root, name string, payload *updatev1.Payload) (bool, error) {
-	file, err := root.OpenFile(name, os.O_RDONLY|files.NoFollow, 0)
+	file, err := root.OpenFile(name, reading, 0)
 	if err != nil {
 		return false, err
 	}

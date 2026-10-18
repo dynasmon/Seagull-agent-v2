@@ -26,7 +26,7 @@ import (
 	policyv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/policy/v1"
 )
 
-func local(t *testing.T, sections string) config.Config {
+func local(t testing.TB, sections string) config.Config {
 	t.Helper()
 	directory := t.TempDir()
 	if err := os.Chmod(directory, 0o755); err != nil {

@@ -371,7 +371,7 @@ func scanValue(decoder *json.Decoder, path string, depth int) error {
 			}
 		}
 	default:
-		written := map[string]bool{}
+		var written []string
 		for decoder.More() {
 			key, err := decoder.Token()
 			if err != nil {
@@ -381,10 +381,10 @@ func scanValue(decoder *json.Decoder, path string, depth int) error {
 			if !named {
 				return errors.New("it is not a configuration")
 			}
-			if written[name] {
+			if slices.ContainsFunc(written, func(other string) bool { return strings.EqualFold(other, name) }) {
 				return fmt.Errorf("%s is set twice", setting(join(path, name)))
 			}
-			written[name] = true
+			written = append(written, name)
 			if err := scanValue(decoder, join(path, name), depth+1); err != nil {
 				return err
 			}

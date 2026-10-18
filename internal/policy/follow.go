@@ -13,9 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/dynasmon/Seagull-agent-v2/internal/link"
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	"github.com/dynasmon/Seagull-agent-v2/internal/transport"
 	controlv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/control/v1"
@@ -169,7 +168,7 @@ func (f *Follower) Ask(ctx context.Context) time.Duration {
 
 func refusal(reply transport.Reply) *controlv1.Refusal {
 	var said controlv1.Refusal
-	if proto.Unmarshal(reply.Body, &said) != nil {
+	if protocol.Decode(reply.Body, &said, protocol.MaxAnswerValues) != nil {
 		return &controlv1.Refusal{}
 	}
 	return &said

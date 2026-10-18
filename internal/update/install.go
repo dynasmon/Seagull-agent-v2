@@ -12,8 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
@@ -84,7 +83,7 @@ func (i *Installer) take(ctx context.Context) error {
 	offered, err := i.options.Staging.Offer()
 	var offer updatev1.Offer
 	if err == nil {
-		err = proto.Unmarshal(offered, &offer)
+		err = protocol.Decode(offered, &offer, MaxOfferValues)
 	}
 	if err != nil {
 		return errors.Join(fmt.Errorf("read what the agent staged: %w", err), i.options.Staging.Clear())

@@ -16,13 +16,13 @@ type estate struct {
 	anchor *update.Root
 }
 
-func newEstate(t *testing.T) estate {
+func newEstate(t testing.TB) estate {
 	t.Helper()
 	owner := newSigner(t)
 	return estate{owner: owner, anchor: anchored(t, rootOf(1, []signer{owner}, 1, []signer{owner}, 1), owner)}
 }
 
-func (e estate) offer(t *testing.T, version string, catalog *updatev1.Catalog) *updatev1.Offer {
+func (e estate) offer(t testing.TB, version string, catalog *updatev1.Catalog) *updatev1.Offer {
 	t.Helper()
 	offer := &updatev1.Offer{Version: version, Roots: []*updatev1.Envelope{sign(t, rootOf(1, []signer{e.owner}, 1, []signer{e.owner}, 1), update.RootPayloadType, e.owner)}}
 	if catalog != nil {

@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/dsse"
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
@@ -38,6 +39,9 @@ const (
 	MaxEnvelopeBytes    = MaxPayloadBytes + 16<<10
 	MaxOfferBytes       = 4 << 20
 	MaxSignatures       = 16
+	MaxRoots            = 64
+	MaxOfferValues      = (MaxRoots + 1) * protocol.MaxAnswerValues
+	MaxCatalogValues    = MaxReleases * 256
 	MaxKeys             = 16
 	MaxRoleKeys         = 8
 	MaxReleases         = 256
@@ -102,7 +106,7 @@ func decode(served []byte) (*updatev1.Envelope, error) {
 		return nil, fmt.Errorf("%w: the envelope is longer than %d bytes", ErrMalformed, MaxEnvelopeBytes)
 	}
 	var envelope updatev1.Envelope
-	if err := proto.Unmarshal(served, &envelope); err != nil {
+	if err := protocol.Decode(served, &envelope, protocol.MaxAnswerValues); err != nil {
 		return nil, fmt.Errorf("%w: it is not an envelope", ErrMalformed)
 	}
 	return &envelope, nil

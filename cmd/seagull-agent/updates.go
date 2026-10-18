@@ -215,8 +215,13 @@ func installRelease(ctx context.Context, path string, stderr io.Writer) int {
 	if err != nil {
 		return refused(err)
 	}
+	installation, err := os.OpenRoot(state)
+	if err != nil {
+		return refused(err)
+	}
+	defer installation.Close()
 	generation := func() uint32 {
-		held, err := opened(filepath.Join(state, updateDirectory))
+		held, err := opened(installation, updateDirectory)
 		if err != nil || held == nil {
 			return 1
 		}
@@ -242,7 +247,7 @@ func installRelease(ctx context.Context, path string, stderr io.Writer) int {
 		Health:     healthy(filepath.Join(state, statusDirectory), owner, time.Duration(settings.Updates.CheckWithin)),
 		Logger:     logger,
 	}
-	staged, err := opened(filepath.Join(state, stagedDirectory))
+	staged, err := opened(installation, stagedDirectory)
 	if err != nil {
 		return refused(err)
 	}
@@ -260,12 +265,17 @@ func installRelease(ctx context.Context, path string, stderr io.Writer) int {
 	return 0
 }
 
-func opened(path string) (*os.Root, error) {
-	held, err := os.OpenRoot(path)
-	if errors.Is(err, fs.ErrNotExist) {
+func opened(installation *os.Root, name string) (*os.Root, error) {
+	described, err := installation.Lstat(name)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
 		return nil, nil
+	case err != nil:
+		return nil, err
+	case !described.IsDir():
+		return nil, fmt.Errorf("%s is not a directory", filepath.Join(installation.Name(), name))
 	}
-	return held, err
+	return installation.OpenRoot(name)
 }
 
 func ownerOf(state string) (int, error) {

@@ -27,7 +27,7 @@ type signer struct {
 	der []byte
 }
 
-func newSigner(t *testing.T) signer {
+func newSigner(t testing.TB) signer {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -65,7 +65,7 @@ func rootOf(version uint64, rootKeys []signer, rootThreshold uint32, catalogKeys
 	return root
 }
 
-func sign(t *testing.T, message proto.Message, payloadType string, keys ...signer) *updatev1.Envelope {
+func sign(t testing.TB, message proto.Message, payloadType string, keys ...signer) *updatev1.Envelope {
 	t.Helper()
 	payload, err := proto.MarshalOptions{Deterministic: true}.Marshal(message)
 	if err != nil {
@@ -83,7 +83,7 @@ func sign(t *testing.T, message proto.Message, payloadType string, keys ...signe
 	return envelope
 }
 
-func encoded(t *testing.T, envelope *updatev1.Envelope) []byte {
+func encoded(t testing.TB, envelope *updatev1.Envelope) []byte {
 	t.Helper()
 	served, err := proto.MarshalOptions{Deterministic: true}.Marshal(envelope)
 	if err != nil {
@@ -92,7 +92,7 @@ func encoded(t *testing.T, envelope *updatev1.Envelope) []byte {
 	return served
 }
 
-func anchored(t *testing.T, root *updatev1.Root, keys ...signer) *update.Root {
+func anchored(t testing.TB, root *updatev1.Root, keys ...signer) *update.Root {
 	t.Helper()
 	trusted, err := update.Anchor(encoded(t, sign(t, root, update.RootPayloadType, keys...)), written)
 	if err != nil {

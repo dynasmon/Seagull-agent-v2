@@ -1,6 +1,7 @@
 // Package logindefs reads /etc/login.defs as the shadow utilities read it: a
 // name, white space and a value up to a double quote, the last line naming an
-// item being the one they apply.
+// item being the one they apply, and a line naming one without a value setting
+// nothing.
 package logindefs
 
 import (
@@ -38,14 +39,13 @@ func Read() (map[string]Setting, error) {
 	}
 	held := map[string]Setting{}
 	for index, line := range strings.Split(string(content), "\n") {
-		line = strings.TrimRight(line, " \t\r\n")
+		line = strings.TrimRight(line, " \t\n\v\f\r")
 		name := strings.TrimLeft(line, " \t")
 		if name == "" || strings.HasPrefix(name, "#") {
 			continue
 		}
 		end := strings.IndexAny(name, " \t")
 		if end < 0 {
-			held[name] = Setting{File: path, Line: index + 1}
 			continue
 		}
 		value := strings.TrimLeft(name[end:], " \t\"")

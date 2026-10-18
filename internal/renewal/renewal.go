@@ -23,6 +23,7 @@ import (
 	"github.com/dynasmon/Seagull-agent-v2/internal/enrollment"
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/pki"
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	"github.com/dynasmon/Seagull-agent-v2/internal/transport"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
@@ -237,7 +238,7 @@ func (r *Renewer) adopt(published, peer []*x509.Certificate, now time.Time) (boo
 func refusal(reply transport.Reply) error {
 	refused := &Refusal{Status: reply.Status}
 	var told controlv1.Refusal
-	if err := proto.Unmarshal(reply.Body, &told); err == nil {
+	if err := protocol.Decode(reply.Body, &told, protocol.MaxAnswerValues); err == nil {
 		refused.Code, refused.Detail = secrets.Bounded(told.GetCode()), secrets.Bounded(told.GetDetail())
 	}
 	return refused

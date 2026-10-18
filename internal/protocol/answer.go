@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -192,7 +191,7 @@ func acknowledged(sent int, answer Answer) Verdict {
 		return Verdict{Outcome: Unexpected, Record: -1, Reason: fmt.Errorf("%w: it answered %d with %s", ErrNoAcknowledgement, answer.Status, secrets.Shown(answer.ContentType))}
 	}
 	var acknowledgement ingestv1.BatchAck
-	if err := proto.Unmarshal(answer.Body, &acknowledgement); err != nil {
+	if err := Decode(answer.Body, &acknowledgement, MaxAnswerValues); err != nil {
 		return Verdict{Outcome: Unexpected, Record: -1, Reason: fmt.Errorf("%w: %s", ErrNoAcknowledgement, secrets.Bounded(err.Error()))}
 	}
 	var missing string
@@ -222,7 +221,7 @@ func (r Route) refused(sent []Sent, refusal *ingestv1.Rejection, said *Refusal, 
 	}
 	said.Record = index
 	record := r.shape().record()
-	if err := proto.Unmarshal(sent[index].Record, record); err != nil {
+	if err := Decode(sent[index].Record, record, len(sent[index].Record)); err != nil {
 		return Verdict{Outcome: RecordRefused, Record: index, Reason: said}
 	}
 	if incompatibility, unspoken := unspoken(record.ProtoReflect(), index, refusal); unspoken {
@@ -266,7 +265,7 @@ func instant(record protoreflect.Message, path string) (time.Time, bool) {
 
 func refusalIn(answer Answer) (*ingestv1.Rejection, bool) {
 	var refusal ingestv1.Rejection
-	if !protobuf(answer.ContentType) || proto.Unmarshal(answer.Body, &refusal) != nil || refusal.GetCode() == "" {
+	if !protobuf(answer.ContentType) || Decode(answer.Body, &refusal, MaxAnswerValues) != nil || refusal.GetCode() == "" {
 		return nil, false
 	}
 	return &refusal, true

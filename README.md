@@ -212,7 +212,9 @@ notes name, for one built from another commit; `--bundle` checks against an
 attached statement instead of asking GitHub. No signing key exists to be kept or lost:
 the workflow signs with a certificate that expires minutes later. Tag `v0.1.0`
 is package version `0.1.0-1`, and a pre-release such as `v0.1.0-rc.1` is
-`0.1.0~rc.1-1`.
+`0.1.0~rc.1-1`. A pre-release is a word and its numbers, such as `rc.2`: dpkg
+would order another kind differently from the agent, or give two of them one
+package version, so the workflow refuses to package it.
 
 A release can be rebuilt and compared with the one published: `make package`
 at its tag, with Go 1.26.9, writes the same package and bill of materials, byte
@@ -429,10 +431,11 @@ downloads both packages, checks every byte against the catalog and stages them.
 
 The installer, `seagull-agent-update.service`, runs as root and only when
 `seagull-agent-update.path` sees a staged release or a pending installation. It
-trusts nothing the agent's account wrote: it verifies what was staged again
-from `updates.root` and what it verified before, copies each package where only
-root writes and checks the copy, and has dpkg confirm the package is the
-release. It installs with apt, keeping the configuration, then waits
+trusts nothing the agent's account wrote: it follows no link and waits on no
+pipe the account put in its way, verifies what was staged again from
+`updates.root` and what it verified before, counting what a message holds
+before decoding it, copies each package where only root writes and checks the
+copy, and has dpkg confirm the package is the release. It installs with apt, keeping the configuration, then waits
 `updates.check_within` for a run of the new release, started after the
 installation, to say it runs as it should for a whole status interval; unless
 one does, it installs the release before again and waits for it the same way.
@@ -522,13 +525,22 @@ dependency from the module proxy, so a checkout is all a build needs.
 ```bash
 make build        # dist/seagull-agent
 make verify       # formatting, vet, module graph, tests, race detector and build
+make fuzz         # every fuzz target for FUZZTIME (10s); an input that fails is kept under testdata/fuzz
 make vulncheck    # known vulnerabilities reachable from the agent
 make package      # dist/deb/seagull-agent_<version>_amd64.deb and .spdx.json, of the commit checked out
 make native-gate  # installs that package on this host, as root: use a disposable host
 ```
 
 `make verify` runs the unit, architecture and compatibility suites;
-`tests/architecture` holds the package boundaries as tests. CI also packages
+`tests/architecture` holds the package boundaries as tests, and refuses code
+that reads a file or a stream without a bound or decodes a message without
+counting what it holds. Every parser of what the agent did not write itself in
+the same run, from its configuration and the platform's answers to its own
+state and what the host's files and programs say, has a fuzz target that
+`make test` runs over its seeds and every input kept under its `testdata/fuzz`.
+CI fuzzes every target for ten seconds on each push and for two minutes every
+night, from the inputs earlier nights found; an input that fails is attached to
+the run, to be kept under `testdata/fuzz` once fixed. CI also packages
 every commit twice on its runner and once more on a second builder and requires
 the same bytes from all three, and runs the native gate, which
 takes the installed service through enrollment, renewal, collection, delivery,

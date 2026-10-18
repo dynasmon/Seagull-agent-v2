@@ -20,7 +20,8 @@ func TestAReleaseIsPackagedAsTheDebianVersionGoStampedItWith(t *testing.T) {
 			t.Errorf("an agent built as %s is packaged as %q (%v), want %q", stamped, got, err, want)
 		}
 	}
-	for _, stamped := range []string{"", "(devel)", "v0.0.0-20260926004346-7d7db5969ad5+dirty", "0.1.0", "v0.1", "v01.2.3", "v1.2.3-", "v1.2.3-rc..1"} {
+	for _, stamped := range []string{"", "(devel)", "v0.0.0-20260926004346-7d7db5969ad5+dirty", "0.1.0", "v0.1", "v01.2.3", "v1.2.3-", "v1.2.3-rc..1",
+		"v1.2.3-rc-1", "v1.2.3-rc9", "v1.2.3-rc.01", "v1.2.3-1", "v1.2.3-rc.1234567890", "v18446744073709551616.0.0"} {
 		if got, err := Version(stamped); err == nil {
 			t.Errorf("an agent built as %q is packaged as %q", stamped, got)
 		}

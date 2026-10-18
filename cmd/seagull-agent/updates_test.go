@@ -115,6 +115,41 @@ func TestAPackageIsTheReleaseItIsSaidToBeOnlyWhenDpkgSaysSo(t *testing.T) {
 	}
 }
 
+func TestTheInstallerOpensOnlyDirectoriesTheInstallationHolds(t *testing.T) {
+	state, outside := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "ready"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(state, "staged"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(state, "update")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "status"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	installation, err := os.OpenRoot(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer installation.Close()
+
+	staged, err := opened(installation, "staged")
+	if err != nil || staged == nil || staged.Name() != filepath.Join(state, "staged") {
+		t.Fatalf("the staging area of the installation was not opened: %v", err)
+	}
+	staged.Close()
+	if held, err := opened(installation, "absent"); held != nil || err != nil {
+		t.Fatalf("a directory never made was opened: %v", err)
+	}
+	for _, name := range []string{"update", "status"} {
+		if held, err := opened(installation, name); held != nil || err == nil {
+			t.Fatalf("%s, which is not a directory of the installation, was opened as one", name)
+		}
+	}
+}
+
 func TestTheInstallerRunsOnlyAsRoot(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("the test runs as root, where the installer runs")

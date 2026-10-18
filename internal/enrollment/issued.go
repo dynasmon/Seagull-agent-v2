@@ -10,10 +10,9 @@ import (
 	"slices"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/dynasmon/Seagull-agent-v2/internal/identity"
 	"github.com/dynasmon/Seagull-agent-v2/internal/pki"
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	agentv1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/agent/v1"
 )
@@ -70,7 +69,7 @@ func read(issued []byte) (answer, error) {
 		return answer{}, fmt.Errorf("%w: it is larger than %d bytes", ErrUnreadable, MaxIssuedBytes)
 	}
 	var message agentv1.IssuedCertificate
-	if err := proto.Unmarshal(issued, &message); err != nil {
+	if err := protocol.Decode(issued, &message, protocol.MaxAnswerValues); err != nil {
 		return answer{}, fmt.Errorf("%w: it is not a %s: %s", ErrUnreadable, message.ProtoReflect().Descriptor().FullName(), secrets.Bounded(err.Error()))
 	}
 	leaves, err := certificates("certificate_pem", message.GetCertificatePem(), 1, false)

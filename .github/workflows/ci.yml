@@ -46,6 +46,36 @@ jobs:
           make build
           dist/seagull-agent -version
 
+  fuzz:
+    name: every fuzz target for a few seconds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: fuzz every target from its seeds and the inputs kept under testdata/fuzz
+        run: make fuzz FUZZTIME=10s
+      - name: gather the inputs that failed, to be kept under testdata/fuzz once fixed
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/failed"
+          git ls-files --others --exclude-standard -z -- ':(glob)**/testdata/fuzz/**' | while IFS= read -r -d '' found; do
+            mkdir -p "$RUNNER_TEMP/failed/$(dirname "$found")"
+            cp -- "$found" "$RUNNER_TEMP/failed/$found"
+          done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: failure()
+        with:
+          name: failing-fuzz-inputs
+          path: ${{ runner.temp }}/failed
+          if-no-files-found: ignore
+          retention-days: 30
+
   package:
     name: debian package on ubuntu 24.04
     runs-on: ubuntu-24.04

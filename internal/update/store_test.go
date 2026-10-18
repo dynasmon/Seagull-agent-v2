@@ -10,7 +10,7 @@ import (
 	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
 
-func directory(t *testing.T) *os.Root {
+func directory(t testing.TB) *os.Root {
 	t.Helper()
 	root, err := os.OpenRoot(t.TempDir())
 	if err != nil {

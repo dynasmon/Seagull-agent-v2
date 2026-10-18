@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/dynasmon/Seagull-agent-v2/internal/protocol"
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
 	updatev1 "github.com/dynasmon/Seagull-contracts/gen/go/seagull/update/v1"
 )
@@ -44,7 +45,7 @@ func (r *Root) Catalog(envelope *updatev1.Envelope, now time.Time) (*Catalog, er
 		return nil, fmt.Errorf("the catalog keys of root %d did not sign it: %w", r.Version(), err)
 	}
 	var catalog updatev1.Catalog
-	if err := proto.Unmarshal(envelope.GetPayload(), &catalog); err != nil {
+	if err := protocol.Decode(envelope.GetPayload(), &catalog, MaxCatalogValues); err != nil {
 		return nil, fmt.Errorf("%w: its payload is not a catalog", ErrMalformed)
 	}
 	if err := known(catalog.ProtoReflect()); err != nil {
