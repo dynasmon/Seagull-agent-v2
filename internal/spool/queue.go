@@ -90,6 +90,7 @@ type queue struct {
 	budget *budget
 	logger *slog.Logger
 	host   host
+	broke  func()
 
 	io sync.Mutex
 
@@ -466,7 +467,8 @@ func (q *queue) fail(err error) {
 	q.broken = err
 	q.mu.Unlock()
 	q.logger.Error("spool_unavailable", q.attributes(slog.Any("error", err),
-		slog.String("recovery", "restart the agent, which reads back what the spool holds before it admits anything more"))...)
+		slog.String("recovery", "none: the agent stops, and starts again on what the spool holds once the filesystem that holds it takes writes again"))...)
+	q.broke()
 }
 
 func (q *queue) read(from uint64, most, bytes int) ([]Entry, error) {

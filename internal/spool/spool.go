@@ -142,9 +142,11 @@ func (system) available(file *os.File) (int64, error) { return files.Available(f
 func (system) now() time.Time { return time.Now() }
 
 type Spool struct {
-	lock   *os.File
-	budget *budget
-	queues []*queue
+	lock        *os.File
+	budget      *budget
+	queues      []*queue
+	unavailable chan struct{}
+	breaking    sync.Once
 
 	mu     sync.Mutex
 	closed bool
@@ -177,7 +179,7 @@ func open(root *os.Root, limits Limits, logger *slog.Logger, held host) (*Spool,
 		return nil, err
 	}
 	room := func() (int64, error) { return held.available(lock) }
-	spooled := &Spool{lock: lock, budget: &budget{room: room, held: map[Stream]int64{}}}
+	spooled := &Spool{lock: lock, budget: &budget{room: room, held: map[Stream]int64{}}, unavailable: make(chan struct{})}
 	spooled.budget.set(limits)
 	if err := spooled.recover(root, logger, held, limits); err != nil {
 		spooled.Close()
@@ -220,7 +222,7 @@ func (s *Spool) recover(root *os.Root, logger *slog.Logger, held host, limits Li
 		if err != nil {
 			return err
 		}
-		kept := &queue{stream: stream, root: directory, budget: s.budget, logger: logger, host: held, maxAge: limits.MaxAge[stream]}
+		kept := &queue{stream: stream, root: directory, budget: s.budget, logger: logger, host: held, broke: s.broke, maxAge: limits.MaxAge[stream]}
 		s.queues = append(s.queues, kept)
 		if err := kept.recover(); err != nil {
 			return err
@@ -297,6 +299,10 @@ func (s *Spool) Admitted(stream Stream) <-chan struct{} {
 	}
 	return kept.admitted()
 }
+
+func (s *Spool) Unavailable() <-chan struct{} { return s.unavailable }
+
+func (s *Spool) broke() { s.breaking.Do(func() { close(s.unavailable) }) }
 
 func (s *Spool) Room(stream Stream) int64 {
 	kept, err := s.queue(stream)
