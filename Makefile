@@ -12,7 +12,7 @@ AHEAD = v1.999.0-gate
 # that points at sibling checkouts.
 export GOWORK := off
 
-.PHONY: help fmt fmt-check vet mod-check lint test test-race fuzz build package ahead native-gate vulncheck clean verify
+.PHONY: help fmt fmt-check vet mod-check lint test test-race fuzz build package ahead native-gate chaos vulncheck clean verify
 
 help:
 	@echo "fmt         format the module"
@@ -27,6 +27,7 @@ help:
 	@echo "package     build the Debian package of the commit checked out, and its SPDX bill of materials, into $(DIST)/deb"
 	@echo "ahead       package the same commit as release $(AHEAD) into $(DIST)/ahead, which the native gate updates the agent to"
 	@echo "native-gate install that package on THIS host, as root, and run it as a service: use a disposable host"
+	@echo "chaos       install that package on THIS host, as root, and fail what the service depends on: use a disposable host"
 	@echo "vulncheck   scan reachable dependencies"
 	@echo "verify      the full gate: lint, mod-check, tests and build"
 
@@ -89,11 +90,12 @@ ahead:
 	$(MAKE) -C $(DIST)/ahead/source package DIST=$(abspath $(DIST)/ahead)
 	rm -rf $(DIST)/ahead/source
 
-native-gate:
+native-gate chaos:
 	@test "$(words $(wildcard $(DIST)/deb/*.deb))" = 1 || { echo "$(DIST)/deb holds no single package: make package first" >&2; exit 1; }
 	@test "$(words $(wildcard $(DIST)/ahead/deb/*.deb))" = 1 || { echo "$(DIST)/ahead/deb holds no single package: make ahead first" >&2; exit 1; }
 	$(GO) test -c -o $(DIST)/native.test ./tests/native
-	sudo $(DIST)/native.test -test.v -test.count=1 -test.timeout=25m -package "$(abspath $(wildcard $(DIST)/deb/*.deb))" -ahead "$(abspath $(wildcard $(DIST)/ahead/deb/*.deb))"
+	sudo $(DIST)/native.test -test.v -test.count=1 -test.timeout=$(if $(filter chaos,$@),45m,25m) -test.run '$(if $(filter chaos,$@),^TestTheInstalledAgentAccountsForEveryEventThroughFailures$$,^TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge$$)' \
+		-package "$(abspath $(wildcard $(DIST)/deb/*.deb))" -ahead "$(abspath $(wildcard $(DIST)/ahead/deb/*.deb))"
 
 vulncheck:
 	$(GO) run $(GOVULNCHECK) ./...
