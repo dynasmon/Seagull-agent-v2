@@ -27,6 +27,8 @@ const (
 var (
 	inspector = "/usr/bin/dpkg-deb"
 	installer = "/usr/bin/apt-get"
+	querier   = "/usr/bin/dpkg-query"
+	manager   = "/usr/bin/dpkg"
 )
 
 var environment = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "DEBIAN_FRONTEND=noninteractive", "LC_ALL=C"}
@@ -39,7 +41,10 @@ var (
 
 var architectures = map[string]string{"amd64": "amd64", "arm64": "arm64"}
 
-var ErrUnreadable = errors.New("dpkg-deb wrote what is not the fields of a package")
+var (
+	ErrUnreadable  = errors.New("dpkg-deb wrote what is not the fields of a package")
+	ErrInterrupted = errors.New("dpkg was interrupted while it changed packages other than the agent's")
+)
 
 // Version is the Debian version an agent built as stamped is packaged as: its
 // release, with a prerelease after a tilde so dpkg orders it before the release
@@ -105,17 +110,51 @@ func fieldsOf(written []byte) (Fields, error) {
 	return fields, nil
 }
 
-// Install leaves dpkg the files the host changed in place, and installs an
-// older version only when it is told to.
+// Install leaves dpkg the files the host changed in place, installs an older
+// version only when it is told to, and installs the package again when dpkg
+// holds its version, so an installation taken up again ends as a whole one.
+// When apt-get finds dpkg was interrupted, dpkg finishes what it left undone
+// first, but only when no package but the agent's was left halfway.
 func Install(ctx context.Context, path string, downgrade bool) error {
 	if !filepath.IsAbs(path) {
 		return fmt.Errorf("install %s: a package is named by its absolute path", secrets.Shown(path))
 	}
-	arguments := []string{"install", "--yes", "--no-install-recommends",
+	arguments := []string{"install", "--yes", "--no-install-recommends", "--reinstall",
 		"-o", "DPkg::Lock::Timeout=300", "-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"}
 	if downgrade {
 		arguments = append(arguments, "--allow-downgrades")
 	}
-	_, err := command.OutputIn(ctx, installer, append(arguments, path), environment, maxOutput)
+	arguments = append(arguments, path)
+	_, err := command.OutputIn(ctx, installer, arguments, environment, maxOutput)
+	var failed *command.Failure
+	if err == nil || !errors.As(err, &failed) || !strings.Contains(failed.Said, "dpkg was interrupted") {
+		return err
+	}
+	if err := finish(ctx); err != nil {
+		return err
+	}
+	_, err = command.OutputIn(ctx, installer, arguments, environment, maxOutput)
 	return err
+}
+
+func finish(ctx context.Context) error {
+	listed, err := command.OutputIn(ctx, querier, []string{"--show", "--showformat=${db:Status-Abbrev} ${Package}\n"}, environment, maxOutput)
+	if err != nil {
+		return fmt.Errorf("read which packages dpkg left halfway: %w", err)
+	}
+	var halfway []string
+	for line := range strings.Lines(string(listed)) {
+		status, name := line[:min(len(line), 3)], strings.TrimSpace(line[min(len(line), 3):])
+		if len(status) == 3 && (strings.ContainsRune("HUF", rune(status[1])) || status[2] == 'R') && name != Package {
+			halfway = append(halfway, secrets.Shown(name))
+		}
+	}
+	if len(halfway) > 0 {
+		return fmt.Errorf("%w: %s were left halfway too, so an operator finishes them with dpkg --configure -a", ErrInterrupted,
+			secrets.Bounded(strings.Join(halfway, ", ")))
+	}
+	if _, err := command.OutputIn(ctx, manager, []string{"--configure", "-a", "--force-confdef", "--force-confold"}, environment, maxOutput); err != nil {
+		return fmt.Errorf("finish what dpkg left halfway of the agent's package: %w", err)
+	}
+	return nil
 }
