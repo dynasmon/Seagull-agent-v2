@@ -391,10 +391,7 @@ func (q *queue) admit(records []Record) (Receipt, error) {
 	if rotate {
 		if err := q.rotate(first); err != nil {
 			q.budget.add(q.stream, -needed)
-			if roomless(err) && q.admitting() {
-				return Receipt{}, q.budget.crowd(err)
-			}
-			return Receipt{}, err
+			return Receipt{}, q.rejected(err)
 		}
 	}
 
@@ -413,12 +410,8 @@ func (q *queue) admit(records []Record) (Receipt, error) {
 		failed := fmt.Errorf("write to %s: %w", q.path(last.name()), err)
 		if undone := errors.Join(file.Truncate(last.size), q.host.sync(file)); undone != nil {
 			q.fail(fmt.Errorf("discard an unfinished write to %s: %w", q.path(last.name()), undone))
-			return Receipt{}, failed
 		}
-		if roomless(err) {
-			return Receipt{}, q.budget.crowd(failed)
-		}
-		return Receipt{}, failed
+		return Receipt{}, q.rejected(failed)
 	}
 	if err := q.host.sync(file); err != nil {
 		failed := fmt.Errorf("sync %s: %w", q.path(last.name()), err)
@@ -435,8 +428,15 @@ func (q *queue) admit(records []Record) (Receipt, error) {
 	return Receipt{Stream: q.stream, First: first, Last: first + uint64(len(records)) - 1}, nil
 }
 
-func roomless(err error) bool {
-	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)
+func (q *queue) rejected(err error) error {
+	switch {
+	case !q.admitting():
+	case errors.Is(err, syscall.ENOSPC), errors.Is(err, syscall.EDQUOT):
+		return q.budget.crowd(err)
+	default:
+		q.fail(err)
+	}
+	return fmt.Errorf("%w: %w", ErrUnavailable, err)
 }
 
 func (q *queue) rotate(first uint64) error {
