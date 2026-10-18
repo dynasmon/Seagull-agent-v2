@@ -73,6 +73,9 @@ func TestMain(m *testing.M) {
 	if sockets, ok := os.LookupEnv(socketsVariable); ok {
 		os.Exit(holding(sockets))
 	}
+	if told, ok := os.LookupEnv(writerVariable); ok {
+		os.Exit(decide(told))
+	}
 	os.Exit(m.Run())
 }
 
@@ -140,6 +143,7 @@ type gate struct {
 	watching     []string
 	excluded     []string
 	signers      string
+	tuned        map[string]any
 }
 
 func open(t *testing.T) *gate {
@@ -244,7 +248,7 @@ func (g *gate) write(t *testing.T) {
 	if !ok || server["trust_bundle"] != bundle {
 		t.Fatalf("the settings the package installs name %v", settings["server"])
 	}
-	server["ingest_url"], server["renewal_url"] = g.platform.ingest.URL, g.platform.renewal.URL
+	server["ingest_url"], server["renewal_url"] = g.platform.address(g.platform.ingest), g.platform.address(g.platform.renewal)
 	for _, collector := range []string{"authentication", "inventory"} {
 		if collected, ok := settings["modules"].(map[string]any)[collector].(map[string]any); !ok || collected["enabled"] != true {
 			t.Fatalf("the settings the package installs collect with %v", settings["modules"])
@@ -276,6 +280,7 @@ func (g *gate) write(t *testing.T) {
 	if g.updating {
 		settings["updates"] = map[string]any{"enabled": true, "root": updateRootPath, "interval": "1m", "check_within": "2m"}
 	}
+	maps.Copy(settings, g.tuned)
 	rewritten, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		t.Fatalf("write the settings: %v", err)
