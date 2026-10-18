@@ -328,7 +328,7 @@ func (o *observing) streams(snapshot *status.Snapshot) status.Component {
 		switch {
 		case held.Unavailable != nil:
 			component = status.Component{Name: "spool", State: status.Failed, Reason: status.Text(fmt.Sprintf("%s: %v", held.Stream, held.Unavailable)),
-				Recovery: status.Text(recovery(o.path, o.state, held.Unavailable))}
+				Recovery: status.Text(recovery(o.path, o.state, fmt.Errorf("%w: %w", spool.ErrUnavailable, held.Unavailable)))}
 		case !held.Paused.IsZero() && component.State == status.Running:
 			component = status.Component{Name: "spool", State: status.Degraded, Since: held.Paused.UTC(),
 				Reason: status.Text(fmt.Sprintf("the spool holds all its budget allows for %s, and refused %d records since %s: a collector that could not admit them keeps its place in its source, and what the source drops meanwhile is a gap",
