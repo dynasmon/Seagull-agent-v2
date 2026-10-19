@@ -127,7 +127,7 @@ func (m *measuring) prepare(t *testing.T) time.Time {
 	m.restarted(t)
 	m.sampler = sample(t, m.gate, 10*time.Second)
 	m.stock(t, began, "process")
-	await(t, m.invocation, "files_watched", 10*time.Minute)
+	await(t, m.invocation, "files_watched", baselineWithin)
 	await(t, m.invocation, "network_watched", time.Minute)
 	await(t, m.invocation, "assessment_admitted", 2*time.Minute)
 	return began
