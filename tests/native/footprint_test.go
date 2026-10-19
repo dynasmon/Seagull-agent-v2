@@ -24,14 +24,15 @@ import (
 )
 
 const (
-	window       = 2 * time.Minute
-	steadyEvery  = 100 * time.Millisecond
-	burstEvery   = time.Millisecond
-	burstCount   = 60000
-	boundedCount = 120000
-	boundedSpool = 16 << 20
-	shownDropIns = "footprint.conf"
-	everything   = "[Service]\nProtectProc=default\nReadOnlyPaths=/proc\nProtectHome=read-only\nCapabilityBoundingSet=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH\nAmbientCapabilities=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH\nSystemCallFilter=~process_vm_readv process_vm_writev\n"
+	window         = 2 * time.Minute
+	steadyEvery    = 100 * time.Millisecond
+	burstEvery     = time.Millisecond
+	burstCount     = 60000
+	boundedCount   = 120000
+	boundedSpool   = 16 << 20
+	baselineWithin = 20 * time.Minute
+	shownDropIns   = "footprint.conf"
+	everything     = "[Service]\nProtectProc=default\nReadOnlyPaths=/proc\nProtectHome=read-only\nCapabilityBoundingSet=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH\nAmbientCapabilities=CAP_SYS_PTRACE CAP_DAC_READ_SEARCH\nSystemCallFilter=~process_vm_readv process_vm_writev\n"
 )
 
 // What the installed agent spends under each workload it meets, measured from
@@ -178,7 +179,7 @@ func (m *measuring) baseline(t *testing.T) {
 	m.tuned["modules"] = map[string]any{"authentication": map[string]any{"enabled": true}, "inventory": map[string]any{"enabled": true}, "files": map[string]any{"enabled": true}}
 	began, before := time.Now(), m.outcomes()
 	m.collecting(t, true)
-	watched := await(t, m.invocation, "files_watched", 10*time.Minute)
+	watched := await(t, m.invocation, "files_watched", baselineWithin)
 	time.Sleep(15 * time.Second)
 	m.measure(t, "files baseline", "the files module enabled on the paths it watches by default, taking their baseline", began, before,
 		map[string]any{"took": watched["took"], "entries": watched["entries"], "directories": watched["directories"], "watched": watched["watched"]})
