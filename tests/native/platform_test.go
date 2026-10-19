@@ -56,6 +56,8 @@ type platform struct {
 	handling   atomic.Pointer[func(w http.ResponseWriter, r *http.Request, content []byte) bool]
 	renewing   atomic.Pointer[func(w http.ResponseWriter, agent string, asked *agentv1.RenewalRequest) bool]
 	presenting atomic.Pointer[func(local net.Addr) *tls.Config]
+	ingested   traffic
+	controlled traffic
 	mu         sync.Mutex
 	stored     map[string][]string
 	collected  []*eventv1.Event
@@ -72,6 +74,8 @@ type platform struct {
 
 const platformName = "platform.seagull.test"
 
+var platformLife = 2 * time.Hour
+
 type dropping struct {
 	net.Listener
 	drop *atomic.Bool
@@ -87,6 +91,43 @@ func (d dropping) Accept() (net.Conn, error) {
 	}
 }
 
+type traffic struct {
+	connections atomic.Int64
+	received    atomic.Int64
+	sent        atomic.Int64
+}
+
+type counting struct {
+	net.Listener
+	carried *traffic
+}
+
+func (c counting) Accept() (net.Conn, error) {
+	connection, err := c.Listener.Accept()
+	if err != nil {
+		return connection, err
+	}
+	c.carried.connections.Add(1)
+	return &counted{Conn: connection, carried: c.carried}, nil
+}
+
+type counted struct {
+	net.Conn
+	carried *traffic
+}
+
+func (c *counted) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	c.carried.received.Add(int64(n))
+	return n, err
+}
+
+func (c *counted) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	c.carried.sent.Add(int64(n))
+	return n, err
+}
+
 func emulate(t *testing.T) *platform {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -97,7 +138,7 @@ func emulate(t *testing.T) *platform {
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{CommonName: "Seagull platform"},
 		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(2 * time.Hour),
+		NotAfter:              time.Now().Add(platformLife),
 		IsCA:                  true,
 		KeyUsage:              x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
@@ -111,8 +152,8 @@ func emulate(t *testing.T) *platform {
 		t.Fatalf("parse the certificate of the platform's authority: %v", err)
 	}
 	emulated := &platform{authority: authority, key: key, stored: map[string][]string{}}
-	emulated.ingest = emulated.listen(t, http.HandlerFunc(emulated.admit), &emulated.dropping)
-	emulated.renewal = emulated.listen(t, http.HandlerFunc(emulated.renew), nil)
+	emulated.ingest = emulated.listen(t, http.HandlerFunc(emulated.admit), &emulated.dropping, &emulated.ingested)
+	emulated.renewal = emulated.listen(t, http.HandlerFunc(emulated.renew), nil, &emulated.controlled)
 	return emulated
 }
 
@@ -128,7 +169,7 @@ func (p *platform) bundle() []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: p.authority.Raw})
 }
 
-func (p *platform) listen(t *testing.T, handler http.Handler, drop *atomic.Bool) *httptest.Server {
+func (p *platform) listen(t *testing.T, handler http.Handler, drop *atomic.Bool, carried *traffic) *httptest.Server {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -140,7 +181,7 @@ func (p *platform) listen(t *testing.T, handler http.Handler, drop *atomic.Bool)
 		DNSNames:     []string{platformName},
 		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
 		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(2 * time.Hour),
+		NotAfter:     time.Now().Add(platformLife),
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 	}
@@ -152,6 +193,7 @@ func (p *platform) listen(t *testing.T, handler http.Handler, drop *atomic.Bool)
 	agents.AddCert(p.authority)
 	listener := httptest.NewUnstartedServer(handler)
 	listener.Config.ErrorLog = log.New(io.Discard, "", 0)
+	listener.Listener = counting{Listener: listener.Listener, carried: carried}
 	if drop != nil {
 		listener.Listener = dropping{Listener: listener.Listener, drop: drop}
 	}
