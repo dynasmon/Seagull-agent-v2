@@ -4,6 +4,8 @@ GOFMT = $(shell $(GO) env GOROOT)/bin/gofmt
 DIST ?= dist
 GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.8.0
 FUZZTIME ?= 10s
+SOAK ?= 4h
+EVIDENCE ?=
 ARCH ?= $(shell $(GO) env GOARCH)
 PACKAGED = $(DIST)/linux-$(ARCH)/seagull-agent
 AHEAD = v1.999.0-gate
@@ -12,7 +14,7 @@ AHEAD = v1.999.0-gate
 # that points at sibling checkouts.
 export GOWORK := off
 
-.PHONY: help fmt fmt-check vet mod-check lint test test-race fuzz build package ahead native-gate chaos vulncheck clean verify
+.PHONY: help fmt fmt-check vet mod-check lint test test-race fuzz build package ahead native-gate chaos footprint soak vulncheck clean verify
 
 help:
 	@echo "fmt         format the module"
@@ -28,6 +30,9 @@ help:
 	@echo "ahead       package the same commit as release $(AHEAD) into $(DIST)/ahead, which the native gate updates the agent to"
 	@echo "native-gate install that package on THIS host, as root, and run it as a service: use a disposable host"
 	@echo "chaos       install that package on THIS host, as root, and fail what the service depends on: use a disposable host"
+	@echo "footprint   install that package on THIS host, as root, and measure what the service spends against its budgets: use a disposable host"
+	@echo "soak        install that package on THIS host, as root, and run it for SOAK ($(SOAK)) with every module: use a disposable host"
+	@echo "            EVIDENCE=DIR has native-gate, footprint and soak write what they recorded under DIR"
 	@echo "vulncheck   scan reachable dependencies"
 	@echo "verify      the full gate: lint, mod-check, tests and build"
 
@@ -90,12 +95,22 @@ ahead:
 	$(MAKE) -C $(DIST)/ahead/source package DIST=$(abspath $(DIST)/ahead)
 	rm -rf $(DIST)/ahead/source
 
-native-gate chaos:
+RUN_native-gate = ^TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge$$
+RUN_chaos = ^TestTheInstalledAgentAccountsForEveryEventThroughFailures$$
+RUN_footprint = ^TestTheInstalledAgentSpendsWithinItsBudgets$$
+RUN_soak = ^TestTheInstalledAgentLastsWithoutGrowing$$
+TIMEOUT_native-gate = 25m
+TIMEOUT_chaos = 45m
+TIMEOUT_footprint = 45m
+TIMEOUT_soak = 0
+
+native-gate chaos footprint soak:
 	@test "$(words $(wildcard $(DIST)/deb/*.deb))" = 1 || { echo "$(DIST)/deb holds no single package: make package first" >&2; exit 1; }
-	@test "$(words $(wildcard $(DIST)/ahead/deb/*.deb))" = 1 || { echo "$(DIST)/ahead/deb holds no single package: make ahead first" >&2; exit 1; }
+	@$(if $(filter native-gate chaos,$@),test "$(words $(wildcard $(DIST)/ahead/deb/*.deb))" = 1 || { echo "$(DIST)/ahead/deb holds no single package: make ahead first" >&2; exit 1; },true)
 	$(GO) test -c -o $(DIST)/native.test ./tests/native
-	sudo $(DIST)/native.test -test.v -test.count=1 -test.timeout=$(if $(filter chaos,$@),45m,25m) -test.run '$(if $(filter chaos,$@),^TestTheInstalledAgentAccountsForEveryEventThroughFailures$$,^TestTheDebianPackageRunsTheAgentAsAServiceFromInstallationToPurge$$)' \
-		-package "$(abspath $(wildcard $(DIST)/deb/*.deb))" -ahead "$(abspath $(wildcard $(DIST)/ahead/deb/*.deb))"
+	sudo $(DIST)/native.test -test.v -test.count=1 -test.timeout=$(TIMEOUT_$@) -test.run '$(RUN_$@)' \
+		-package "$(abspath $(wildcard $(DIST)/deb/*.deb))" $(if $(filter native-gate chaos,$@),-ahead "$(abspath $(wildcard $(DIST)/ahead/deb/*.deb))") \
+		$(if $(filter soak,$@),-soak $(SOAK)) $(if $(EVIDENCE),-evidence "$(abspath $(EVIDENCE))")
 
 vulncheck:
 	$(GO) run $(GOVULNCHECK) ./...
