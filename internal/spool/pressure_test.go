@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -188,6 +189,106 @@ func TestTheSpoolLeavesTheFilesystemRoomForWhatTheAgentMustStillWrite(t *testing
 	clock.set(start, 1<<40)
 	if _, err := held.Admit(Events, sizedRecord("event", 4, 2048)); err != nil {
 		t.Fatalf("the spool refused a record once the filesystem had room again: %v", err)
+	}
+}
+
+// A crowded host is a pressured one whose filesystem has no room for the next
+// writes it is told to refuse, though it says it has, as a filesystem does
+// once another writer took what was left or a quota holds the agent's account.
+type crowded struct {
+	*pressured
+	refusal  error
+	refusing int
+	writes   int
+}
+
+func (c *crowded) write(file *os.File, content []byte) (int, error) {
+	c.writes++
+	if c.refusing > 0 {
+		c.refusing--
+		written, _ := file.Write(content[:len(content)/2])
+		return written, &fs.PathError{Op: "write", Path: file.Name(), Err: c.refusal}
+	}
+	return file.Write(content)
+}
+
+func TestAFilesystemWithNoRoomForAWritePausesAdmissionAndIsTriedAgainLater(t *testing.T) {
+	for _, refusal := range []error{syscall.ENOSPC, syscall.EDQUOT} {
+		t.Run(refusal.Error(), func(t *testing.T) {
+			directory := spoolDirectory(t)
+			disk := &crowded{pressured: newPressured(), refusal: refusal}
+			held, logs := openPressured(t, directory, aged(64<<20, time.Hour, time.Hour), disk)
+			admitAll(t, held, Events, "event", 1, 1)
+			before := segmentSize(t, directory)
+
+			disk.refusing = 1
+			_, err := held.Admit(Events, sizedRecord("event", 1, 300<<10))
+			if !errors.Is(err, ErrFull) || errors.Is(err, ErrUnavailable) || !errors.Is(err, refusal) {
+				t.Fatalf("a write the filesystem had no room for ended with %v", err)
+			}
+			if after := segmentSize(t, directory); after != before {
+				t.Fatalf("the segment holds %d bytes after the refused write, and %d before it", after, before)
+			}
+			if paused, found := entry(t, logs, "spool_admission_paused"); !found || !strings.Contains(fmt.Sprint(paused["reason"]), "the filesystem that holds it had no room") {
+				t.Fatalf("the spool reported the refusal as %v:\n%s", paused, logs)
+			}
+			for waited, wait := time.Duration(0), time.Second; wait <= time.Minute; wait = min(2*wait, time.Minute) {
+				writes := disk.writes
+				if room := held.Room(Events); room != 0 {
+					t.Fatalf("%s after the filesystem refused a write, events have room for %d bytes", waited, room)
+				}
+				if _, err := held.Admit(Events, sizedRecord("event", 1, 300<<10)); !errors.Is(err, ErrFull) || disk.writes != writes {
+					t.Fatalf("%s after the filesystem refused a write, the spool wrote %d times and ended with %v", waited, disk.writes-writes, err)
+				}
+				disk.advance(wait - time.Millisecond)
+				if room := held.Room(Events); room != 0 {
+					t.Fatalf("%s after the filesystem refused a write, a millisecond short of %s, events have room for %d bytes", waited+wait, wait, room)
+				}
+				disk.advance(time.Millisecond)
+				waited += wait
+				if room := held.Room(Events); room < 300<<10 {
+					t.Fatalf("%s after the filesystem refused a write, events have room for %d bytes", waited, room)
+				}
+				if wait == time.Minute {
+					break
+				}
+				disk.refusing = 1
+				if _, err := held.Admit(Events, sizedRecord("event", 1, 300<<10)); !errors.Is(err, ErrFull) {
+					t.Fatalf("a write the filesystem refused again ended with %v", err)
+				}
+			}
+			disk.refusing = 1
+			if _, err := held.Admit(Events, sizedRecord("event", 1, 300<<10)); !errors.Is(err, ErrFull) {
+				t.Fatalf("a write the filesystem refused once the spool waited a minute ended with %v", err)
+			}
+			disk.advance(time.Minute)
+			if _, err := held.Admit(Events, sizedRecord("event", 1, 300<<10)); err != nil {
+				t.Fatalf("the spool refused a record once the filesystem had room again: %v", err)
+			}
+			if resumed, found := entry(t, logs, "spool_admission_resumed"); !found || resumed["refused"] == float64(0) {
+				t.Fatalf("the spool reported the resumption as %v", resumed)
+			}
+			disk.refusing = 1
+			if _, err := held.Admit(Events, sizedRecord("event", 2, 100)); !errors.Is(err, ErrFull) {
+				t.Fatalf("a write the filesystem refused after one it took ended with %v", err)
+			}
+			disk.advance(time.Second)
+			if room := held.Room(Events); room == 0 {
+				t.Fatal("a refusal after a write the filesystem took waited longer than a second")
+			}
+			if kept := streamStats(t, held, Events); kept.Unavailable != nil || kept.Lost != 0 {
+				t.Fatalf("a filesystem with no room left the stream as %+v", kept)
+			}
+			closed(t, held)
+
+			held, logs = openPressured(t, directory, aged(64<<20, time.Hour, time.Hour), newPressured())
+			if logs.Len() != 0 {
+				t.Fatalf("a spool that undid the writes its filesystem refused reported:\n%s", logs)
+			}
+			if got := sequences(t, held, Events); !slices.Equal(got, []uint64{1, 2}) {
+				t.Fatalf("after reopening, read back %v", got)
+			}
+		})
 	}
 }
 

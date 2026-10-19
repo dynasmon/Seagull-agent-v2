@@ -3,6 +3,7 @@ package spool
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,14 +12,11 @@ import (
 	"testing"
 )
 
-var (
-	errNoSpace = errors.New("no space left on device")
-	errIO      = errors.New("input/output error")
-)
+var errIO = errors.New("input/output error")
 
 // A faulty host fails the write or the sync it is told to, counting from now,
 // and behaves as the system does otherwise. A write that fails still writes
-// the first cut bytes it was given, as a disk that fills up part way does.
+// the first cut bytes it was given, as a disk that fails part way does.
 type faulty struct {
 	system
 	writes int
@@ -32,7 +30,7 @@ func (f *faulty) write(file *os.File, content []byte) (int, error) {
 	if f.writes == 0 {
 		f.writes = -1
 		written, _ := file.Write(content[:min(f.cut, len(content))])
-		return written, errNoSpace
+		return written, errIO
 	}
 	if f.writes > 0 {
 		f.writes--
@@ -51,28 +49,34 @@ func (f *faulty) sync(file *os.File) error {
 	return file.Sync()
 }
 
-func TestAWriteThatFailsAdmitsNothingAndTheSpoolAdmitsAgain(t *testing.T) {
+func TestAWriteThatFailsAdmitsNothingAndTheStreamAdmitsAgainOnceReopened(t *testing.T) {
 	directory := spoolDirectory(t)
 	disk := healthy()
-	held, _ := openWith(t, directory, disk)
+	held, logs := openWith(t, directory, disk)
 	first := admitted(t, held, "event-1", 100)
 	before := segmentSize(t, directory)
 
 	disk.writes, disk.cut = 1, 1000
-	if receipt, err := held.Admit(Events, Record{ID: "event-2", Payload: make([]byte, 300<<10)}); err == nil || errors.Is(err, ErrUnavailable) {
-		t.Fatalf("a write that ran out of space admitted %+v: %v", receipt, err)
+	if receipt, err := held.Admit(Events, Record{ID: "event-2", Payload: make([]byte, 300<<10)}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("a write that failed admitted %+v: %v", receipt, err)
 	}
 	if after := segmentSize(t, directory); after != before {
 		t.Fatalf("the segment holds %d bytes after the failed write, and %d before it", after, before)
 	}
-	if next := admitted(t, held, "event-3", 100); next.First != first.Last+1 {
-		t.Fatalf("the record admitted after the failed write became %d", next.First)
+	if !strings.Contains(logs.String(), `"msg":"spool_unavailable"`) {
+		t.Fatalf("the spool did not report that it stopped admitting:\n%s", logs)
+	}
+	if _, err := held.Admit(Events, Record{ID: "event-3", Payload: []byte("refused")}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("the stream kept admitting after a write failed: %v", err)
 	}
 	closed(t, held)
 
-	held, logs := openWith(t, directory, healthy())
+	held, logs = openWith(t, directory, healthy())
 	if logs.Len() != 0 {
 		t.Fatalf("a spool that undid its failed write reported:\n%s", logs)
+	}
+	if next := admitted(t, held, "event-3", 100); next.First != first.Last+1 {
+		t.Fatalf("the record admitted once the spool was opened again became %d", next.First)
 	}
 	if got := identifiers(t, held); !slices.Equal(got, []string{"event-1", "event-3"}) {
 		t.Fatalf("read back %q", got)
@@ -121,6 +125,94 @@ func TestASyncThatFailsStopsTheStreamAdmittingUntilItIsReopened(t *testing.T) {
 	}
 }
 
+func TestASpoolThatCanNoLongerMakeRecordsDurableSaysSoToWhoeverWaitsOnIt(t *testing.T) {
+	for name, fail := range map[string]func(disk *faulty){
+		"a sync that fails":                            func(disk *faulty) { disk.syncs = 0 },
+		"a write that fails":                           func(disk *faulty) { disk.writes, disk.cut = 0, 10 },
+		"an unfinished write that cannot be discarded": func(disk *faulty) { disk.writes, disk.syncs, disk.cut = 0, 0, 10 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := spoolDirectory(t)
+			disk := healthy()
+			held, _ := openWith(t, directory, disk)
+			admitted(t, held, "event-1", 100)
+			if _, err := held.Admit(Inventory, Record{ID: "inventory-1", Payload: []byte("kept")}); err != nil {
+				t.Fatalf("admit: %v", err)
+			}
+			unavailable := held.Unavailable()
+			if signalled(unavailable) {
+				t.Fatal("a spool that makes every record durable says it can no longer")
+			}
+			if err := held.Acknowledge(Inventory, 1); err != nil {
+				t.Fatalf("acknowledge: %v", err)
+			}
+			if signalled(unavailable) {
+				t.Fatal("an acknowledgement made the spool say it can no longer make records durable")
+			}
+
+			fail(disk)
+			if _, err := held.Admit(Events, Record{ID: "event-2", Payload: []byte(strings.Repeat("unconfirmed", 100))}); err == nil {
+				t.Fatal("a record the spool could not make durable was admitted")
+			}
+			if !signalled(unavailable) || !signalled(held.Unavailable()) {
+				t.Fatal("a spool whose stream can no longer make records durable does not say so")
+			}
+			if kept := held.Stats().Streams[0]; kept.Stream != Events || kept.Unavailable == nil {
+				t.Fatalf("the spool does not say which stream can no longer make records durable: %+v", kept)
+			}
+			closed(t, held)
+
+			held, _ = openWith(t, directory, healthy())
+			if signalled(held.Unavailable()) {
+				t.Fatal("a spool opened again on what it holds says it can no longer make records durable")
+			}
+			if got := identifiers(t, held); len(got) == 0 || got[0] != "event-1" || len(got) > 2 || len(got) == 2 && got[1] != "event-2" {
+				t.Fatalf("after reopening, read back %q", got)
+			}
+		})
+	}
+}
+
+func TestASegmentTheFilesystemRefusesToCreateStopsTheStreamAdmittingUntilItIsReopened(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("the superuser creates a file in a directory whatever its mode says")
+	}
+	directory := spoolDirectory(t)
+	held, logs := openWith(t, directory, healthy())
+	events := filepath.Join(directory, "events")
+	if err := os.Chmod(events, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(events, 0o700) })
+	if _, err := held.Admit(Events, Record{ID: "event-1", Payload: []byte("refused")}); !errors.Is(err, ErrUnavailable) || !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("a record whose segment the filesystem refused to create ended with %v", err)
+	}
+	if !signalled(held.Unavailable()) || !strings.Contains(logs.String(), `"msg":"spool_unavailable"`) {
+		t.Fatalf("a stream whose segment the filesystem refused to create does not say it can no longer make records durable:\n%s", logs)
+	}
+	if err := os.Chmod(events, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := held.Admit(Events, Record{ID: "event-1", Payload: []byte("refused")}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("the stream admitted before the spool was opened again: %v", err)
+	}
+	closed(t, held)
+
+	held, _ = openWith(t, directory, healthy())
+	if receipt := admitted(t, held, "event-1", 100); receipt.First != 1 {
+		t.Fatalf("the first record admitted once the spool was opened again became %d", receipt.First)
+	}
+}
+
+func signalled(signal <-chan struct{}) bool {
+	select {
+	case <-signal:
+		return true
+	default:
+		return false
+	}
+}
+
 func TestAnAcknowledgementThatCannotBeWrittenLeavesTheRecordsOutstanding(t *testing.T) {
 	for name, fail := range map[string]func(disk *faulty){
 		"a write that fails": func(disk *faulty) { disk.writes = 0 },
@@ -159,12 +251,18 @@ func TestASegmentThatCannotBeCreatedWholeIsNotKept(t *testing.T) {
 	disk := healthy()
 	held, _ := openWith(t, directory, disk)
 	disk.syncs = 0
-	if _, err := held.Admit(Events, Record{ID: "event-1", Payload: []byte("first")}); err == nil {
-		t.Fatal("a record was admitted into a segment that was never synced")
+	if _, err := held.Admit(Events, Record{ID: "event-1", Payload: []byte("first")}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("a record admitted into a segment that was never synced ended with %v", err)
 	}
 	if left, _ := filepath.Glob(filepath.Join(directory, "events", "*.seg")); len(left) > 0 {
 		t.Fatalf("the segment that could not be created is still there: %q", left)
 	}
+	if _, err := held.Admit(Events, Record{ID: "event-2", Payload: []byte("refused")}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("the stream kept admitting after a segment could not be created: %v", err)
+	}
+	closed(t, held)
+
+	held, _ = openWith(t, directory, healthy())
 	if receipt := admitted(t, held, "event-2", 100); receipt.First != 1 {
 		t.Fatalf("the first record admitted became %d", receipt.First)
 	}

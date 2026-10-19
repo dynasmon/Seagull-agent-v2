@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/dynasmon/Seagull-agent-v2/internal/secrets"
@@ -90,6 +91,7 @@ type queue struct {
 	budget *budget
 	logger *slog.Logger
 	host   host
+	broke  func()
 
 	io sync.Mutex
 
@@ -389,7 +391,7 @@ func (q *queue) admit(records []Record) (Receipt, error) {
 	if rotate {
 		if err := q.rotate(first); err != nil {
 			q.budget.add(q.stream, -needed)
-			return Receipt{}, err
+			return Receipt{}, q.rejected(err)
 		}
 	}
 
@@ -405,16 +407,18 @@ func (q *queue) admit(records []Record) (Receipt, error) {
 	}
 	if err := writer.Flush(); err != nil {
 		q.budget.add(q.stream, -frames)
+		failed := fmt.Errorf("write to %s: %w", q.path(last.name()), err)
 		if undone := errors.Join(file.Truncate(last.size), q.host.sync(file)); undone != nil {
 			q.fail(fmt.Errorf("discard an unfinished write to %s: %w", q.path(last.name()), undone))
 		}
-		return Receipt{}, fmt.Errorf("write to %s: %w", q.path(last.name()), err)
+		return Receipt{}, q.rejected(failed)
 	}
 	if err := q.host.sync(file); err != nil {
 		failed := fmt.Errorf("sync %s: %w", q.path(last.name()), err)
 		q.fail(failed)
 		return Receipt{}, fmt.Errorf("%w: %w", ErrUnavailable, failed)
 	}
+	q.budget.relieve()
 	q.mu.Lock()
 	q.segments[len(q.segments)-1].size += frames
 	q.next += uint64(len(records))
@@ -422,6 +426,17 @@ func (q *queue) admit(records []Record) (Receipt, error) {
 	q.announce()
 	q.mu.Unlock()
 	return Receipt{Stream: q.stream, First: first, Last: first + uint64(len(records)) - 1}, nil
+}
+
+func (q *queue) rejected(err error) error {
+	switch {
+	case !q.admitting():
+	case errors.Is(err, syscall.ENOSPC), errors.Is(err, syscall.EDQUOT):
+		return q.budget.crowd(err)
+	default:
+		q.fail(err)
+	}
+	return fmt.Errorf("%w: %w", ErrUnavailable, err)
 }
 
 func (q *queue) rotate(first uint64) error {
@@ -466,7 +481,8 @@ func (q *queue) fail(err error) {
 	q.broken = err
 	q.mu.Unlock()
 	q.logger.Error("spool_unavailable", q.attributes(slog.Any("error", err),
-		slog.String("recovery", "restart the agent, which reads back what the spool holds before it admits anything more"))...)
+		slog.String("recovery", "none: the agent stops, and starts again on what the spool holds once the filesystem that holds it takes writes again"))...)
+	q.broke()
 }
 
 func (q *queue) read(from uint64, most, bytes int) ([]Entry, error) {
@@ -761,7 +777,7 @@ func (q *queue) pressure(records int, err error) {
 	switch {
 	case errors.Is(err, ErrFull) && paused.IsZero():
 		q.logger.Warn("spool_admission_paused", q.attributes(slog.Any("reason", err),
-			slog.String("recovery", "none: collectors keep their place in what they read and admit again once delivery frees room or records expire"))...)
+			slog.String("recovery", "none: collectors keep their place in what they read and admit again once delivery frees room, records expire or the filesystem has room again"))...)
 	case err == nil && !paused.IsZero():
 		q.logger.Info("spool_admission_resumed", q.attributes(slog.Duration("paused", now.Sub(paused)), slog.Uint64("refused", withheld))...)
 	}

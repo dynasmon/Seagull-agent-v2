@@ -43,26 +43,48 @@ import (
 // agents and of its listeners, and ingest and renewal listeners that speak TLS
 // 1.3 alone and ask every client for the certificate of an agent.
 type platform struct {
-	authority *x509.Certificate
-	key       *ecdsa.PrivateKey
-	ingest    *httptest.Server
-	renewal   *httptest.Server
-	renewals  atomic.Int32
-	renewed   atomic.Pointer[string]
-	handed    atomic.Pointer[[]byte]
-	taking    atomic.Bool
-	mu        sync.Mutex
-	stored    map[string][]string
-	collected []*eventv1.Event
-	batches   [][]byte
-	inventory []*inventoryv1.Record
-	stocked   [][]byte
-	reports   []*agentv1.Status
-	statused  [][]byte
-	assessed  []*assessmentv1.Assessment
-	assessing [][]byte
-	offered   []byte
-	packages  map[string][]byte
+	authority  *x509.Certificate
+	key        *ecdsa.PrivateKey
+	ingest     *httptest.Server
+	renewal    *httptest.Server
+	named      bool
+	renewals   atomic.Int32
+	renewed    atomic.Pointer[string]
+	handed     atomic.Pointer[[]byte]
+	taking     atomic.Bool
+	dropping   atomic.Bool
+	handling   atomic.Pointer[func(w http.ResponseWriter, r *http.Request, content []byte) bool]
+	renewing   atomic.Pointer[func(w http.ResponseWriter, agent string, asked *agentv1.RenewalRequest) bool]
+	presenting atomic.Pointer[func(local net.Addr) *tls.Config]
+	mu         sync.Mutex
+	stored     map[string][]string
+	collected  []*eventv1.Event
+	batches    [][]byte
+	inventory  []*inventoryv1.Record
+	stocked    [][]byte
+	reports    []*agentv1.Status
+	statused   [][]byte
+	assessed   []*assessmentv1.Assessment
+	assessing  [][]byte
+	offered    []byte
+	packages   map[string][]byte
+}
+
+const platformName = "platform.seagull.test"
+
+type dropping struct {
+	net.Listener
+	drop *atomic.Bool
+}
+
+func (d dropping) Accept() (net.Conn, error) {
+	for {
+		connection, err := d.Listener.Accept()
+		if err != nil || !d.drop.Load() {
+			return connection, err
+		}
+		connection.Close()
+	}
 }
 
 func emulate(t *testing.T) *platform {
@@ -89,16 +111,24 @@ func emulate(t *testing.T) *platform {
 		t.Fatalf("parse the certificate of the platform's authority: %v", err)
 	}
 	emulated := &platform{authority: authority, key: key, stored: map[string][]string{}}
-	emulated.ingest = emulated.listen(t, http.HandlerFunc(emulated.admit))
-	emulated.renewal = emulated.listen(t, http.HandlerFunc(emulated.renew))
+	emulated.ingest = emulated.listen(t, http.HandlerFunc(emulated.admit), &emulated.dropping)
+	emulated.renewal = emulated.listen(t, http.HandlerFunc(emulated.renew), nil)
 	return emulated
+}
+
+func (p *platform) address(listener *httptest.Server) string {
+	if !p.named {
+		return listener.URL
+	}
+	_, port, _ := net.SplitHostPort(listener.Listener.Addr().String())
+	return "https://" + net.JoinHostPort(platformName, port)
 }
 
 func (p *platform) bundle() []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: p.authority.Raw})
 }
 
-func (p *platform) listen(t *testing.T, handler http.Handler) *httptest.Server {
+func (p *platform) listen(t *testing.T, handler http.Handler, drop *atomic.Bool) *httptest.Server {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -107,6 +137,7 @@ func (p *platform) listen(t *testing.T, handler http.Handler) *httptest.Server {
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject:      pkix.Name{CommonName: "platform listener"},
+		DNSNames:     []string{platformName},
 		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(2 * time.Hour),
@@ -121,11 +152,20 @@ func (p *platform) listen(t *testing.T, handler http.Handler) *httptest.Server {
 	agents.AddCert(p.authority)
 	listener := httptest.NewUnstartedServer(handler)
 	listener.Config.ErrorLog = log.New(io.Discard, "", 0)
+	if drop != nil {
+		listener.Listener = dropping{Listener: listener.Listener, drop: drop}
+	}
 	listener.TLS = &tls.Config{
 		MinVersion:   tls.VersionTLS13,
 		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		ClientCAs:    agents,
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			if present := p.presenting.Load(); present != nil {
+				return (*present)(hello.Conn.LocalAddr()), nil
+			}
+			return nil, nil
+		},
 	}
 	listener.StartTLS()
 	t.Cleanup(listener.Close)
@@ -136,6 +176,10 @@ func (p *platform) listen(t *testing.T, handler http.Handler) *httptest.Server {
 // signed for agent, the chain and the authorities it tells its agents to trust,
 // and what it recorded of the certificate.
 func (p *platform) issue(requested []byte, agent string, notBefore, notAfter time.Time) ([]byte, error) {
+	return issueBy(p.authority, p.key, p.bundle(), p.bundle(), requested, agent, notBefore, notAfter)
+}
+
+func issueBy(authority *x509.Certificate, key *ecdsa.PrivateKey, chain, trusted, requested []byte, agent string, notBefore, notAfter time.Time) ([]byte, error) {
 	block, _ := pem.Decode(requested)
 	if block == nil || block.Type != "CERTIFICATE REQUEST" {
 		return nil, fmt.Errorf("the agent asked with %q", requested)
@@ -160,7 +204,7 @@ func (p *platform) issue(requested []byte, agent string, notBefore, notAfter tim
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 	}
-	signed, err := x509.CreateCertificate(rand.Reader, template, p.authority, asked.PublicKey, p.key)
+	signed, err := x509.CreateCertificate(rand.Reader, template, authority, asked.PublicKey, key)
 	if err != nil {
 		return nil, err
 	}
@@ -171,8 +215,8 @@ func (p *platform) issue(requested []byte, agent string, notBefore, notAfter tim
 	digest := sha256.Sum256(signed)
 	return proto.Marshal(&agentv1.IssuedCertificate{
 		CertificatePem: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signed}),
-		ChainPem:       p.bundle(),
-		TrustBundlePem: p.bundle(),
+		ChainPem:       chain,
+		TrustBundlePem: trusted,
 		Identity: &agentv1.Identity{
 			Subject:           certificate.Subject.CommonName,
 			Serial:            hex.EncodeToString(certificate.SerialNumber.Bytes()),
@@ -194,6 +238,9 @@ func (p *platform) admit(w http.ResponseWriter, r *http.Request) {
 		w.Write(encoded)
 	}
 	content, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
+	if handle := p.handling.Load(); handle != nil && err == nil && r.Method == http.MethodPost && r.URL.Path == "/v1/events" && (*handle)(w, r, content) {
+		return
+	}
 	var reported agentv1.StatusBatch
 	if err == nil && r.Method == http.MethodPost && r.URL.Path == "/v1/status" && proto.Unmarshal(content, &reported) == nil && len(reported.GetReports()) > 0 {
 		p.mu.Lock()
@@ -339,6 +386,9 @@ func (p *platform) renew(w http.ResponseWriter, r *http.Request) {
 	var asked agentv1.RenewalRequest
 	if err == nil {
 		err = proto.Unmarshal(content, &asked)
+	}
+	if handle := p.renewing.Load(); handle != nil && err == nil && (*handle)(w, agent, &asked) {
+		return
 	}
 	var issued []byte
 	if err == nil {

@@ -1,6 +1,8 @@
 package deb
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,5 +118,61 @@ func TestAPackageIsInstalledWithTheArgumentsAndTheEnvironmentTheAgentFixes(t *te
 	}
 	if err := Install(t.Context(), "next.deb", false); err == nil {
 		t.Fatal("a package named by a relative path was installed")
+	}
+}
+
+func TestAnInstallationDpkgLeftHalfwayIsFinishedOnlyWhenTheAgentsPackageIsAllItLeft(t *testing.T) {
+	interrupted := "E: dpkg was interrupted, you must manually run 'dpkg --configure -a' to correct the problem."
+	for name, c := range map[string]struct {
+		listed     string
+		refusals   int
+		configured bool
+		installs   int
+		refused    error
+	}{
+		"the agent's package half installed":                             {listed: "ii  bash\niHR seagull-agent\nrc  old\n", refusals: 1, configured: true, installs: 2},
+		"the agent's package half configured, another awaiting triggers": {listed: "iF  seagull-agent\nit  man-db\n", refusals: 1, configured: true, installs: 2},
+		"nothing left halfway that dpkg lists":                           {listed: "ii  seagull-agent\nii  bash\n", refusals: 1, configured: true, installs: 2},
+		"another package half configured":                                {listed: "iHR seagull-agent\niF  linux-image-6.8.0-31-generic\n", refusals: 1, installs: 1, refused: ErrInterrupted},
+		"another package unpacked":                                       {listed: "iU  libc6\nii  seagull-agent\n", refusals: 1, installs: 1, refused: ErrInterrupted},
+		"dpkg interrupted again after finishing":                         {listed: "iHR seagull-agent\n", refusals: 2, configured: true, installs: 2, refused: errors.New("dpkg was interrupted")},
+		"an installation dpkg was not interrupted in":                    {listed: "iHR seagull-agent\n", installs: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			calls := filepath.Join(directory, "calls")
+			programs := map[string]string{
+				"apt-get":    "#!/bin/sh\necho \"apt-get $*\" >> " + calls + "\ncount=$(grep -c '^apt-get' " + calls + ")\nif [ \"$count\" -le " + fmt.Sprint(c.refusals) + " ]; then echo \"" + interrupted + "\" >&2; exit 100; fi\n",
+				"dpkg-query": "#!/bin/sh\necho \"dpkg-query $*\" >> " + calls + "\nprintf '" + strings.ReplaceAll(c.listed, "\n", "\\n") + "'\n",
+				"dpkg":       "#!/bin/sh\necho \"dpkg $*\" >> " + calls + "\n",
+			}
+			for program, script := range programs {
+				if err := os.WriteFile(filepath.Join(directory, program), []byte(script), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			held := []string{installer, querier, manager}
+			installer, querier, manager = filepath.Join(directory, "apt-get"), filepath.Join(directory, "dpkg-query"), filepath.Join(directory, "dpkg")
+			t.Cleanup(func() { installer, querier, manager = held[0], held[1], held[2] })
+
+			err := Install(t.Context(), "/var/lib/seagull-agent-update/next.deb", false)
+			switch {
+			case c.refused == nil && err != nil:
+				t.Fatalf("install: %v", err)
+			case c.refused != nil && (err == nil || !errors.Is(err, c.refused) && !strings.Contains(err.Error(), c.refused.Error())):
+				t.Fatalf("install ended with %v, want %v", err, c.refused)
+			}
+			written, _ := os.ReadFile(calls)
+			said := string(written)
+			if installs := strings.Count(said, "apt-get install --yes --no-install-recommends --reinstall "); installs != c.installs || strings.Count(said, "apt-get") != c.installs {
+				t.Errorf("apt-get ran %d times, want %d:\n%s", installs, c.installs, said)
+			}
+			if configured := strings.Contains(said, "dpkg --configure -a --force-confdef --force-confold\n"); configured != c.configured {
+				t.Errorf("dpkg finished what it left halfway: %v, want %v:\n%s", configured, c.configured, said)
+			}
+			if c.refused == ErrInterrupted && !strings.Contains(err.Error(), "dpkg --configure -a") {
+				t.Errorf("an installation that cannot finish what dpkg left halfway says %v", err)
+			}
+		})
 	}
 }

@@ -5,21 +5,29 @@ package native_test
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
+
+	systemjournal "github.com/dynasmon/Seagull-agent-v2/internal/platform/journal"
 )
 
 const (
-	outside     = "203.0.113.10"
-	forgedFrom  = "198.51.100."
-	gateAccount = "seagull-native-gate"
-	sshdDropIn  = "/etc/ssh/sshd_config.d/00-seagull-native-gate.conf"
+	outside        = "203.0.113.10"
+	forgedFrom     = "198.51.100."
+	gateAccount    = "seagull-native-gate"
+	sshdDropIn     = "/etc/ssh/sshd_config.d/00-seagull-native-gate.conf"
+	writerVariable = "SEAGULL_NATIVE_SSHD"
 )
 
 // The sshd of this host, taking passwords from an address outside the private
@@ -139,4 +147,44 @@ func forge(t *testing.T, scratch string) {
 		t.Fatal(err)
 	}
 	run(t, "runuser", "-u", "nobody", "--", named, "--priority", "auth.info", "--tag", "sshd", "Accepted password for root from "+forgedFrom+"67 port 4243 ssh2")
+}
+
+// What sshd decides as it turns guesses away, as fast as the gate asks: a copy
+// of the gate named sshd and run as the superuser writes each outcome to
+// journald, which names the process that wrote it, so the collector takes the
+// entries as sshd's own. Each names a user of its own, so the gate tells apart
+// every event the agent delivers, and the copy says so once journald took one.
+func decide(told string) int {
+	fields := strings.Fields(told)
+	if len(fields) != 4 {
+		fmt.Println("failed: want a prefix, a first number, a count and a pace, and was told", told)
+		return 1
+	}
+	first, err := strconv.Atoi(fields[1])
+	count, counted := strconv.Atoi(fields[2])
+	every, paced := time.ParseDuration(fields[3])
+	if err = errors.Join(err, counted, paced); err != nil {
+		fmt.Println("failed:", err)
+		return 1
+	}
+	stopped := make(chan os.Signal, 1)
+	signal.Notify(stopped, syscall.SIGTERM)
+	pace := time.NewTicker(every)
+	defer pace.Stop()
+	for n := first; n < first+count; n++ {
+		user := fmt.Sprintf("%s-%06d", fields[0], n)
+		note := systemjournal.Note{Identifier: "sshd", Priority: 6,
+			Message: fmt.Sprintf("Failed password for invalid user %s from %s port %d ssh2", user, outside, 1024+n%60000)}
+		if err := systemjournal.Send(note); err != nil {
+			fmt.Println("failed:", err)
+			return 1
+		}
+		fmt.Println("wrote", user)
+		select {
+		case <-stopped:
+			return 0
+		case <-pace.C:
+		}
+	}
+	return 0
 }

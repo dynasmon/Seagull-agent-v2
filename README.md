@@ -442,6 +442,10 @@ one does, it installs the release before again and waits for it the same way.
 Each step is written down before it is taken, so an installation a crash or a
 reboot interrupted is taken to its end when the host starts again, and going
 back is refused once the state was moved past what the release before reads.
+When dpkg itself was interrupted and the agent's package is all it left
+halfway, the installer has dpkg finish it and installs again; when it left
+other packages halfway too, the installation ends failed and leaves
+`dpkg --configure -a` to an operator.
 How the last update went is in `status`, in what the agent reports to the
 platform and in `journalctl -u seagull-agent-update`.
 
@@ -461,6 +465,40 @@ a rollout does not wait for an agent that cannot take its release; and where
 its update stands, so the platform pauses a rollout once agents went back from
 its release or could not verify or install it, and never because an agent could
 not reach it. What a rollout decides changes nothing the agent verifies.
+
+## Failures
+
+What the agent does when what it depends on fails, and what it can lose:
+
+| Failure | What the agent does | What it can lose |
+|---|---|---|
+| The agent killed at any moment: as it admits, writes a checkpoint, sends, writes an acknowledgement down or reclaims a segment | starts again on what its spool and checkpoints hold, and sends again what it could not know was delivered | nothing; the platform may receive an event again, byte for byte |
+| An answer lost, a batch published in part, an acknowledgement that does not count every record | sends the same batch again | nothing; the platform stores the event once |
+| The platform or its backbone out, its name not resolving, connections dropped, answers later than `transport.request_timeout` | keeps the records and tries again, one request at a time, with jittered backoff and the platform's `Retry-After` | nothing while records are younger than `spool.max_age`, which then expire, counted as expired; a full spool pauses collection as below |
+| A listener the agent does not trust, an agent the platform no longer admits, a certificate that expired | keeps the records, tries again at most an hour apart and says in `status` what an operator does | as above |
+| The platform rotating its authority | adopts the authorities a renewal publishes, from the renewal listener the agent already trusts | nothing |
+| A filesystem with less than 64 MiB free, or with no room for a write | pauses admission; collectors keep their place in what they read and catch up once there is room | what the source drops meanwhile, reported as a gap |
+| A filesystem the kernel made read-only, or a sync that failed | stops, so the service starts it again on what the spool holds, which it refuses to do while the filesystem takes no writes | nothing it admitted; what the source drops meanwhile, reported as a gap |
+| A record damaged on disk | delivers the others | that record, counted as lost |
+| The journal dropping entries before the agent read them | reports a gap | those entries |
+| The platform refusing a record for good | delivers the others | that record, counted as quarantined |
+| An update interrupted as dpkg installs it or as the installer checks it | the installer takes it to its end when it runs again | nothing |
+
+`make chaos` proves it on Ubuntu 24.04, as root, on a disposable host: it installs
+the package, keeps the installation on an ext4 filesystem of its own and has
+sshd's stand-in decide thousands of outcomes while it kills the agent over and
+over, has the emulated platform lose answers, publish part of batches, go away,
+answer late, present a certificate the agent does not trust, stop admitting the
+agent and rotate its authority, lets a certificate expire, fills the
+filesystem, has the kernel find an error in it, damages a record and has the
+journal drop entries, and interrupts an update twice. After every failure, the
+platform holds each outcome as one event, byte for byte however often it was
+delivered, and the agent counts every other one under the reason it was given.
+The compatibility suite also holds what platform 331492d's own gateway,
+backbone and store kept of what the installed agent delivered while it was
+killed over and over and the backbone stopped for longer than the agent waits
+for an answer: the backbone holds some events twice, as the agent sent again
+what it was never told was durable, and the store keeps each event once.
 
 ## Runtime state
 
@@ -529,6 +567,7 @@ make fuzz         # every fuzz target for FUZZTIME (10s); an input that fails is
 make vulncheck    # known vulnerabilities reachable from the agent
 make package      # dist/deb/seagull-agent_<version>_amd64.deb and .spdx.json, of the commit checked out
 make native-gate  # installs that package on this host, as root: use a disposable host
+make chaos        # installs it again and fails what it depends on, as root: use a disposable host
 ```
 
 `make verify` runs the unit, architecture and compatibility suites;
@@ -544,7 +583,7 @@ the run, to be kept under `testdata/fuzz` once fixed. CI also packages
 every commit twice on its runner and once more on a second builder and requires
 the same bytes from all three, and runs the native gate, which
 takes the installed service through enrollment, renewal, collection, delivery,
-upgrade, removal and purge on Ubuntu 24.04. While a contract change is in
+upgrade, removal and purge on Ubuntu 24.04, and the chaos suite beside it. While a contract change is in
 progress, a `go.work` may use a sibling contracts checkout; Git ignores it, and
 every `make` target runs with `GOWORK=off`.
 

@@ -245,7 +245,8 @@ func serve(ctx context.Context, stderr io.Writer, path string, components ...age
 	held.collection, held.files, held.assessment = collected.collection, collected.files, collected.assessment
 	observed.collection, observed.authentication, observed.inventory, observed.processes, observed.files, observed.network = collected.collection, collected.authentication, collected.inventory, collected.processes, collected.files, collected.network
 	observed.assessment = collected.assessment
-	composed := append([]agentruntime.Component{held.component(asked), {Name: "collection", Policy: agentruntime.Optional, Run: collected.collection.Run}}, components...)
+	composed := append([]agentruntime.Component{held.component(asked), {Name: "spool", Policy: agentruntime.Essential, Run: durable(spooled)},
+		{Name: "collection", Policy: agentruntime.Optional, Run: collected.collection.Run}}, components...)
 	if isEnrolled {
 		client, err := platform(settings, chosen.authorities, credential)
 		if err != nil {
@@ -855,6 +856,22 @@ func spending(logger *slog.Logger, settings config.Config, enforced ceilings.Cei
 	logger.Warn("agent_resources", append(reported, slog.String("recovery", bound))...)
 }
 
+func durable(spooled *spool.Spool) func(context.Context) error {
+	return func(ctx context.Context) error {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-spooled.Unavailable():
+		}
+		for _, held := range spooled.Stats().Streams {
+			if held.Unavailable != nil {
+				return fmt.Errorf("%w: %s: %w", spool.ErrUnavailable, held.Stream, held.Unavailable)
+			}
+		}
+		return spool.ErrUnavailable
+	}
+}
+
 func backlog(logger *slog.Logger, held spool.Stats) {
 	reported := []any{slog.Int64("max_bytes", held.MaxBytes), slog.Int64("bytes", held.Bytes)}
 	for _, stream := range held.Streams {
@@ -1303,7 +1320,7 @@ func recovery(path, state string, err error) string {
 	case errors.Is(err, spool.ErrDamaged):
 		return "take out of " + filepath.Join(state, spoolDirectory) + " what the agent did not write there, or discard the installation with " + replacement
 	case errors.Is(err, spool.ErrUnavailable):
-		return "restart the agent once the filesystem that holds " + filepath.Join(state, spoolDirectory) + " takes writes again: a spool that could not make a record durable admits nothing until the agent starts again"
+		return "repair the filesystem that holds " + filepath.Join(state, spoolDirectory) + ", whose errors the kernel log names: the agent stops once its spool can no longer make a record durable, and its service starts it again on what the spool holds once that filesystem takes writes"
 	case errors.Is(err, status.ErrUnwritten):
 		return "start the agent: it writes its status as it starts, and every " + statusEvery.String() + " while it runs"
 	case errors.Is(err, status.ErrInsecure):
@@ -1353,7 +1370,7 @@ func recovery(path, state string, err error) string {
 	case errors.Is(err, diagnostics.ErrInstallation):
 		return "write the bundle outside the directories the agent keeps as its own, its installation among them, such as in /var/tmp, and read it there as root"
 	case errors.Is(err, syscall.EROFS):
-		return "let the agent write " + state + ": its filesystem is read-only to the agent, and the service the package installs leaves it writable in /var/lib/seagull-agent alone, so keep the installation there or name its directory in ReadWritePaths= with a drop-in"
+		return "let the agent write " + state + ": the filesystem that holds it is read-only to the agent, either because the kernel made it read-only after errors, which its log names and which the service starts the agent again from once it is repaired, or because the service keeps the agent from writing there: the one the package installs leaves /var/lib/seagull-agent alone writable, so keep the installation there or name its directory in ReadWritePaths= with a drop-in"
 	case errors.Is(err, fs.ErrNotExist):
 		return "write the agent's configuration at " + path
 	}
