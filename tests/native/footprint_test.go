@@ -3,10 +3,12 @@
 package native_test
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"math"
@@ -328,4 +330,39 @@ func overspent(workloads []spent) []string {
 		}
 	}
 	return problems
+}
+
+// What the installed agent was measured to spend, on each host recorded under
+// testdata/footprint, stays within the budgets the measurement holds it to,
+// and a recorded soak within what a settled agent may grow by.
+func TestWhatTheInstalledAgentWasMeasuredToSpendStaysWithinItsBudgets(t *testing.T) {
+	recorded, err := filepath.Glob(filepath.Join("testdata", "footprint", "*.json"))
+	if err != nil || len(recorded) == 0 {
+		t.Fatalf("no footprint is recorded under testdata/footprint: %v", err)
+	}
+	for _, path := range recorded {
+		var held measured
+		content, err := os.ReadFile(path)
+		if err == nil {
+			decoder := json.NewDecoder(bytes.NewReader(content))
+			decoder.DisallowUnknownFields()
+			err = decoder.Decode(&held)
+		}
+		if err != nil {
+			t.Errorf("read %s: %v", path, err)
+			continue
+		}
+		if held.Build == "" || held.Host.Processor == "" || held.Host.System == "" || len(held.Method) == 0 || len(held.Workloads) == 0 || len(held.Samples) == 0 {
+			t.Errorf("%s does not say what was measured, on what and how", path)
+			continue
+		}
+		problems := overspent(held.Workloads)
+		if held.Trends != nil {
+			settled := held.Samples[0].At.Add(soakSettled)
+			_, problems, _ = unsettled(slices.DeleteFunc(slices.Clone(held.Samples), func(u usage) bool { return u.At.Before(settled) }))
+		}
+		for _, problem := range problems {
+			t.Errorf("%s: %s", path, problem)
+		}
+	}
 }
