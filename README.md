@@ -500,6 +500,46 @@ killed over and over and the backbone stopped for longer than the agent waits
 for an answer: the backbone holds some events twice, as the agent sent again
 what it was never told was durable, and the store keeps each event once.
 
+## Footprint
+
+What the agent spends, measured from outside its service with the package's
+unit and settings on Ubuntu 24.04 amd64 and systemd 255, while sshd's outcomes
+are what it collects and an emulated platform takes what it delivers. The
+service counts the agent and the `journalctl` it reads the journal through, and
+its memory here is anonymous memory, which no file backs. It was measured in a
+container on a VMware VM with 8 processors of a Ryzen 7 5700X, and on GitHub's
+runner, an Azure VM with 4 processors of an EPYC 7763:
+
+| Workload | VMware VM | GitHub's runner | Budget |
+|---|---|---|---|
+| Idle | 0.01% of a processor, 8 MiB, 19 goroutines, 23 descriptors, 0.2 KiB written a second | 0.01%, 11 MiB, 19 goroutines, 23 descriptors, 0.2 KiB | 0.5%, 32 MiB, 40 goroutines, 48 descriptors, 4 KiB |
+| 10 outcomes a second | 1% of a processor, 9 MiB; each event on the platform at most 304 ms after its outcome went to journald | 0.7%, 11 MiB, 344 ms | 3%, 32 MiB, 2 seconds |
+| A burst of 60,000 outcomes | 730 a second: 5% of a processor, 9 MiB, caught up 0.2 seconds after the last | 920 a second: 8%, 11 MiB, 0.2 seconds | 48 MiB, 30 seconds |
+| The platform out for 2 minutes | 9 MiB | 11 MiB | 32 MiB |
+| The platform back | delivering again 6 seconds later; 9 MiB | 16 seconds later; 11 MiB | 48 MiB |
+| 120,000 outcomes with the platform out and `spool.max_bytes` at 16 MiB | admission paused at 14 MiB of spool and 39,231 events, the rest left in the journal; 10 MiB | 39,204 events; 11 MiB | below 16 MiB of spool, 32 MiB |
+| The platform back with them | delivering again 100 seconds later, then 3,400 events a second, the upload rate of 1 MiB/s; 27% of a processor over the busiest 5 seconds, held back by the unit's quota for 10 seconds in all; 11 MiB | 122 seconds later, 3,400 a second; 42%, held back for 14 seconds; 11 MiB | 1,500 events a second, 48 MiB |
+| Starting and taking stock | stock taken in 0.3 seconds, 9 MiB | 0.9 seconds, 10 MiB | 64 MiB |
+| The files baseline of the default paths | 1,037 entries in 6 seconds, 10 MiB | 8,155 entries, 3 GiB read at the 8 MiB/s of `resources.max_scan_bytes_per_second` in 6.5 minutes, 26 MiB | 64 MiB |
+| Every module with the [Privileges](#privileges) drop-ins, 10 outcomes a second | 1% of a processor, 11 MiB, 27 goroutines, 26 descriptors | 0.8%, 27 MiB, 27 goroutines, 26 descriptors | 5%, 64 MiB, 64 goroutines, 64 descriptors |
+
+The spool takes about 370 bytes an event. Delivery resumes at the agent's next
+try, at most 7.5 minutes after the platform is back. The agent syncs every
+admission and every acknowledgement, so at 10 outcomes a second its service
+writes about 54 KB a second to storage, 5 KiB an event, and in a burst about
+440 bytes an event. The service's control group also counts the page cache of
+the files it reads: on the runner, the files baseline filled it to the unit's
+512 MiB, where the kernel reclaims it.
+
+`make footprint` measures it again on Ubuntu 24.04, as root, on a disposable
+host, and fails when a workload goes over its budget; CI runs it on every push.
+`make soak` runs the agent for `SOAK` with every module at its shortest
+interval, certificates that last ten minutes, the platform out and every
+connection dropped every quarter of an hour, and fails when its goroutines,
+descriptors or memory grow once settled; CI soaks it for four hours every
+week. What was measured, on which host and how, is under
+[`tests/native/testdata/footprint`](tests/native/testdata/footprint).
+
 ## Runtime state
 
 | Path | Purpose |
@@ -568,6 +608,8 @@ make vulncheck    # known vulnerabilities reachable from the agent
 make package      # dist/deb/seagull-agent_<version>_amd64.deb and .spdx.json, of the commit checked out
 make native-gate  # installs that package on this host, as root: use a disposable host
 make chaos        # installs it again and fails what it depends on, as root: use a disposable host
+make footprint    # installs it again and holds what it spends to its budgets, as root: use a disposable host
+make soak         # installs it again and runs it for SOAK (4h) with every module, as root: use a disposable host
 ```
 
 `make verify` runs the unit, architecture and compatibility suites;
@@ -583,9 +625,11 @@ the run, to be kept under `testdata/fuzz` once fixed. CI also packages
 every commit twice on its runner and once more on a second builder and requires
 the same bytes from all three, and runs the native gate, which
 takes the installed service through enrollment, renewal, collection, delivery,
-upgrade, removal and purge on Ubuntu 24.04, and the chaos suite beside it. While a contract change is in
-progress, a `go.work` may use a sibling contracts checkout; Git ignores it, and
-every `make` target runs with `GOWORK=off`.
+upgrade, removal and purge on Ubuntu 24.04, with the chaos suite and the
+footprint measurement beside it, and soaks the installed agent for four hours
+every week. While a contract change is in progress, a `go.work` may use a
+sibling contracts checkout; Git ignores it, and every `make` target runs with
+`GOWORK=off`.
 
 ## Security
 
