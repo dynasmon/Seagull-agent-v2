@@ -12,9 +12,6 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  GO_VERSION: "1.26.9"
-
 jobs:
   package:
     name: verify, package and gate the tagged commit
@@ -22,6 +19,7 @@ jobs:
     timeout-minutes: 40
     outputs:
       packaged: ${{ steps.packaged.outputs.packaged }}
+      toolchain: ${{ steps.packaged.outputs.toolchain }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -29,7 +27,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           cache: false
       - name: source verification
         run: make verify
@@ -45,6 +43,7 @@ jobs:
           cd dist/deb
           sha256sum -- *.deb *.spdx.json
           echo "packaged=$(sha256sum -- *.deb *.spdx.json | tr '\n' ';')" >> "$GITHUB_OUTPUT"
+          echo "toolchain=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
       - name: package the tagged commit again as a later release, to update the agent to
         run: make ahead
       - name: install the package, run it as a service, update it and remove it
@@ -62,7 +61,7 @@ jobs:
     name: package the tagged commit on another builder
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    container: golang:1.26.9-trixie@sha256:f06b7122f888680048afb247c4e5f49c0069eb6c4c1ccae0f3f4834527a8d22c
+    container: golang:1.26.10-trixie@sha256:a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42
     outputs:
       packaged: ${{ steps.packaged.outputs.packaged }}
     steps:
@@ -160,6 +159,7 @@ jobs:
           SBOM: ${{ steps.held.outputs.sbom }}
           PROVENANCE: ${{ steps.provenance.outputs.bundle-path }}
           MATERIALS: ${{ steps.materials.outputs.bundle-path }}
+          TOOLCHAIN: ${{ needs.package.outputs.toolchain }}
         run: |
           name="$(basename "$PACKAGE")"
           listed="$(basename "$SBOM")"
@@ -175,7 +175,7 @@ jobs:
 
           The same command with --predicate-type https://spdx.dev/Document/v2.3 verifies ${listed//\~/.}, the bill of materials of what the package holds.
 
-          Two builders packaged commit $GITHUB_SHA into these same bytes, and make package at $GITHUB_REF_NAME, with Go $GO_VERSION, writes them again.
+          Two builders packaged commit $GITHUB_SHA into these same bytes, and make package at $GITHUB_REF_NAME, with $TOOLCHAIN, writes them again.
 
           The README says how to install, configure and enroll it.
           EOF

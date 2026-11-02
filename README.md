@@ -217,10 +217,11 @@ would order another kind differently from the agent, or give two of them one
 package version, so the workflow refuses to package it.
 
 A release can be rebuilt and compared with the one published: `make package`
-at its tag, with Go 1.26.9, writes the same package and bill of materials, byte
-for byte. CI checks it for every commit, packaging it on the Ubuntu 24.04 runner
-and again in the `golang:1.26.9-trixie` image as another account, in another
-directory and under another time zone, locale and umask; one commit packaged on
+at its tag, with the Go `go.mod` names, writes the same package and bill of
+materials, byte for byte. CI checks it for every commit, packaging it on the
+Ubuntu 24.04 runner and again in the `golang` image of that same version as
+another account, in another directory and under another time zone, locale and
+umask; one commit packaged on
 Ubuntu 24.04 and 22.04 and on Debian 12 and 13 was the same bytes on all four.
 The agent is built without its symbol table and debugging information, which
 halves the package; a panic still names every function and line it went
