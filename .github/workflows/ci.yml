@@ -32,6 +32,8 @@ jobs:
           cache: true
       - name: lint and static analysis
         run: make lint
+      - name: security rules
+        run: make gosec
       - name: dependency graph and checksums
         run: make mod-check
       - name: unit, architecture and compatibility suites
