@@ -1,0 +1,57 @@
+name: scheduled
+
+on:
+  schedule:
+    - cron: "33 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  vulnerabilities:
+    name: what is known today of what is linked
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: refuse a known vulnerability in any package this module links
+        run: make vulncheck
+
+  rules:
+    name: what the security rules find today
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: refuse what the static security rules find
+        run: make gosec
+
+  protection:
+    name: main is protected as declared
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: compare the rules GitHub enforces with the ones this repository declares
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: make check-protection REPOSITORY="$GITHUB_REPOSITORY"

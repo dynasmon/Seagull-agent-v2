@@ -2,7 +2,9 @@ SHELL := /bin/bash
 GO ?= go
 GOFMT = $(shell $(GO) env GOROOT)/bin/gofmt
 DIST ?= dist
-GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.8.0
+GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.9.0
+GOSEC ?= github.com/securego/gosec/v2/cmd/gosec@v2.30.0
+REPOSITORY ?= dynasmon/Seagull-agent-v2
 FUZZTIME ?= 10s
 SOAK ?= 4h
 EVIDENCE ?=
@@ -14,7 +16,7 @@ AHEAD = v1.999.0-gate
 # that points at sibling checkouts.
 export GOWORK := off
 
-.PHONY: help fmt fmt-check vet mod-check lint test test-race fuzz build package ahead native-gate chaos footprint soak vulncheck clean verify
+.PHONY: help fmt fmt-check vet mod-check lint test test-race fuzz build package ahead native-gate chaos footprint soak vulncheck gosec verify-tag check-protection clean verify
 
 help:
 	@echo "fmt         format the module"
@@ -33,7 +35,10 @@ help:
 	@echo "footprint   install that package on THIS host, as root, and measure what the service spends against its budgets: use a disposable host"
 	@echo "soak        install that package on THIS host, as root, and run it for SOAK ($(SOAK)) with every module: use a disposable host"
 	@echo "            EVIDENCE=DIR has native-gate, footprint and soak write what they recorded under DIR"
-	@echo "vulncheck   scan reachable dependencies"
+	@echo "vulncheck   refuse a known vulnerability in any package this module links"
+	@echo "gosec       refuse what the static security rules find"
+	@echo "verify-tag  refuse TAG unless a signer main names signed it"
+	@echo "check-protection  compare the rules GitHub enforces on main with the ones declared here"
 	@echo "verify      the full gate: lint, mod-check, tests and build"
 
 fmt:
@@ -113,7 +118,25 @@ native-gate chaos footprint soak:
 		$(if $(filter soak,$@),-soak $(SOAK)) $(if $(EVIDENCE),-evidence "$(abspath $(EVIDENCE))")
 
 vulncheck:
-	$(GO) run $(GOVULNCHECK) ./...
+	$(GO) run $(GOVULNCHECK) -scan package ./...
+
+gosec:
+	$(GO) run $(GOSEC) -quiet -conf .gosec.json -exclude=G104,G115 ./...
+
+verify-tag:
+	@test -n "$(TAG)" || { echo "name the tag: make verify-tag TAG=v1.2.3"; exit 1; }
+	@mkdir -p $(DIST)
+	@git show origin/main:.github/allowed_signers > $(DIST)/allowed_signers
+	@git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=$(DIST)/allowed_signers -c gpg.minTrustLevel=fully \
+	  verify-tag "$(TAG)"
+
+check-protection:
+	@summary='{rules: (map(.type) | unique), checks: ([.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | sort)}'; \
+	declared="$$(jq -c ".rules | $$summary" .github/rulesets/main.json)"; \
+	enforced="$$(gh api repos/$(REPOSITORY)/rules/branches/main | jq -c "$$summary")"; \
+	if [ "$$declared" != "$$enforced" ]; then \
+	  echo "main is declared as $$declared"; echo "and enforced as   $$enforced"; exit 1; \
+	fi; echo "main is enforced as declared"
 
 clean:
 	rm -rf $(DIST)

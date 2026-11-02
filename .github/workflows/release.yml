@@ -13,8 +13,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  signature:
+    name: release tag signature
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: fetch the tag as it was pushed, and main, which names who may sign it
+        run: git fetch --force --no-tags origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME" +refs/heads/main:refs/remotes/origin/main
+      - name: refuse a tag no signer of main signed
+        run: make verify-tag TAG="$GITHUB_REF_NAME"
+
   package:
     name: verify, package and gate the tagged commit
+    needs: signature
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     outputs:
@@ -59,6 +73,7 @@ jobs:
 
   reproduce:
     name: package the tagged commit on another builder
+    needs: signature
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     container: golang:1.26.10-trixie@sha256:a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42

@@ -1,0 +1,10 @@
+{
+  "exclude-rules": [
+    { "path": "packaging/.*", "rules": ["G204", "G301", "G302", "G304", "G306", "G401", "G501"] },
+    { "path": "internal/platform/(command|journal)/.*", "rules": ["G204"] },
+    { "path": "internal/platform/interfaces/.*", "rules": ["G103"] },
+    { "path": "(internal/platform/files/files|internal/config/config|cmd/seagull-agent/main)\\.go", "rules": ["G304"] },
+    { "path": "internal/(update/follow|reporting/reporting)\\.go", "rules": ["G125"] },
+    { "path": "internal/(update/follow|policy/follow|reporting/reporting|modules/modules|governor/work)\\.go", "rules": ["G404"] }
+  ]
+}
