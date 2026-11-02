@@ -2,7 +2,8 @@ SHELL := /bin/bash
 GO ?= go
 GOFMT = $(shell $(GO) env GOROOT)/bin/gofmt
 DIST ?= dist
-GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.8.0
+GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.9.0
+GOSEC ?= github.com/securego/gosec/v2/cmd/gosec@v2.30.0
 FUZZTIME ?= 10s
 SOAK ?= 4h
 EVIDENCE ?=
@@ -14,7 +15,7 @@ AHEAD = v1.999.0-gate
 # that points at sibling checkouts.
 export GOWORK := off
 
-.PHONY: help fmt fmt-check vet mod-check lint test test-race fuzz build package ahead native-gate chaos footprint soak vulncheck clean verify
+.PHONY: help fmt fmt-check vet mod-check lint test test-race fuzz build package ahead native-gate chaos footprint soak vulncheck gosec clean verify
 
 help:
 	@echo "fmt         format the module"
@@ -33,7 +34,8 @@ help:
 	@echo "footprint   install that package on THIS host, as root, and measure what the service spends against its budgets: use a disposable host"
 	@echo "soak        install that package on THIS host, as root, and run it for SOAK ($(SOAK)) with every module: use a disposable host"
 	@echo "            EVIDENCE=DIR has native-gate, footprint and soak write what they recorded under DIR"
-	@echo "vulncheck   scan reachable dependencies"
+	@echo "vulncheck   refuse a known vulnerability in any package this module links"
+	@echo "gosec       refuse what the static security rules find"
 	@echo "verify      the full gate: lint, mod-check, tests and build"
 
 fmt:
@@ -113,7 +115,10 @@ native-gate chaos footprint soak:
 		$(if $(filter soak,$@),-soak $(SOAK)) $(if $(EVIDENCE),-evidence "$(abspath $(EVIDENCE))")
 
 vulncheck:
-	$(GO) run $(GOVULNCHECK) ./...
+	$(GO) run $(GOVULNCHECK) -scan package ./...
+
+gosec:
+	$(GO) run $(GOSEC) -quiet -conf .gosec.json -exclude=G104,G115 ./...
 
 clean:
 	rm -rf $(DIST)
