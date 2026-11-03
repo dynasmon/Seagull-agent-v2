@@ -18,10 +18,11 @@ import (
 )
 
 const (
-	Package   = "seagull-agent"
-	revision  = "1"
-	maxFields = 4 << 10
-	maxOutput = 1 << 20
+	Package    = "seagull-agent"
+	revision   = "1"
+	maxVersion = 128
+	maxFields  = 4 << 10
+	maxOutput  = 1 << 20
 )
 
 var (
@@ -52,6 +53,9 @@ var (
 // such as rc.2, or what Go stamps a commit with, the only ones dpkg orders as
 // the agent orders releases and no two of which share a package version.
 func Version(stamped string) (string, error) {
+	if len(stamped) > maxVersion {
+		return "", fmt.Errorf("it was built as a version longer than the %d bytes a release of the agent is named in", maxVersion)
+	}
 	parts := semantic.FindStringSubmatch(stamped)
 	if parts == nil || parts[4] != "" && !ordered.MatchString(parts[4]) {
 		return "", fmt.Errorf("it was built as %s, which names no release or commit of the agent dpkg orders as the agent does", secrets.Shown(stamped))
