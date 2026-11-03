@@ -838,7 +838,11 @@ func address(name, raw string) (string, error) {
 	if reached.Path != "" && (!strings.HasPrefix(reached.Path, "/") || slices.ContainsFunc(segments, unresolved)) {
 		return "", fmt.Errorf("%s is %s, and the path it names has nothing to resolve", name, secrets.Address(raw))
 	}
-	return reached.String(), nil
+	written := reached.String()
+	if len(written) > maxPathBytes {
+		return "", fmt.Errorf("%s is longer than %d bytes once written as a URL", name, maxPathBytes)
+	}
+	return written, nil
 }
 
 func setting(path string) string {
