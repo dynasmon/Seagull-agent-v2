@@ -303,6 +303,7 @@ func TestAStopReleasesTheRequestAndTheConnectionItWasWaitingOn(t *testing.T) {
 		entered <- struct{}{}
 		<-r.Context().Done()
 		released <- struct{}{}
+		panic(http.ErrAbortHandler)
 	})
 	key := agentKey(t)
 	client := compose(t, platform.trusted, &held{credential: transport.Credential{Chain: agents.agent(t, "web-01", key.Public()), Signer: key}})
