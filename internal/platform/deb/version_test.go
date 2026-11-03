@@ -112,3 +112,16 @@ func FuzzVersion(f *testing.F) {
 		}
 	})
 }
+
+func TestAVersionIsPackagedUpToTheLongestReleaseTheAgentReads(t *testing.T) {
+	longest := "v1.0.0-" + strings.Repeat("a", update.MaxVersionLength-len("v1.0.0-"))
+	if _, read := update.ParseVersion(longest); !read {
+		t.Fatalf("the agent reads no release named %s", longest)
+	}
+	if _, err := Version(longest); err != nil {
+		t.Fatalf("the longest release the agent reads is not packaged: %v", err)
+	}
+	if packaged, err := Version(longest + "a"); err == nil {
+		t.Fatalf("a version longer than any release the agent reads is packaged as %s", packaged)
+	}
+}
