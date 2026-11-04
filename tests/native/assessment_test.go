@@ -197,8 +197,7 @@ func (g *gate) assess(t *testing.T) {
 	if again["revision"] != float64(4) || again["because"] != "changed" || again["errors"] != float64(4) {
 		t.Fatalf("after a newer policy the agent admitted %v", again)
 	}
-	found = g.assessed(t, 2)
-	judge(t, found[1], 4, order, expected)
+	judge(t, g.assessment(t, again["assessment_id"]), 4, order, expected)
 	g.statusSays(t, true, fmt.Sprintf("ran the %d checks of revision 4 of gate-servers", len(order)))
 
 	run(t, "systemctl", "stop", unit)
@@ -260,6 +259,28 @@ func (g *gate) assessed(t *testing.T, count int) []*assessmentv1.Assessment {
 		if time.Now().After(deadline) {
 			t.Fatalf("the platform holds %d assessments, want %d:\n%s", len(found), count,
 				answer("journalctl", "--no-pager", "--output", "cat", "_SYSTEMD_INVOCATION_ID="+g.invocation))
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// The assessment the agent says it admitted under a revision. The module's
+// hourly round falls where the installation places it, so a round of the
+// revision before can be admitted between a change to the host and the newer
+// policy, and the order the platform received them in proves nothing.
+func (g *gate) assessment(t *testing.T, named any) *assessmentv1.Assessment {
+	t.Helper()
+	id, _ := named.(string)
+	deadline := time.Now().Add(time.Minute)
+	for {
+		found, _ := g.platform.assessments()
+		for _, held := range found {
+			if id != "" && held.GetAssessmentId() == id {
+				return held
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the platform holds no assessment %q, the one the agent said it admitted", id)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
