@@ -183,16 +183,50 @@ and procps. The host needs neither Go, Git nor any Seagull repository.
 it passes its own native gate; other distributions, Windows and macOS are not
 supported.
 
+## What a release claims
+
+A release claims the Core profile and four more, each held by suites of its own
+in CI and by the native gate:
+
+| Profile | What it covers |
+|---|---|
+| Core | enrollment, identity and renewal; durable delivery, replay and recovery from the spool; authentication monitoring; diagnostics; installation, upgrade and removal |
+| Inventory | complete snapshots of every kind `inventory` takes, removal through a later complete snapshot, replay |
+| Process visibility | `processes` snapshots, with the drop-in its privileges need |
+| Security configuration assessment | `assessment`, under a policy an operator signed |
+| Fleet | signed policy, status, signed updates and rollouts |
+
+It does not claim file integrity monitoring or network visibility: `files` and
+`network` run and log on the host, but the platform keeps neither yet, so they
+deliver nothing. Response actions are not built, and only Ubuntu 24.04 on amd64
+passes the native gate.
+
+The platform's half is evidenced against the backend commit the release notes
+name. That commit records the answers its listeners give an agent, and its
+pipeline was recorded keeping and deciding what this agent sends (see
+[Compatibility](#compatibility)). The backend has no release gate of its own
+yet, so a release names a commit and not a backend version. Inventory and
+process projection were last recorded against backend 0656b2a; since then the
+backend keeps apart two local accounts that share a uid, where the agent merges
+them into one item and logs `inventory_items_merged`. A revocation is enforced
+within the bound the backend states: every gateway serving agents refuses a
+revoked agent within 30 seconds of the decision reaching the platform's log, or
+refuses every batch with `503 roster_stale`, which the agent waits out with its
+spool intact.
+
 ## Verify a release
 
-A release is a tag `vX.Y.Z`. Its workflow verifies the commit, packages it, runs
-the package through the native gate and packages the commit again on a second
-builder. Only when both builders wrote the same bytes does it attest, through
-Sigstore, SLSA provenance for the package and the SPDX bill of materials of what
-the package holds. The package, its bill of materials and both statements, as
-`.sigstore.json` bundles, are attached to a draft release that a maintainer
-publishes. Verify a package before installing it, with a GitHub CLI that has
-`gh attestation` (Ubuntu 24.04's own, 2.45, predates it):
+A release is a tag `vX.Y.Z` that a signer `main` names signed. Its workflow runs
+every job `main` requires on the tagged commit, the native gate and the chaos
+and footprint suites among them. It cites the newest weekly soak of `main` that
+ran a commit the tag holds, and refuses the release when no such soak ran in the
+last eight days. It packages the commit on two builders, and attests only bytes
+both builders wrote and the native gate installed: through Sigstore, SLSA
+provenance for the package and the SPDX bill of materials of what it holds. The
+package, its bill of materials and both statements, as `.sigstore.json`
+bundles, are attached to a draft release that a maintainer publishes. Verify a
+package before installing it, with a GitHub CLI that has `gh attestation`
+(Ubuntu 24.04's own, 2.45, predates it):
 
 ```bash
 gh attestation verify seagull-agent_0.1.0-1_amd64.deb \
@@ -581,9 +615,19 @@ refusal of the agent itself is an exclusion that waits for an operator. Reply
 fields the contracts do not declare are ignored.
 
 Compatibility is claimed only with the backend commits recorded under
-[`tests/compatibility/testdata`](tests/compatibility/testdata): 6fae345,
-2829b0d, 0656b2a, fdd814d, 46ca9c7, 6b85c4b, 8d1e9e0 and 331492d, whose ingest
-gateway, control plane and pipeline were driven with what this agent sends;
+[`tests/compatibility/testdata`](tests/compatibility/testdata), and this build
+is verified against 5c48cc9. That backend records every answer its listeners
+give an agent and fails its own build when one changes without a version
+decision. `make platform-answers BACKEND=<commit>` copies that record from a
+commit's tree, and the suite reads every answer with the agent's own code: the
+four streams' acknowledgements and refusals, both descriptors, issuance,
+renewal, policy and update. It fails on an answer no part of the agent reads,
+or on one the record lost. What 5c48cc9's pipeline stores and decides of the
+authentication this agent collected, keeps of its status and assessments, and
+makes of rollouts on its reports was recorded against the same commit. The
+earlier commits 6fae345, 2829b0d, 0656b2a, fdd814d, 46ca9c7, 6b85c4b, 8d1e9e0
+and 331492d were recorded by driving their ingest gateway, control plane and
+pipeline with what this agent sends;
 fdd814d, 46ca9c7, 6b85c4b, 8d1e9e0 and 331492d also handed it the signed
 policies it applies; 46ca9c7, 6b85c4b, 8d1e9e0 and 331492d took and kept the
 status reports this build's installed agent sent in the native gate; 6b85c4b,
@@ -611,6 +655,7 @@ make native-gate  # installs that package on this host, as root: use a disposabl
 make chaos        # installs it again and fails what it depends on, as root: use a disposable host
 make footprint    # installs it again and holds what it spends to its budgets, as root: use a disposable host
 make soak         # installs it again and runs it for SOAK (4h) with every module, as root: use a disposable host
+make platform-answers BACKEND=<commit>  # copies the answers that backend commit recorded for an agent
 ```
 
 `make verify` runs the unit, architecture and compatibility suites;
