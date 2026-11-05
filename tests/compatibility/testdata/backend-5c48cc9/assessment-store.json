@@ -1,0 +1,39 @@
+{
+  "platform": {
+    "repository": "github.com/dynasmon/Seagull-backend-v2",
+    "commit": "5c48cc9f2dbd7f90c083c2d9eff6e372bbc74526",
+    "contracts": "v0.21.0",
+    "broker": "redpandadata/redpanda:v26.2.6",
+    "store": "clickhouse/clickhouse-server:26.8.36.3"
+  },
+  "recorded_at": "2026-11-05T15:59:28.912829891Z",
+  "tenant_id": "tenant-1793894367611092236",
+  "alone": {
+    "admitted": 2,
+    "kept_rows": 2,
+    "posture": "c3689fde-f39b-8a60-bce8-9618edb03659",
+    "posture_file": "assessment-posture-alone.pb",
+    "posture_counts": {
+      "checks": 21,
+      "passed": 10,
+      "failed": 4,
+      "errors": 4,
+      "unsupported": 2,
+      "not_applicable": 1
+    }
+  },
+  "replayed": {
+    "admitted": 4,
+    "kept_rows": 2,
+    "posture": "c3689fde-f39b-8a60-bce8-9618edb03659",
+    "posture_file": "assessment-posture-replayed.pb",
+    "posture_counts": {
+      "checks": 21,
+      "passed": 10,
+      "failed": 4,
+      "errors": 4,
+      "unsupported": 2,
+      "not_applicable": 1
+    }
+  }
+}
