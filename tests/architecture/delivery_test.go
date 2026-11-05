@@ -23,6 +23,8 @@ var (
 	calledLocally = regexp.MustCompile(`^\./\.github/workflows/[a-z]+\.yml$`)
 	jobHeader     = regexp.MustCompile(`(?m)^  ([a-z][a-z0-9_-]*):$`)
 	jobNeeds      = regexp.MustCompile(`(?m)^    needs: (?:\[([^\]]*)\]|(\S+))$`)
+	jobCalls      = regexp.MustCompile(`(?m)^    uses: \./\.github/workflows/(\S+)$`)
+	callable      = regexp.MustCompile(`(?m)^  workflow_call:`)
 )
 
 func workflows(t *testing.T) map[string]string {
@@ -156,6 +158,43 @@ func TestNothingIsReleasedFromATagNobodySigned(t *testing.T) {
 		if name != "signature" && !release.after(name, "signature") {
 			t.Errorf("%s may run before the signature of the tag is verified", name)
 		}
+	}
+}
+
+func TestAReleaseIsDraftedOnlyOnceItsCommitPassedWhatMainRequiresAndASoakIsCited(t *testing.T) {
+	declared := workflows(t)
+	release := jobsOf(t, declared["release.yml"])
+	if _, found := release.blocks["release"]; !found {
+		t.Fatal("the release workflow drafts no release")
+	}
+	called := map[string]string{}
+	for name, block := range release.blocks {
+		if call := jobCalls.FindStringSubmatch(block); call != nil {
+			called[call[1]] = name
+		}
+	}
+	for _, required := range []string{"ci.yml", "codeql.yml"} {
+		job, found := called[required]
+		switch {
+		case !found:
+			t.Errorf("the release does not run %s on the tagged commit", required)
+		case !callable.MatchString(declared[required]):
+			t.Errorf("%s cannot be run by the release", required)
+		case !release.after("release", job):
+			t.Errorf("the release is drafted without waiting for %s", required)
+		}
+	}
+	cited := false
+	for name, block := range release.blocks {
+		if strings.Contains(block, "--workflow soak.yml") {
+			cited = cited || release.after("release", name)
+		}
+	}
+	if !cited {
+		t.Error("the release is drafted without citing a soak")
+	}
+	if !strings.Contains(release.blocks["release"], "needs.ci.outputs.packaged") {
+		t.Error("the release attests a package without holding it to the one the native gate installed")
 	}
 }
 
