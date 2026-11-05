@@ -19,8 +19,12 @@ var (
 	imageByDigest = regexp.MustCompile(`^golang:(\d+\.\d+\.\d+)-[a-z]+@sha256:[0-9a-f]{64}$`)
 	declaredGo    = regexp.MustCompile(`(?m)^toolchain go(\S+)$`)
 	jobName       = regexp.MustCompile(`(?m)^    name: (.+)$`)
-	waitsOnTag    = regexp.MustCompile(`(?m)^    needs: signature$`)
 	readOnly      = regexp.MustCompile(`(?m)^permissions:\n  contents: read\n`)
+	calledLocally = regexp.MustCompile(`^\./\.github/workflows/[a-z]+\.yml$`)
+	jobHeader     = regexp.MustCompile(`(?m)^  ([a-z][a-z0-9_-]*):$`)
+	jobNeeds      = regexp.MustCompile(`(?m)^    needs: (?:\[([^\]]*)\]|(\S+))$`)
+	jobCalls      = regexp.MustCompile(`(?m)^    uses: \./\.github/workflows/(\S+)$`)
+	callable      = regexp.MustCompile(`(?m)^  workflow_call:`)
 )
 
 func workflows(t *testing.T) map[string]string {
@@ -46,7 +50,7 @@ func workflows(t *testing.T) map[string]string {
 func TestEveryActionIsNamedByItsCommit(t *testing.T) {
 	for name, content := range workflows(t) {
 		for _, used := range usedAction.FindAllStringSubmatch(content, -1) {
-			if !actionByHash.MatchString(used[1]) {
+			if !actionByHash.MatchString(used[1]) && !calledLocally.MatchString(used[1]) {
 				t.Errorf("%s: %s is named by a tag, which its owner can move: name it by its commit", name, used[1])
 			}
 		}
@@ -146,8 +150,96 @@ func TestEveryJobIsRequiredOnMain(t *testing.T) {
 }
 
 func TestNothingIsReleasedFromATagNobodySigned(t *testing.T) {
-	release := workflows(t)["release.yml"]
-	if got := len(waitsOnTag.FindAllString(release, -1)); got != 2 {
-		t.Errorf("%d jobs wait for the tag to be verified, want the two that package it", got)
+	release := jobsOf(t, workflows(t)["release.yml"])
+	if _, found := release.blocks["signature"]; !found {
+		t.Fatal("the release verifies no signature of its tag")
 	}
+	for name := range release.blocks {
+		if name != "signature" && !release.after(name, "signature") {
+			t.Errorf("%s may run before the signature of the tag is verified", name)
+		}
+	}
+}
+
+func TestAReleaseIsDraftedOnlyOnceItsCommitPassedWhatMainRequiresAndASoakIsCited(t *testing.T) {
+	declared := workflows(t)
+	release := jobsOf(t, declared["release.yml"])
+	if _, found := release.blocks["release"]; !found {
+		t.Fatal("the release workflow drafts no release")
+	}
+	called := map[string]string{}
+	for name, block := range release.blocks {
+		if call := jobCalls.FindStringSubmatch(block); call != nil {
+			called[call[1]] = name
+		}
+	}
+	for _, required := range []string{"ci.yml", "codeql.yml"} {
+		job, found := called[required]
+		switch {
+		case !found:
+			t.Errorf("the release does not run %s on the tagged commit", required)
+		case !callable.MatchString(declared[required]):
+			t.Errorf("%s cannot be run by the release", required)
+		case !release.after("release", job):
+			t.Errorf("the release is drafted without waiting for %s", required)
+		}
+	}
+	cited := false
+	for name, block := range release.blocks {
+		if strings.Contains(block, "--workflow soak.yml") {
+			cited = cited || release.after("release", name)
+		}
+	}
+	if !cited {
+		t.Error("the release is drafted without citing a soak")
+	}
+	if !strings.Contains(release.blocks["release"], "needs.ci.outputs.packaged") {
+		t.Error("the release attests a package without holding it to the one the native gate installed")
+	}
+}
+
+type workflowJobs struct {
+	blocks map[string]string
+	needs  map[string][]string
+}
+
+func jobsOf(t *testing.T, content string) workflowJobs {
+	t.Helper()
+	_, declared, found := strings.Cut(content, "\njobs:\n")
+	if !found {
+		t.Fatal("the workflow declares no jobs")
+	}
+	jobs := workflowJobs{blocks: map[string]string{}, needs: map[string][]string{}}
+	headers := jobHeader.FindAllStringSubmatchIndex(declared, -1)
+	for index, header := range headers {
+		end := len(declared)
+		if index+1 < len(headers) {
+			end = headers[index+1][0]
+		}
+		name, block := declared[header[2]:header[3]], declared[header[1]:end]
+		jobs.blocks[name] = block
+		if waits := jobNeeds.FindStringSubmatch(block); waits != nil {
+			for _, needed := range strings.Split(waits[1]+waits[2], ",") {
+				jobs.needs[name] = append(jobs.needs[name], strings.TrimSpace(needed))
+			}
+		}
+	}
+	return jobs
+}
+
+func (w workflowJobs) after(job, before string) bool {
+	seen := map[string]bool{}
+	waiting := slices.Clone(w.needs[job])
+	for len(waiting) > 0 {
+		next := waiting[0]
+		waiting = waiting[1:]
+		if next == before {
+			return true
+		}
+		if !seen[next] {
+			seen[next] = true
+			waiting = append(waiting, w.needs[next]...)
+		}
+	}
+	return false
 }

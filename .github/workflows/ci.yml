@@ -9,6 +9,11 @@ on:
       - "refact/**"
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    outputs:
+      packaged:
+        description: the digests of the package and bill of materials that went through the native gate
+        value: ${{ jobs.package.outputs.packaged }}
 
 permissions:
   contents: read

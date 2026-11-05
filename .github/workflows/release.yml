@@ -26,14 +26,62 @@ jobs:
       - name: refuse a tag no signer of main signed
         run: make verify-tag TAG="$GITHUB_REF_NAME"
 
-  package:
-    name: verify, package and gate the tagged commit
+  ci:
+    name: every job main requires, on the tagged commit
+    needs: signature
+    uses: ./.github/workflows/ci.yml
+
+  codeql:
+    name: the code analysis main requires, on the tagged commit
+    needs: signature
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/codeql.yml
+
+  soak:
+    name: cite the weekly soak of a commit the tag holds
     needs: signature
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      cited: ${{ steps.cited.outputs.cited }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: cited
+        name: cite the newest weekly soak of main, at most eight days old, of a commit the tag holds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          since="$(date -u -d '8 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow soak.yml --branch main --event schedule --status success \
+            --limit 20 --json headSha,createdAt,url \
+            --jq ".[] | select(.createdAt >= \"$since\") | \"\(.headSha) \(.createdAt) \(.url)\"" > "$RUNNER_TEMP/soaks"
+          while read -r commit began url; do
+            if git merge-base --is-ancestor "$commit" "$GITHUB_SHA"; then
+              echo "cited=$url, which soaked $commit from $began" >> "$GITHUB_OUTPUT"
+              echo "cited $url, which soaked $commit from $began"
+              exit 0
+            fi
+          done < "$RUNNER_TEMP/soaks"
+          echo "no weekly soak of main since $since ran a commit the tag holds: tag again once one has" >&2
+          exit 1
+
+  package:
+    name: package the tagged commit
+    needs: signature
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     outputs:
       packaged: ${{ steps.packaged.outputs.packaged }}
       toolchain: ${{ steps.packaged.outputs.toolchain }}
+      platform: ${{ steps.platform.outputs.platform }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -43,8 +91,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - name: source verification
-        run: make verify
       - name: package the tagged commit
         id: packaged
         run: |
@@ -58,10 +104,12 @@ jobs:
           sha256sum -- *.deb *.spdx.json
           echo "packaged=$(sha256sum -- *.deb *.spdx.json | tr '\n' ';')" >> "$GITHUB_OUTPUT"
           echo "toolchain=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
-      - name: package the tagged commit again as a later release, to update the agent to
-        run: make ahead
-      - name: install the package, run it as a service, update it and remove it
-        run: make native-gate
+      - name: name the backend commits the agent was verified against
+        id: platform
+        run: |
+          verified="$(jq -r .commit tests/compatibility/testdata/*/platform.json | sort -u | paste -sd ' ')"
+          test -n "$verified"
+          echo "platform=$verified" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: debian-package
@@ -103,7 +151,7 @@ jobs:
 
   release:
     name: attest the package and draft its release
-    needs: [package, reproduce]
+    needs: [package, reproduce, ci, codeql, soak]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: release
@@ -117,15 +165,18 @@ jobs:
           name: debian-package
           path: dist/deb
       - id: held
-        name: hold the package to what both builders packaged and its bill of materials names
+        name: hold the package to what both builders packaged, what the native gate installed and what its bill of materials names
         env:
           PACKAGED: ${{ needs.package.outputs.packaged }}
           REPRODUCED: ${{ needs.reproduce.outputs.packaged }}
+          GATED: ${{ needs.ci.outputs.packaged }}
         run: |
           echo "ubuntu 24.04 runner:  $PACKAGED"
           echo "golang trixie image: $REPRODUCED"
+          echo "native gate:         $GATED"
           test -n "$PACKAGED"
           test "$PACKAGED" = "$REPRODUCED"
+          test "$PACKAGED" = "$GATED"
           cd dist/deb
           test "$(sha256sum -- *.deb *.spdx.json | tr '\n' ';')" = "$PACKAGED"
           package="$(ls -- *.deb)"
@@ -175,6 +226,8 @@ jobs:
           PROVENANCE: ${{ steps.provenance.outputs.bundle-path }}
           MATERIALS: ${{ steps.materials.outputs.bundle-path }}
           TOOLCHAIN: ${{ needs.package.outputs.toolchain }}
+          PLATFORM: ${{ needs.package.outputs.platform }}
+          SOAK: ${{ needs.soak.outputs.cited }}
         run: |
           name="$(basename "$PACKAGE")"
           listed="$(basename "$SBOM")"
@@ -184,6 +237,8 @@ jobs:
           cat > notes.md <<EOF
           Seagull Agent $GITHUB_REF_NAME, packaged for Ubuntu 24.04 on amd64.
 
+          It claims the Core profile with inventory, process visibility, security configuration assessment and fleet management: signed policy, status, signed updates and rollouts. File integrity monitoring and network visibility are not claimed, since the backend keeps neither canonically yet, and neither are response actions.
+
           Verify the package before installing it:
 
               gh attestation verify $served --repo $GITHUB_REPOSITORY --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml --source-ref $GITHUB_REF --source-digest $GITHUB_SHA --deny-self-hosted-runners
@@ -191,6 +246,10 @@ jobs:
           The same command with --predicate-type https://spdx.dev/Document/v2.3 verifies ${listed//\~/.}, the bill of materials of what the package holds.
 
           Two builders packaged commit $GITHUB_SHA into these same bytes, and make package at $GITHUB_REF_NAME, with $TOOLCHAIN, writes them again.
+
+          Before the release was drafted, that commit passed every job main requires, the native gate installed these same bytes, and the weekly soak of a commit it holds was cited: $SOAK.
+
+          It was verified against Seagull backend $PLATFORM: every answer that commit records for an agent, and what its pipeline keeps and decides of what this agent sends. The backend has no release gate of its own yet, so the commit is named rather than a version.
 
           The README says how to install, configure and enroll it.
           EOF
