@@ -1,0 +1,931 @@
+{
+  "protocol": 1,
+  "contracts": "v0.21.0",
+  "answers": [
+    {
+      "name": "events-accepted",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-accepted.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "reply": "events-accepted.reply.pb",
+      "message": "seagull.ingest.v1.BatchAck",
+      "summary": {
+        "accepted": true,
+        "durable": true,
+        "received": 1
+      }
+    },
+    {
+      "name": "events-replayed",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-replayed.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "reply": "events-replayed.reply.pb",
+      "message": "seagull.ingest.v1.BatchAck",
+      "summary": {
+        "accepted": true,
+        "durable": true,
+        "received": 1
+      }
+    },
+    {
+      "name": "events-protocol-2",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-protocol-2.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 426,
+      "content_type": "application/x-protobuf",
+      "reply": "events-protocol-2.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "unsupported_protocol_version",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "events-schema-2",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-schema-2.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "events-schema-2.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "invalid_event",
+        "detail": "\u003cdetail\u003e",
+        "event_index": 1,
+        "field": "schema_version"
+      }
+    },
+    {
+      "name": "events-unknown-class",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-unknown-class.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "events-unknown-class.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "invalid_event",
+        "detail": "\u003cdetail\u003e",
+        "event_index": 1,
+        "field": "event_class"
+      }
+    },
+    {
+      "name": "events-too-old",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-too-old.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "events-too-old.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "invalid_event",
+        "detail": "\u003cdetail\u003e",
+        "event_index": 1,
+        "field": "time.event_time"
+      }
+    },
+    {
+      "name": "events-ahead",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-ahead.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "events-ahead.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "invalid_event",
+        "detail": "\u003cdetail\u003e",
+        "event_index": 1,
+        "field": "time.event_time"
+      }
+    },
+    {
+      "name": "events-too-many",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-too-many.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "events-too-many.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "batch_too_large",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "events-malformed-batch-id",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-malformed-batch-id.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "events-malformed-batch-id.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "malformed_batch_id",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1,
+        "field": "batch_id"
+      }
+    },
+    {
+      "name": "events-malformed-payload",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-malformed-payload.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 400,
+      "content_type": "application/x-protobuf",
+      "reply": "events-malformed-payload.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "malformed_payload",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "events-unsupported-media-type",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-unsupported-media-type.request.pb",
+      "asked": "application/json",
+      "status": 415,
+      "content_type": "application/x-protobuf",
+      "reply": "events-unsupported-media-type.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "unsupported_media_type",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "events-body-too-large",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-body-too-large.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 413,
+      "content_type": "application/x-protobuf",
+      "reply": "events-body-too-large.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "batch_body_too_large",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "events-backbone-unavailable",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-backbone-unavailable.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 503,
+      "content_type": "application/x-protobuf",
+      "retry_after": true,
+      "reply": "events-backbone-unavailable.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "backbone_unavailable",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "events-agent-not-registered",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-agent-not-registered.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "reply": "events-agent-not-registered.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "agent_not_registered",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "events-agent-not-admitted",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-agent-not-admitted.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "reply": "events-agent-not-admitted.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "agent_not_admitted",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "inventory-accepted",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/inventory",
+      "request": "inventory-accepted.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "reply": "inventory-accepted.reply.pb",
+      "message": "seagull.ingest.v1.BatchAck",
+      "summary": {
+        "accepted": true,
+        "durable": true,
+        "received": 1
+      }
+    },
+    {
+      "name": "inventory-protocol-2",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/inventory",
+      "request": "inventory-protocol-2.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 426,
+      "content_type": "application/x-protobuf",
+      "reply": "inventory-protocol-2.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "unsupported_protocol_version",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "inventory-unknown-kind",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/inventory",
+      "request": "inventory-unknown-kind.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "inventory-unknown-kind.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "invalid_record",
+        "detail": "\u003cdetail\u003e",
+        "event_index": 1,
+        "field": "kind"
+      }
+    },
+    {
+      "name": "inventory-unknown-mode",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/inventory",
+      "request": "inventory-unknown-mode.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "inventory-unknown-mode.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "invalid_record",
+        "detail": "\u003cdetail\u003e",
+        "event_index": 1,
+        "field": "mode"
+      }
+    },
+    {
+      "name": "inventory-agent-not-admitted",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/inventory",
+      "request": "inventory-agent-not-admitted.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "reply": "inventory-agent-not-admitted.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "agent_not_admitted",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "status-accepted",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/status",
+      "request": "status-accepted.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "reply": "status-accepted.reply.pb",
+      "message": "seagull.ingest.v1.BatchAck",
+      "summary": {
+        "accepted": true,
+        "durable": true,
+        "received": 1
+      }
+    },
+    {
+      "name": "status-schema-2",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/status",
+      "request": "status-schema-2.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "status-schema-2.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "invalid_report",
+        "detail": "\u003cdetail\u003e",
+        "event_index": 1,
+        "field": "schema_version"
+      }
+    },
+    {
+      "name": "assessments-accepted",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/assessments",
+      "request": "assessments-accepted.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "reply": "assessments-accepted.reply.pb",
+      "message": "seagull.ingest.v1.BatchAck",
+      "summary": {
+        "accepted": true,
+        "durable": true,
+        "received": 1
+      }
+    },
+    {
+      "name": "assessments-schema-2",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/assessments",
+      "request": "assessments-schema-2.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "assessments-schema-2.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "invalid_assessment",
+        "detail": "\u003cdetail\u003e",
+        "event_index": 1,
+        "field": "schema_version"
+      }
+    },
+    {
+      "name": "gateway-descriptor",
+      "listener": "gateway",
+      "method": "GET",
+      "path": "/v1/descriptor",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "tagged": true,
+      "reply": "gateway-descriptor.reply.pb",
+      "message": "seagull.platform.v1.Descriptor",
+      "summary": {
+        "event_schema_version": 1,
+        "max_body_bytes": 65536,
+        "protocol_version": 1,
+        "server_time": "\u003cinstant\u003e",
+        "streams": [
+          {
+            "batch": "seagull.ingest.v1.EventBatch",
+            "max_age": "168h0m0s",
+            "max_clock_skew": "5m0s",
+            "max_record_bytes": 982755,
+            "max_records_per_batch": 4,
+            "record": "seagull.event.v1.Event",
+            "route": "POST /v1/events",
+            "supported_schema": {
+              "maximum": 1,
+              "minimum": 1
+            }
+          },
+          {
+            "batch": "seagull.inventory.v1.RecordBatch",
+            "max_age": "168h0m0s",
+            "max_clock_skew": "5m0s",
+            "max_items_per_batch": 20000,
+            "max_items_per_record": 10000,
+            "max_record_bytes": 4194019,
+            "max_records_per_batch": 2,
+            "record": "seagull.inventory.v1.Record",
+            "route": "POST /v1/inventory",
+            "supported_schema": {
+              "maximum": 1,
+              "minimum": 1
+            }
+          },
+          {
+            "batch": "seagull.agent.v1.StatusBatch",
+            "max_age": "168h0m0s",
+            "max_clock_skew": "5m0s",
+            "max_record_bytes": 982755,
+            "max_records_per_batch": 2,
+            "record": "seagull.agent.v1.Status",
+            "route": "POST /v1/status",
+            "supported_schema": {
+              "maximum": 1,
+              "minimum": 1
+            }
+          },
+          {
+            "batch": "seagull.assessment.v1.AssessmentBatch",
+            "max_age": "720h0m0s",
+            "max_clock_skew": "5m0s",
+            "max_record_bytes": 982755,
+            "max_records_per_batch": 2,
+            "record": "seagull.assessment.v1.Assessment",
+            "route": "POST /v1/assessments",
+            "supported_schema": {
+              "maximum": 1,
+              "minimum": 1
+            }
+          }
+        ],
+        "supported_event_schema": {
+          "maximum": 1,
+          "minimum": 1
+        },
+        "supported_protocol": {
+          "maximum": 1,
+          "minimum": 1
+        }
+      }
+    },
+    {
+      "name": "gateway-descriptor-unchanged",
+      "listener": "gateway",
+      "method": "GET",
+      "path": "/v1/descriptor",
+      "if_none_match": true,
+      "status": 304,
+      "tagged": true
+    },
+    {
+      "name": "gateway-descriptor-agent-not-registered",
+      "listener": "gateway",
+      "method": "GET",
+      "path": "/v1/descriptor",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "reply": "gateway-descriptor-agent-not-registered.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "agent_not_registered",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "events-rate-limited",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-rate-limited.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 429,
+      "content_type": "application/x-protobuf",
+      "retry_after": true,
+      "reply": "events-rate-limited.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "rate_limited",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "events-batch-too-large",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-batch-too-large.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 413,
+      "content_type": "application/x-protobuf",
+      "reply": "events-batch-too-large.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "batch_too_large",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "events-gateway-at-capacity",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-gateway-at-capacity.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 503,
+      "content_type": "application/x-protobuf",
+      "retry_after": true,
+      "reply": "events-gateway-at-capacity.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "gateway_at_capacity",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "events-roster-stale",
+      "listener": "gateway",
+      "method": "POST",
+      "path": "/v1/events",
+      "request": "events-roster-stale.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 503,
+      "content_type": "application/x-protobuf",
+      "retry_after": true,
+      "reply": "events-roster-stale.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "roster_stale",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "gateway-descriptor-roster-stale",
+      "listener": "gateway",
+      "method": "GET",
+      "path": "/v1/descriptor",
+      "status": 503,
+      "content_type": "application/x-protobuf",
+      "retry_after": true,
+      "reply": "gateway-descriptor-roster-stale.reply.pb",
+      "message": "seagull.ingest.v1.Rejection",
+      "summary": {
+        "code": "roster_stale",
+        "detail": "\u003cdetail\u003e",
+        "event_index": -1
+      }
+    },
+    {
+      "name": "issuance-accepted",
+      "listener": "operator",
+      "method": "POST",
+      "path": "/v1/agents/e2e-agent-70/certificate",
+      "request": "issuance-accepted.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 201,
+      "content_type": "application/x-protobuf",
+      "reply": "issuance-accepted.reply.pb",
+      "message": "seagull.agent.v1.IssuedCertificate",
+      "summary": {
+        "certificate_pem": [
+          "certificate \"e2e-agent-70\" by \"Seagull Agent Test CA\", authority false"
+        ],
+        "chain_pem": [
+          "certificate \"Seagull Agent Test CA\" by \"Seagull Agent Test CA\", authority true"
+        ],
+        "identity": {
+          "expires_at": "\u003cinstant\u003e",
+          "fingerprint_sha256": "\u003cfingerprint_sha256\u003e",
+          "issued_at": "\u003cinstant\u003e",
+          "serial": "\u003cserial\u003e",
+          "subject": "e2e-agent-70"
+        },
+        "trust_bundle_pem": [
+          "certificate \"Seagull Agent Test CA\" by \"Seagull Agent Test CA\", authority true"
+        ]
+      }
+    },
+    {
+      "name": "issuance-other-agent",
+      "listener": "operator",
+      "method": "POST",
+      "path": "/v1/agents/e2e-agent-71/certificate",
+      "request": "issuance-other-agent.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "issuance-other-agent.reply.pb",
+      "message": "seagull.control.v1.Refusal",
+      "summary": {
+        "code": "malformed_certificate_request",
+        "detail": "\u003cdetail\u003e"
+      }
+    },
+    {
+      "name": "issuance-unregistered",
+      "listener": "operator",
+      "method": "POST",
+      "path": "/v1/agents/e2e-agent-78/certificate",
+      "request": "issuance-unregistered.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 404,
+      "content_type": "application/x-protobuf",
+      "reply": "issuance-unregistered.reply.pb",
+      "message": "seagull.control.v1.Refusal",
+      "summary": {
+        "code": "unknown_agent",
+        "detail": "\u003cdetail\u003e"
+      }
+    },
+    {
+      "name": "renewal-renewed",
+      "listener": "agent",
+      "method": "POST",
+      "path": "/v1/agents/certificate",
+      "request": "renewal-renewed.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 201,
+      "content_type": "application/x-protobuf",
+      "reply": "renewal-renewed.reply.pb",
+      "message": "seagull.agent.v1.IssuedCertificate",
+      "summary": {
+        "certificate_pem": [
+          "certificate \"e2e-agent-70\" by \"Seagull Agent Test CA\", authority false"
+        ],
+        "chain_pem": [
+          "certificate \"Seagull Agent Test CA\" by \"Seagull Agent Test CA\", authority true"
+        ],
+        "identity": {
+          "expires_at": "\u003cinstant\u003e",
+          "fingerprint_sha256": "\u003cfingerprint_sha256\u003e",
+          "issued_at": "\u003cinstant\u003e",
+          "serial": "\u003cserial\u003e",
+          "subject": "e2e-agent-70"
+        },
+        "trust_bundle_pem": [
+          "certificate \"Seagull Agent Test CA\" by \"Seagull Agent Test CA\", authority true"
+        ]
+      }
+    },
+    {
+      "name": "renewal-asked-again",
+      "listener": "agent",
+      "method": "POST",
+      "path": "/v1/agents/certificate",
+      "request": "renewal-asked-again.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 201,
+      "content_type": "application/x-protobuf",
+      "reply": "renewal-asked-again.reply.pb",
+      "message": "seagull.agent.v1.IssuedCertificate",
+      "summary": {
+        "certificate_pem": [
+          "certificate \"e2e-agent-70\" by \"Seagull Agent Test CA\", authority false"
+        ],
+        "chain_pem": [
+          "certificate \"Seagull Agent Test CA\" by \"Seagull Agent Test CA\", authority true"
+        ],
+        "identity": {
+          "expires_at": "\u003cinstant\u003e",
+          "fingerprint_sha256": "\u003cfingerprint_sha256\u003e",
+          "issued_at": "\u003cinstant\u003e",
+          "serial": "\u003cserial\u003e",
+          "subject": "e2e-agent-70"
+        },
+        "trust_bundle_pem": [
+          "certificate \"Seagull Agent Test CA\" by \"Seagull Agent Test CA\", authority true"
+        ]
+      }
+    },
+    {
+      "name": "renewal-superseded",
+      "listener": "agent",
+      "method": "POST",
+      "path": "/v1/agents/certificate",
+      "request": "renewal-superseded.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "renewal-superseded.reply.pb",
+      "message": "seagull.control.v1.Refusal",
+      "summary": {
+        "code": "illegal_move",
+        "detail": "\u003cdetail\u003e"
+      }
+    },
+    {
+      "name": "renewal-revoked",
+      "listener": "agent",
+      "method": "POST",
+      "path": "/v1/agents/certificate",
+      "request": "renewal-revoked.request.pb",
+      "asked": "application/x-protobuf",
+      "status": 422,
+      "content_type": "application/x-protobuf",
+      "reply": "renewal-revoked.reply.pb",
+      "message": "seagull.control.v1.Refusal",
+      "summary": {
+        "code": "illegal_move",
+        "detail": "\u003cdetail\u003e"
+      }
+    },
+    {
+      "name": "policy-none",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/agents/policy",
+      "status": 404,
+      "content_type": "application/x-protobuf",
+      "reply": "policy-none.reply.pb",
+      "message": "seagull.control.v1.Refusal",
+      "summary": {
+        "code": "no_policy",
+        "detail": "\u003cdetail\u003e"
+      }
+    },
+    {
+      "name": "policy-served",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/agents/policy",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "tagged": true,
+      "reply": "policy-served.reply.pb",
+      "message": "seagull.policy.v1.SignedPolicy",
+      "summary": {
+        "payload": "\u003cbytes\u003e",
+        "payload_type": "application/vnd.seagull.policy.v1+protobuf",
+        "signatures": [
+          {
+            "keyid": "\u003ckeyid\u003e",
+            "sig": "\u003cbytes\u003e"
+          }
+        ]
+      }
+    },
+    {
+      "name": "policy-unchanged",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/agents/policy",
+      "if_none_match": true,
+      "status": 304,
+      "tagged": true
+    },
+    {
+      "name": "policy-not-admitted",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/agents/policy",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "reply": "policy-not-admitted.reply.pb",
+      "message": "seagull.control.v1.Refusal",
+      "summary": {
+        "code": "agent_not_admitted",
+        "detail": "\u003cdetail\u003e"
+      }
+    },
+    {
+      "name": "update-offered",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/agents/update",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "tagged": true,
+      "reply": "update-offered.reply.pb",
+      "message": "seagull.update.v1.Offer",
+      "summary": {
+        "roots": [
+          {
+            "payload": "\u003cbytes\u003e",
+            "payload_type": "application/vnd.seagull.update.v1.root+protobuf",
+            "signatures": [
+              {
+                "keyid": "\u003ckeyid\u003e",
+                "sig": "\u003cbytes\u003e"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "update-unchanged",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/agents/update",
+      "if_none_match": true,
+      "status": 304,
+      "tagged": true
+    },
+    {
+      "name": "update-not-admitted",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/agents/update",
+      "status": 403,
+      "content_type": "application/x-protobuf",
+      "reply": "update-not-admitted.reply.pb",
+      "message": "seagull.control.v1.Refusal",
+      "summary": {
+        "code": "agent_not_admitted",
+        "detail": "\u003cdetail\u003e"
+      }
+    },
+    {
+      "name": "agent-descriptor",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/descriptor",
+      "status": 200,
+      "content_type": "application/x-protobuf",
+      "tagged": true,
+      "reply": "agent-descriptor.reply.pb",
+      "message": "seagull.platform.v1.Descriptor",
+      "summary": {
+        "capabilities": [
+          {
+            "name": "renewal",
+            "route": "POST /v1/agents/certificate"
+          },
+          {
+            "name": "policy",
+            "route": "GET /v1/agents/policy",
+            "supported_schema": {
+              "maximum": 1,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "update",
+            "route": "GET /v1/agents/update",
+            "supported_schema": {
+              "maximum": 1,
+              "minimum": 1
+            }
+          }
+        ],
+        "event_schema_version": 1,
+        "protocol_version": 1,
+        "server_time": "\u003cinstant\u003e",
+        "supported_event_schema": {
+          "maximum": 1,
+          "minimum": 1
+        },
+        "supported_protocol": {
+          "maximum": 1,
+          "minimum": 1
+        }
+      }
+    },
+    {
+      "name": "agent-descriptor-unchanged",
+      "listener": "agent",
+      "method": "GET",
+      "path": "/v1/descriptor",
+      "if_none_match": true,
+      "status": 304,
+      "tagged": true
+    }
+  ]
+}

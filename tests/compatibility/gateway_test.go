@@ -60,6 +60,11 @@ func TestTheContractsTheAgentIsBuiltWithWereRecordedAgainstAPlatform(t *testing.
 			return
 		}
 	}
+	for _, recorded := range books(t) {
+		if recorded.Contracts == pinned {
+			return
+		}
+	}
 	t.Fatalf("go.mod pins the contracts at %s and no platform built with them was recorded: record one before the agent claims to speak them", pinned)
 }
 

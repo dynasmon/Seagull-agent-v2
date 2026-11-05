@@ -5,6 +5,10 @@ DIST ?= dist
 GOVULNCHECK ?= golang.org/x/vuln/cmd/govulncheck@v1.9.0
 GOSEC ?= github.com/securego/gosec/v2/cmd/gosec@v2.30.0
 REPOSITORY ?= dynasmon/Seagull-agent-v2
+PLATFORM ?= github.com/dynasmon/Seagull-backend-v2
+BACKEND ?=
+ANSWERS = tests/e2e/testdata/agent/protocol-1
+HELD = tests/compatibility/testdata/backend-$(shell printf %.7s "$(BACKEND)")
 FUZZTIME ?= 10s
 SOAK ?= 4h
 EVIDENCE ?=
@@ -16,7 +20,7 @@ AHEAD = v1.999.0-gate
 # that points at sibling checkouts.
 export GOWORK := off
 
-.PHONY: help fmt fmt-check vet mod-check lint test test-race fuzz build package ahead native-gate chaos footprint soak vulncheck gosec verify-tag check-protection clean verify
+.PHONY: help fmt fmt-check vet mod-check lint test test-race fuzz build package ahead native-gate chaos footprint soak vulncheck gosec verify-tag check-protection platform-answers clean verify
 
 help:
 	@echo "fmt         format the module"
@@ -39,6 +43,7 @@ help:
 	@echo "gosec       refuse what the static security rules find"
 	@echo "verify-tag  refuse TAG unless a signer main names signed it"
 	@echo "check-protection  compare the rules GitHub enforces on main with the ones declared here"
+	@echo "platform-answers  copy every answer the backend commit BACKEND recorded for an agent into tests/compatibility/testdata"
 	@echo "verify      the full gate: lint, mod-check, tests and build"
 
 fmt:
@@ -137,6 +142,17 @@ check-protection:
 	if [ "$$declared" != "$$enforced" ]; then \
 	  echo "main is declared as $$declared"; echo "and enforced as   $$enforced"; exit 1; \
 	fi; echo "main is enforced as declared"
+
+platform-answers:
+	@[[ "$(BACKEND)" =~ ^[0-9a-f]{40}$$ ]] || { echo "name the backend commit whole: make platform-answers BACKEND=<40 hexadecimal digits>" >&2; exit 1; }
+	@test ! -e $(HELD)/protocol-1 || { echo "$(HELD)/protocol-1 holds a copy already" >&2; exit 1; }
+	git init --quiet $(DIST)/platform
+	git -C $(DIST)/platform fetch --quiet --depth 1 https://$(PLATFORM) $(BACKEND)
+	test "$$(git -C $(DIST)/platform rev-parse FETCH_HEAD)" = "$(BACKEND)"
+	mkdir -p $(HELD)
+	git -C $(DIST)/platform archive FETCH_HEAD $(ANSWERS) | tar -x --strip-components=4 -C $(HELD)
+	jq -n --arg repository $(PLATFORM) --arg commit $(BACKEND) --arg path $(ANSWERS) \
+	  '{repository: $$repository, commit: $$commit, path: $$path}' > $(HELD)/platform.json
 
 clean:
 	rm -rf $(DIST)
