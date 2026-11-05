@@ -5,6 +5,6 @@ go 1.26.0
 toolchain go1.26.10
 
 require (
-	github.com/dynasmon/Seagull-contracts v0.19.0
+	github.com/dynasmon/Seagull-contracts v0.21.0
 	google.golang.org/protobuf v1.36.12
 )
