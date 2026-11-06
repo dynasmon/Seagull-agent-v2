@@ -162,7 +162,7 @@ func (r *Renewer) Run(ctx context.Context) error {
 			due = retry
 		}
 		if now.Before(due) {
-			if !r.sleep(ctx, min(due.Sub(now), r.options.Policy.Recheck)) {
+			if !r.sleep(ctx, min(due.Sub(now), certificate.NotAfter.Sub(now), r.options.Policy.Recheck)) {
 				return nil
 			}
 			continue

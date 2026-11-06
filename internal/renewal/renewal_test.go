@@ -406,6 +406,39 @@ func TestACredentialThatExpiredWaitsForAnOperator(t *testing.T) {
 	}
 }
 
+func TestAnExpiryIsReportedWhenItHappensThoughTheNextAttemptIsDueLater(t *testing.T) {
+	signing := authorityNamed(t, "Seagull agents")
+	signing.backdate = 0
+	serving := listen(t, signing)
+	held := enrolled(t, signing, "web-01", 4*time.Second)
+	notAfter := held.active(t).Certificate.NotAfter
+	serving.change(func(p *platform) { p.failures = 1 << 20 })
+	renewing := renewerFor(t, held, serving, []*x509.Certificate{signing.certificate}, month, renewal.Policy{Retry: time.Hour, Longest: time.Hour, Recheck: time.Hour})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- renewing.renewer.Run(ctx) }()
+	deadline := time.After(time.Until(notAfter) + 10*time.Second)
+	for len(renewing.logs.entries(t, "credential_expired")) == 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("10s after its certificate expired the agent had not said so, having failed to renew it with %v", renewing.logs.entries(t, "credential_not_renewed"))
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-stopped
+	failed, expired := renewing.logs.entries(t, "credential_not_renewed"), renewing.logs.entries(t, "credential_expired")
+	if len(failed) != 1 {
+		t.Fatalf("the agent failed to renew %d times before its certificate expired: %v", len(failed), failed)
+	}
+	next, err := time.Parse(time.RFC3339Nano, failed[0]["next_attempt"].(string))
+	at, err2 := time.Parse(time.RFC3339Nano, expired[0]["time"].(string))
+	if err != nil || err2 != nil || !next.After(notAfter) || at.Before(notAfter) {
+		t.Fatalf("the certificate expired at %s, the next attempt was due at %s and the expiry was reported at %s", notAfter, next, at)
+	}
+}
+
 func TestRenewalsAreSpreadAcrossTheLifetimeOfACertificate(t *testing.T) {
 	signing := authorityNamed(t, "Seagull agents")
 	serving := listen(t, signing)
