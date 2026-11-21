@@ -124,7 +124,7 @@ jobs:
     needs: signature
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    container: golang:1.26.10-trixie@sha256:a050dcceee6eb9bf110151662dfac7662f3bec40927c7dee48731e3d92083d42
+    container: golang:1.26.11-trixie@sha256:fa340cb59ebeb1d53ac1cccfc334201d938fe5f3458003cccb767096d8e032b8
     outputs:
       packaged: ${{ steps.packaged.outputs.packaged }}
     steps:
