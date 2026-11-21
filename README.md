@@ -271,8 +271,12 @@ The package creates the `seagull-agent` system account, a member of
 `systemd-journal`, with `/var/lib/seagull-agent` (0700) for its installation and
 `/etc/seagull-agent` for its settings. It installs the agent at
 `/usr/bin/seagull-agent`, the `seagull-agent` service and a settings template at
-`/usr/share/seagull-agent/agent.json`. It starts and enables nothing, and holds
-no key, certificate or authority.
+`/usr/share/seagull-agent/agent.json`. It enables and starts the watch on what the
+agent stages for an update, `seagull-agent-update.path`, which installs nothing
+until an operator enables updates, and it enables and starts no agent. It holds no
+key, certificate or authority. A unit an administrator wrote under
+`/etc/systemd/system`, as an installation made by hand before the package does,
+wins over the package's, and installing the package says so.
 
 An operator then gives the agent its settings, enrolls it and starts it:
 
