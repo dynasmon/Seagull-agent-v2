@@ -242,6 +242,14 @@ func TestTheInstallerRunsAsRootWhenTheAgentStagesAReleaseOrAnInstallationIsPendi
 	if !strings.Contains(installed, "enable seagull-agent-update.path") || !strings.Contains(installed, "start seagull-agent-update.path") {
 		t.Error("installing the package does not watch what the agent stages")
 	}
+	for _, unit := range []string{"seagull-agent.service", "seagull-agent-update.path", "seagull-agent-update.service"} {
+		if !strings.Contains(installed, unit) {
+			t.Errorf("installing the package says nothing when an administrator's %s overrides the one it installs", unit)
+		}
+	}
+	if !strings.Contains(installed, `"/etc/systemd/system/$unit"`) {
+		t.Error("installing the package does not look for a unit an administrator wrote under /etc/systemd/system")
+	}
 	if !strings.Contains(removed, "stop seagull-agent-update.path") {
 		t.Error("removing the package leaves the watch running")
 	}
