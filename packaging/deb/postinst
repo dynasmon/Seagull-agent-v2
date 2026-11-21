@@ -4,6 +4,14 @@ set -e
 if [ "$1" = configure ]; then
 	systemd-sysusers seagull-agent.conf
 	systemd-tmpfiles --create seagull-agent.conf
+
+	# A unit an administrator wrote under /etc/systemd/system wins over the one
+	# installed here, so nothing an upgrade changes in the package's would apply.
+	for unit in seagull-agent.service seagull-agent-update.path seagull-agent-update.service; do
+		if [ -f "/etc/systemd/system/$unit" ] && [ ! -L "/etc/systemd/system/$unit" ]; then
+			echo "seagull-agent: /etc/systemd/system/$unit overrides the $unit this package installs; remove it unless that is meant" >&2
+		fi
+	done
 fi
 
 # A first installation starts nothing but the watch on what the agent stages,
